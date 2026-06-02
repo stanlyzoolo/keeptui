@@ -1,0 +1,68 @@
+name: ripgrep
+description: Fast recursive grep (rg)
+github: github.com/BurntSushi/ripgrep
+version_cmd: rg --version
+categories:
+  - name: Basic search
+    bindings:
+      - key: "rg <pattern>"
+        desc: search recursively in current dir
+      - key: "rg <pattern> <path>"
+        desc: search in specific path
+      - key: "rg -e <pattern>"
+        desc: explicit pattern (useful with special chars)
+      - key: "rg -F <string>"
+        desc: search literal string (no regex)
+      - key: "rg -i <pattern>"
+        desc: case-insensitive search
+      - key: "rg -w <pattern>"
+        desc: match whole words only
+      - key: "rg -x <pattern>"
+        desc: match whole lines only
+
+  - name: Output control
+    bindings:
+      - key: "rg -l <pattern>"
+        desc: only print file names with matches
+      - key: "rg -c <pattern>"
+        desc: print match count per file
+      - key: "rg -n <pattern>"
+        desc: show line numbers (default in tty)
+      - key: "rg -N <pattern>"
+        desc: suppress line numbers
+      - key: "rg -A <n> <pattern>"
+        desc: show n lines after match
+      - key: "rg -B <n> <pattern>"
+        desc: show n lines before match
+      - key: "rg -C <n> <pattern>"
+        desc: show n lines around match
+      - key: "rg --no-heading <pattern>"
+        desc: flat output (file:line:match)
+
+  - name: Filtering
+    bindings:
+      - key: "rg -t <type> <pattern>"
+        desc: search only files of given type (e.g. -t py)
+      - key: "rg -T <type> <pattern>"
+        desc: exclude files of given type
+      - key: "rg --glob '*.go'"
+        desc: search only matching filenames
+      - key: "rg -u <pattern>"
+        desc: include hidden files (.gitignore still applies)
+      - key: "rg -uu <pattern>"
+        desc: also include .gitignore-d files
+      - key: "rg -uuu <pattern>"
+        desc: include all files (binary too)
+      - key: "rg --hidden <pattern>"
+        desc: search hidden files / directories
+
+  - name: Replace & Misc
+    bindings:
+      - key: "rg -r <replacement> <pattern>"
+        desc: replace pattern in output (preview only)
+      - key: "rg --stats <pattern>"
+        desc: show search statistics
+      - key: "rg --type-list"
+        desc: list all supported file types
+      - key: "rg -0 <pattern>"
+        desc: output NUL-separated results (for xargs -0)

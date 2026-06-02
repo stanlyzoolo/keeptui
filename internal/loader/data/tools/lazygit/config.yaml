@@ -1,0 +1,93 @@
+name: lazygit
+description: TUI for git
+github: github.com/jesseduffield/lazygit
+categories:
+  - name: Global
+    bindings:
+      - key: "?"
+        desc: show keybindings help
+      - key: "q"
+        desc: quit
+      - key: "Ctrl+r"
+        desc: switch to recent repo
+      - key: "["
+        desc: previous tab panel
+      - key: "]"
+        desc: next tab panel
+      - key: "PgUp / PgDn"
+        desc: scroll main panel up / down
+      - key: "@"
+        desc: open command log menu
+
+  - name: Navigation
+    bindings:
+      - key: "h / l"
+        desc: previous / next panel
+      - key: "j / k"
+        desc: move down / up in list
+      - key: "H / L"
+        desc: scroll left / right
+      - key: "← / →"
+        desc: switch panel (left / right)
+      - key: "1-5"
+        desc: jump to panel by number
+
+  - name: Files panel
+    bindings:
+      - key: "Space"
+        desc: stage / unstage file
+      - key: "a"
+        desc: stage / unstage all files
+      - key: "c"
+        desc: commit staged changes
+      - key: "C"
+        desc: commit with editor
+      - key: "A"
+        desc: amend last commit
+      - key: "d"
+        desc: discard changes
+      - key: "e"
+        desc: open file in editor
+      - key: "Enter"
+        desc: view diff / stage hunks
+
+  - name: Branches panel
+    bindings:
+      - key: "Space"
+        desc: checkout branch
+      - key: "n"
+        desc: create new branch
+      - key: "d"
+        desc: delete branch
+      - key: "r"
+        desc: rebase current branch on selected
+      - key: "M"
+        desc: merge into current branch
+      - key: "f"
+        desc: fast-forward branch
+
+  - name: Commits panel
+    bindings:
+      - key: "s"
+        desc: squash commit into parent
+      - key: "r"
+        desc: reword commit message
+      - key: "d"
+        desc: drop commit
+      - key: "e"
+        desc: edit commit (rebase -i stop here)
+      - key: "p"
+        desc: pick commit
+      - key: "Enter"
+        desc: view commit files
+
+  - name: Stash
+    bindings:
+      - key: "s"
+        desc: stash changes (files panel)
+      - key: "Space"
+        desc: apply stash entry
+      - key: "d"
+        desc: drop stash entry
+      - key: "g"
+        desc: pop stash entry

@@ -1,0 +1,78 @@
+name: tmux
+description: "Terminal multiplexer (prefix: Ctrl+b)"
+github: github.com/tmux/tmux
+categories:
+  - name: Sessions
+    bindings:
+      - key: "prefix + $"
+        desc: rename session
+      - key: "prefix + s"
+        desc: list / switch sessions
+      - key: "prefix + d"
+        desc: detach from session
+      - key: "prefix + ("
+        desc: previous session
+      - key: "prefix + )"
+        desc: next session
+
+  - name: Windows
+    bindings:
+      - key: "prefix + c"
+        desc: create new window
+      - key: "prefix + w"
+        desc: list all windows
+      - key: "prefix + n / p"
+        desc: next / previous window
+      - key: "prefix + [0-9]"
+        desc: switch to window by number
+      - key: "prefix + ,"
+        desc: rename window
+      - key: "prefix + &"
+        desc: close window
+
+  - name: Panes
+    bindings:
+      - key: "prefix + %"
+        desc: split vertically
+      - key: "prefix + \""
+        desc: split horizontally
+      - key: "prefix + h/j/k/l"
+        desc: move between panes
+      - key: "prefix + ←/→/↑/↓"
+        desc: move between panes
+      - key: "prefix + z"
+        desc: toggle pane zoom (fullscreen)
+      - key: "prefix + x"
+        desc: close pane
+      - key: "prefix + }"
+        desc: swap pane right
+      - key: "prefix + {"
+        desc: swap pane left
+      - key: "prefix + Ctrl+←/→"
+        desc: resize pane left / right
+      - key: "prefix + Ctrl+↑/↓"
+        desc: resize pane up / down
+
+  - name: Copy mode
+    bindings:
+      - key: "prefix + ["
+        desc: enter copy mode
+      - key: "Space"
+        desc: start selection (in copy mode)
+      - key: "Enter"
+        desc: copy selection (in copy mode)
+      - key: "q"
+        desc: exit copy mode
+      - key: "prefix + ]"
+        desc: paste buffer
+
+  - name: Misc
+    bindings:
+      - key: "prefix + t"
+        desc: show clock
+      - key: "prefix + ?"
+        desc: show all keybindings
+      - key: "prefix + :"
+        desc: command prompt
+      - key: "prefix + r"
+        desc: reload config

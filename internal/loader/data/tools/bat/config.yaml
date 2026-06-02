@@ -1,0 +1,46 @@
+name: bat
+description: A cat clone with syntax highlighting
+github: github.com/sharkdp/bat
+version_cmd: bat --version
+categories:
+  - name: Navigation (pager)
+    bindings:
+      - key: "j / k"
+        desc: scroll down / up one line
+      - key: "d / u"
+        desc: scroll down / up half page
+      - key: "f / b"
+        desc: scroll forward / backward full page
+      - key: "g / G"
+        desc: go to start / end of file
+      - key: "/<pattern>"
+        desc: search forward
+      - key: "?<pattern>"
+        desc: search backward
+      - key: "n / N"
+        desc: next / previous search match
+      - key: "q"
+        desc: quit
+
+  - name: Usage flags
+    bindings:
+      - key: "bat <file>"
+        desc: view file with syntax highlighting
+      - key: "bat -A <file>"
+        desc: show non-printable characters
+      - key: "bat -n <file>"
+        desc: show line numbers only
+      - key: "bat -p <file>"
+        desc: plain output (no decorations)
+      - key: "bat -l <lang> <file>"
+        desc: force specific syntax language
+      - key: "bat --diff <file>"
+        desc: show git diff for file
+      - key: "bat -r <from>:<to> <file>"
+        desc: show specific line range
+      - key: "bat --theme=<name>"
+        desc: use specific color theme
+      - key: "bat --list-themes"
+        desc: list available themes
+      - key: "bat --list-languages"
+        desc: list supported languages

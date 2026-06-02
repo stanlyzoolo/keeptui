@@ -1,0 +1,48 @@
+name: atuin
+description: Magical shell history with sync
+github: github.com/atuinsh/atuin
+version_cmd: atuin --version
+categories:
+  - name: Search UI
+    bindings:
+      - key: "Ctrl+r"
+        desc: open atuin search
+      - key: "↑"
+        desc: open search (arrow-up mode)
+      - key: "Enter"
+        desc: execute selected command
+      - key: "Tab"
+        desc: select command without executing
+      - key: "Esc / Ctrl+c"
+        desc: close search
+
+  - name: Navigation
+    bindings:
+      - key: "↑ / ↓"
+        desc: move through results
+      - key: "Ctrl+p / Ctrl+n"
+        desc: move up / down
+      - key: "Ctrl+j / Ctrl+k"
+        desc: move down / up (vim-style)
+      - key: "PgUp / PgDn"
+        desc: scroll results page up / down
+
+  - name: Filtering
+    bindings:
+      - key: "Ctrl+r"
+        desc: cycle filter mode (global → host → session → dir)
+      - key: "Ctrl+s"
+        desc: toggle search mode (fuzzy ↔ prefix ↔ full-text)
+      - key: "Ctrl+d"
+        desc: delete selected history entry
+      - key: "Ctrl+l"
+        desc: clear search query
+
+  - name: Sync
+    bindings:
+      - key: "atuin sync"
+        desc: sync history to server
+      - key: "atuin login"
+        desc: log in to atuin cloud
+      - key: "atuin import auto"
+        desc: import shell history

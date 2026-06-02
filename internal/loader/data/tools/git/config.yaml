@@ -1,0 +1,114 @@
+name: git
+description: Version control system (CLI commands)
+github: github.com/git/git
+categories:
+  - name: Repository
+    bindings:
+      - key: "git init"
+        desc: initialize new repository
+      - key: "git clone <url>"
+        desc: clone remote repository
+      - key: "git status"
+        desc: show working tree status
+      - key: "git log --oneline"
+        desc: compact commit history
+
+  - name: Staging
+    bindings:
+      - key: "git add <file>"
+        desc: stage file
+      - key: "git add -p"
+        desc: stage interactively (by hunk)
+      - key: "git add ."
+        desc: stage all changes
+      - key: "git restore --staged <file>"
+        desc: unstage file
+      - key: "git diff --staged"
+        desc: show staged changes
+
+  - name: Commits
+    bindings:
+      - key: "git commit -m 'msg'"
+        desc: commit with message
+      - key: "git commit --amend"
+        desc: amend last commit
+      - key: "git reset HEAD~1"
+        desc: undo last commit (keep changes)
+      - key: "git reset --hard HEAD~1"
+        desc: undo last commit (discard changes)
+      - key: "git revert HEAD"
+        desc: create revert commit
+
+  - name: Branches
+    bindings:
+      - key: "git branch"
+        desc: list local branches
+      - key: "git branch <name>"
+        desc: create branch
+      - key: "git switch <name>"
+        desc: switch to branch
+      - key: "git switch -c <name>"
+        desc: create and switch to branch
+      - key: "git branch -d <name>"
+        desc: delete branch
+      - key: "git merge <branch>"
+        desc: merge branch into current
+
+  - name: Remote
+    bindings:
+      - key: "git fetch"
+        desc: fetch from remote
+      - key: "git pull"
+        desc: fetch and merge
+      - key: "git push"
+        desc: push to remote
+      - key: "git push -u origin <branch>"
+        desc: push and set upstream
+      - key: "git push --force-with-lease"
+        desc: safe force push
+
+  - name: Stash
+    bindings:
+      - key: "git stash"
+        desc: stash current changes
+      - key: "git stash pop"
+        desc: apply and remove top stash
+      - key: "git stash list"
+        desc: list all stashes
+      - key: "git stash drop"
+        desc: discard top stash
+
+  - name: History & Diff
+    bindings:
+      - key: "git log --graph --oneline"
+        desc: visual branch graph
+      - key: "git diff"
+        desc: show unstaged changes
+      - key: "git show <hash>"
+        desc: show commit details
+      - key: "git blame <file>"
+        desc: show who changed each line
+
+command_groups:
+  - name: Examples
+    commands:
+      - cmd: "git clone https://github.com/user/repo.git"
+        desc: Clone a repository
+      - cmd: "git add ."
+        desc: Stage all changes in current directory
+      - cmd: "git commit -m 'message'"
+        desc: Commit staged changes with a message
+      - cmd: "git push origin main"
+        desc: Push local branch to remote
+      - cmd: "git pull --rebase origin main"
+        desc: Pull remote changes and rebase local commits on top
+      - cmd: "git log --oneline --graph --all"
+        desc: Show compact branch graph for all branches
+      - cmd: "git checkout -b feature/name"
+        desc: Create and switch to a new branch
+      - cmd: "git rebase -i HEAD~3"
+        desc: Interactive rebase for last 3 commits
+      - cmd: "git stash push -m 'description'"
+        desc: Stash changes with a description
+      - cmd: "git bisect start"
+        desc: Start binary search for a bug-introducing commit

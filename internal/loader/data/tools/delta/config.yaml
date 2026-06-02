@@ -1,0 +1,44 @@
+name: delta
+description: Syntax-highlighting pager for git diffs
+github: github.com/dandavison/delta
+version_cmd: delta --version
+categories:
+  - name: Navigation (pager)
+    bindings:
+      - key: "j / k"
+        desc: scroll down / up
+      - key: "Ctrl+d / Ctrl+u"
+        desc: half page down / up
+      - key: "Ctrl+f / Ctrl+b"
+        desc: full page forward / backward
+      - key: "g / G"
+        desc: go to start / end
+      - key: "/<pattern>"
+        desc: search
+      - key: "n / N"
+        desc: next / previous match
+      - key: "q"
+        desc: quit
+
+  - name: Usage flags
+    bindings:
+      - key: "delta <file1> <file2>"
+        desc: diff two files
+      - key: "--side-by-side"
+        desc: enable side-by-side view
+      - key: "--line-numbers"
+        desc: show line numbers
+      - key: "--diff-highlight"
+        desc: highlight changed portions within lines
+      - key: "--no-gitconfig"
+        desc: ignore git config for delta settings
+      - key: "--light"
+        desc: use light theme
+      - key: "--dark"
+        desc: use dark theme
+      - key: "--syntax-theme=<name>"
+        desc: set syntax highlighting theme
+      - key: "--word-diff"
+        desc: show word-level diffs
+      - key: "--navigate"
+        desc: n/N keys navigate between files

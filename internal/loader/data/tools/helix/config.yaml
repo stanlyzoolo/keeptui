@@ -1,0 +1,152 @@
+name: helix
+description: Post-modern modal text editor
+github: github.com/helix-editor/helix
+version_cmd: hx --version
+categories:
+  - name: Navigation
+    bindings:
+      - key: "h / l"
+        desc: move left / right
+      - key: "j / k"
+        desc: move down / up
+      - key: "w / b"
+        desc: next / previous word start
+      - key: "e"
+        desc: next word end
+      - key: "gg / ge"
+        desc: go to start / end of file
+      - key: "gh / gl"
+        desc: go to line start / end
+      - key: "gm"
+        desc: go to line middle
+      - key: "Ctrl+u / Ctrl+d"
+        desc: scroll half-page up / down
+      - key: "Ctrl+b / Ctrl+f"
+        desc: scroll page up / down
+      - key: "gd"
+        desc: go to definition
+      - key: "gr"
+        desc: go to references
+      - key: "gy"
+        desc: go to type definition
+
+  - name: Selection & Editing
+    bindings:
+      - key: "v"
+        desc: enter select mode
+      - key: "x"
+        desc: select whole line
+      - key: "X"
+        desc: extend selection to whole line
+      - key: "%"
+        desc: select whole file
+      - key: "d"
+        desc: delete selection
+      - key: "c"
+        desc: change selection
+      - key: "y"
+        desc: yank selection
+      - key: "p / P"
+        desc: paste after / before
+      - key: "u / U"
+        desc: undo / redo
+      - key: "~"
+        desc: switch case
+      - key: "`"
+        desc: to lowercase
+      - key: "Alt+`"
+        desc: to uppercase
+
+  - name: Insert mode
+    bindings:
+      - key: "i"
+        desc: insert before selection
+      - key: "a"
+        desc: insert after selection
+      - key: "I"
+        desc: insert at line start
+      - key: "A"
+        desc: insert at line end
+      - key: "o / O"
+        desc: open new line below / above
+      - key: "Esc"
+        desc: back to normal mode
+
+  - name: Search & Replace
+    bindings:
+      - key: "/"
+        desc: search forward
+      - key: "?"
+        desc: search backward
+      - key: "n / N"
+        desc: next / previous match
+      - key: "s"
+        desc: select occurrences of regex in selection
+      - key: "S"
+        desc: split selection on regex
+      - key: "Alt+s"
+        desc: split selection on newlines
+
+  - name: Multiple selections
+    bindings:
+      - key: "C"
+        desc: copy selection to next line
+      - key: "Alt+C"
+        desc: copy selection to previous line
+      - key: ","
+        desc: keep only primary selection
+      - key: "Alt+,"
+        desc: remove primary selection
+      - key: "("
+        desc: rotate selection backward
+      - key: ")"
+        desc: rotate selection forward
+
+  - name: Windows & Buffers
+    bindings:
+      - key: "Ctrl+w s"
+        desc: split horizontally
+      - key: "Ctrl+w v"
+        desc: split vertically
+      - key: "Ctrl+w h/j/k/l"
+        desc: move to split
+      - key: "Ctrl+w c"
+        desc: close split
+      - key: ":b <name>"
+        desc: switch to buffer
+      - key: ":bc"
+        desc: close buffer
+
+  - name: File & Space menu
+    bindings:
+      - key: "Space f"
+        desc: file picker
+      - key: "Space b"
+        desc: buffer picker
+      - key: "Space s"
+        desc: symbol picker
+      - key: "Space /"
+        desc: global search
+      - key: "Space k"
+        desc: hover documentation
+      - key: "Space a"
+        desc: code action
+      - key: "Space r"
+        desc: rename symbol
+      - key: "Space d"
+        desc: workspace diagnostics
+
+  - name: Commands
+    bindings:
+      - key: ":"
+        desc: open command mode
+      - key: ":w"
+        desc: save file
+      - key: ":q"
+        desc: quit
+      - key: ":wq"
+        desc: save and quit
+      - key: "Z Z"
+        desc: save and quit
+      - key: "Z Q"
+        desc: quit without saving

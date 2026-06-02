@@ -1,0 +1,83 @@
+name: yazi
+description: Terminal file manager
+github: github.com/sxyazi/yazi
+categories:
+  - name: Navigation
+    bindings:
+      - key: "h / l"
+        desc: parent / child directory
+      - key: "j / k"
+        desc: move up / down
+      - key: "gg / G"
+        desc: top / bottom of list
+      - key: "H / L"
+        desc: previous / next tab
+      - key: "~"
+        desc: go to home directory
+      - key: "Enter"
+        desc: open file / enter dir
+      - key: "Backspace"
+        desc: go to parent directory
+
+  - name: Selection
+    bindings:
+      - key: "Space"
+        desc: toggle select file
+      - key: "v"
+        desc: enter visual selection mode
+      - key: "V"
+        desc: select all files
+      - key: "Esc"
+        desc: clear selection / cancel
+
+  - name: File operations
+    bindings:
+      - key: "y"
+        desc: yank (copy) selected
+      - key: "x"
+        desc: cut selected
+      - key: "p"
+        desc: paste
+      - key: "P"
+        desc: paste and overwrite
+      - key: "d"
+        desc: delete selected (to trash)
+      - key: "D"
+        desc: permanently delete
+      - key: "r"
+        desc: rename file
+      - key: "a"
+        desc: create file / directory
+
+  - name: Search & Filter
+    bindings:
+      - key: "/"
+        desc: search in current directory
+      - key: "n / N"
+        desc: next / previous search match
+      - key: "f"
+        desc: filter files
+
+  - name: View
+    bindings:
+      - key: "."
+        desc: toggle hidden files
+      - key: "z"
+        desc: jump with zoxide
+      - key: "Z"
+        desc: jump with fzf
+      - key: "Tab"
+        desc: switch to / create next tab
+      - key: "t"
+        desc: create new tab
+      - key: "q"
+        desc: quit
+
+  - name: Shell
+    bindings:
+      - key: "!"
+        desc: open shell in current directory
+      - key: "o"
+        desc: open file with default app
+      - key: "s"
+        desc: open shell (interactive)

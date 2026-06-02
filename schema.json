@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/lepeshko/keys/schema.json",
+  "title": "keys tool config",
+  "description": "Configuration schema for a keys tool YAML file",
+  "type": "object",
+  "required": ["name", "description", "categories"],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Tool identifier (used as display name and directory name)",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string",
+      "description": "One-line description of the tool",
+      "minLength": 1
+    },
+    "github": {
+      "type": "string",
+      "description": "GitHub repo path, e.g. github.com/user/repo (without https://)",
+      "pattern": "^github\\.com/.+/.+$"
+    },
+    "version_cmd": {
+      "type": "string",
+      "description": "Shell command to retrieve the installed version, e.g. 'yazi --version'"
+    },
+    "categories": {
+      "type": "array",
+      "description": "Groups of keybindings",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/category"
+      }
+    },
+    "command_groups": {
+      "type": "array",
+      "description": "Groups of CLI commands (shown in the Commands tab)",
+      "items": {
+        "$ref": "#/$defs/commandGroup"
+      }
+    }
+  },
+  "$defs": {
+    "category": {
+      "type": "object",
+      "required": ["name", "bindings"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Category heading",
+          "minLength": 1
+        },
+        "bindings": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/binding"
+          }
+        }
+      }
+    },
+    "binding": {
+      "type": "object",
+      "required": ["key", "desc"],
+      "additionalProperties": false,
+      "properties": {
+        "key": {
+          "type": "string",
+          "description": "Key combination or command string",
+          "minLength": 1
+        },
+        "desc": {
+          "type": "string",
+          "description": "Short description of what the key does",
+          "minLength": 1
+        }
+      }
+    },
+    "commandGroup": {
+      "type": "object",
+      "required": ["name", "commands"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Command group heading",
+          "minLength": 1
+        },
+        "commands": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/command"
+          }
+        }
+      }
+    },
+    "command": {
+      "type": "object",
+      "required": ["cmd", "desc"],
+      "additionalProperties": false,
+      "properties": {
+        "cmd": {
+          "type": "string",
+          "description": "The CLI command string",
+          "minLength": 1
+        },
+        "desc": {
+          "type": "string",
+          "description": "Short description of what the command does",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

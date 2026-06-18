@@ -1,10 +1,14 @@
 package model
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -57,6 +61,18 @@ type repoCardMsg struct {
 	err      error
 }
 
+type helpOutputMsg struct {
+	toolName string
+	mode     int
+	output   string
+	err      error
+}
+
+const (
+	helpModeHelp = 0
+	helpModeMan  = 1
+)
+
 type Model struct {
 	tools               []loader.Tool
 	versions            map[string]VersionInfo
@@ -83,6 +99,14 @@ type Model struct {
 	meta         []loader.ToolMeta
 	metaFilter   loader.Status
 	metaSelected int
+
+	helpMode      int
+	helpLoading   bool
+	helpCache     map[string][2]string
+	helpSearching bool
+	helpSearch    textinput.Model
+	helpMatches   []int
+	helpMatchIdx  int
 }
 
 type Options struct {
@@ -103,15 +127,21 @@ func New(meta []loader.ToolMeta, opts Options) Model {
 	tgi.Placeholder = "tag1, tag2..."
 	tgi.CharLimit = 256
 
+	hsi := textinput.New()
+	hsi.Placeholder = "search help..."
+	hsi.CharLimit = 128
+
 	m := Model{
 		tools:         loader.ToolsFromMeta(meta),
 		versions:      make(map[string]VersionInfo),
 		repoStatus:    make(map[string]string),
 		repoCards:     make(map[string]version.RepoCard),
 		changelogData: make(map[string]changelogMsg),
+		helpCache:     make(map[string][2]string),
 		search:        ti,
 		noteInput:     ni,
 		tagsInput:     tgi,
+		helpSearch:    hsi,
 		meta:          meta,
 	}
 
@@ -154,6 +184,13 @@ func (m Model) Init() tea.Cmd {
 	}
 	if m.searching {
 		cmds = append(cmds, textinput.Blink)
+	}
+	// Auto-fetch --help for initial selected tool
+	if mt, ok := m.selectedMeta(); ok {
+		cached := m.helpCache[mt.Name]
+		if cached[helpModeHelp] == "" {
+			cmds = append(cmds, fetchHelpCmd(mt.Name, helpModeHelp))
+		}
 	}
 	return tea.Batch(cmds...)
 }
@@ -208,6 +245,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case helpOutputMsg:
+		m.helpLoading = false
+		cached := m.helpCache[msg.toolName]
+		if msg.err == nil && msg.output != "" {
+			cached[msg.mode] = msg.output
+		} else if msg.mode == helpModeHelp {
+			cached[msg.mode] = "--help not available"
+		} else {
+			cached[msg.mode] = "man page not available"
+		}
+		m.helpCache[msg.toolName] = cached
+		if mt, ok := m.selectedMeta(); ok && mt.Name == msg.toolName {
+			m.helpViewport.SetContent(m.renderHelpContent())
+		}
+		return m, nil
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -216,7 +269,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.ready {
 			m.cardViewport = viewport.New(cardW, vpH)
 			m.helpViewport = viewport.New(helpW, vpH)
-			m.helpViewport.SetContent(m.renderHelpPlaceholder())
+			m.helpViewport.SetContent(m.renderHelpContent())
 			m.ready = true
 		} else {
 			m.cardViewport.Width = cardW
@@ -239,6 +292,41 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.editingTags {
 			return m.updateTagsEdit(msg)
+		}
+
+		if m.helpSearching {
+			switch msg.String() {
+			case "esc":
+				m.helpSearching = false
+				m.helpSearch.SetValue("")
+				m.helpSearch.Blur()
+				m.helpMatches = nil
+				m.helpMatchIdx = 0
+				m.helpViewport.SetContent(m.renderHelpContent())
+				return m, nil
+			case "n":
+				if len(m.helpMatches) > 0 {
+					m.helpMatchIdx = (m.helpMatchIdx + 1) % len(m.helpMatches)
+					m.helpViewport.SetYOffset(m.helpMatches[m.helpMatchIdx])
+				}
+				return m, nil
+			case "N":
+				if len(m.helpMatches) > 0 {
+					m.helpMatchIdx = (m.helpMatchIdx - 1 + len(m.helpMatches)) % len(m.helpMatches)
+					m.helpViewport.SetYOffset(m.helpMatches[m.helpMatchIdx])
+				}
+				return m, nil
+			default:
+				m.helpSearch, cmd = m.helpSearch.Update(msg)
+				query := m.helpSearch.Value()
+				m.helpMatches = findMatches(m.rawHelpText(), query)
+				m.helpMatchIdx = 0
+				m.helpViewport.SetContent(m.renderHelpContent())
+				if len(m.helpMatches) > 0 {
+					m.helpViewport.SetYOffset(m.helpMatches[0])
+				}
+				return m, cmd
+			}
 		}
 
 		if m.searching {
@@ -277,7 +365,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cardViewport.SetContent(m.renderCard())
 			}
 
-		case "left", "h":
+		case "left":
 			if m.focus == focusRight {
 				m.focus = focusLeft
 				m.cardViewport.SetContent(m.renderCard())
@@ -291,6 +379,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.cardViewport.Height = m.calcVpHeight()
 					m.cardViewport.GotoTop()
 					m.cardViewport.SetContent(m.renderCard())
+					// auto-fetch --help for newly selected tool
+					if mt, ok := m.selectedMeta(); ok {
+						cached := m.helpCache[mt.Name]
+						if cached[m.helpMode] == "" && !m.helpLoading {
+							m.helpLoading = true
+							m.helpViewport.SetContent(m.renderHelpContent())
+							return m, fetchHelpCmd(mt.Name, m.helpMode)
+						}
+						m.helpViewport.SetContent(m.renderHelpContent())
+						m.helpViewport.GotoTop()
+					}
 				}
 			}
 
@@ -301,6 +400,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.cardViewport.Height = m.calcVpHeight()
 					m.cardViewport.GotoTop()
 					m.cardViewport.SetContent(m.renderCard())
+					// auto-fetch --help for newly selected tool
+					if mt, ok := m.selectedMeta(); ok {
+						cached := m.helpCache[mt.Name]
+						if cached[m.helpMode] == "" && !m.helpLoading {
+							m.helpLoading = true
+							m.helpViewport.SetContent(m.renderHelpContent())
+							return m, fetchHelpCmd(mt.Name, m.helpMode)
+						}
+						m.helpViewport.SetContent(m.renderHelpContent())
+						m.helpViewport.GotoTop()
+					}
 				}
 			}
 
@@ -311,9 +421,44 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cardViewport.GotoBottom()
 
 		case "/":
+			if m.focus == focusRight {
+				m.helpSearching = true
+				m.helpSearch.Focus()
+				return m, textinput.Blink
+			}
 			m.searching = true
 			m.search.Focus()
 			return m, textinput.Blink
+
+		case "h":
+			if m.focus == focusRight {
+				m.helpMode = helpModeHelp
+				if mt, ok := m.selectedMeta(); ok {
+					cached := m.helpCache[mt.Name]
+					if cached[helpModeHelp] == "" && !m.helpLoading {
+						m.helpLoading = true
+						m.helpViewport.SetContent(m.renderHelpContent())
+						return m, fetchHelpCmd(mt.Name, helpModeHelp)
+					}
+					m.helpViewport.SetContent(m.renderHelpContent())
+					m.helpViewport.GotoTop()
+				}
+			}
+
+		case "m":
+			if m.focus == focusRight {
+				m.helpMode = helpModeMan
+				if mt, ok := m.selectedMeta(); ok {
+					cached := m.helpCache[mt.Name]
+					if cached[helpModeMan] == "" && !m.helpLoading {
+						m.helpLoading = true
+						m.helpViewport.SetContent(m.renderHelpContent())
+						return m, fetchHelpCmd(mt.Name, helpModeMan)
+					}
+					m.helpViewport.SetContent(m.renderHelpContent())
+					m.helpViewport.GotoTop()
+				}
+			}
 
 		case "f":
 			if m.focus == focusLeft {
@@ -527,6 +672,23 @@ func (m Model) View() string {
 
 func (m Model) renderHelp() string {
 	style := ui.HelpStyle.Width(m.width - 4)
+	if m.helpSearching {
+		matchInfo := ""
+		if len(m.helpMatches) > 0 {
+			matchInfo = fmt.Sprintf("  %d/%d matches", m.helpMatchIdx+1, len(m.helpMatches))
+		} else if m.helpSearch.Value() != "" {
+			matchInfo = "  no matches"
+		}
+		return style.Render(fmt.Sprintf(
+			"%s %s  %s next  %s prev  %s exit%s",
+			ui.SearchPromptStyle.Render("/"),
+			m.helpSearch.View(),
+			keyHint("n"),
+			keyHint("N"),
+			keyHint("esc"),
+			matchInfo,
+		))
+	}
 	if m.searching {
 		return style.Render(fmt.Sprintf(
 			"%s %s  %s exit search",
@@ -552,7 +714,7 @@ func (m Model) renderHelp() string {
 		return style.Render(hints)
 	}
 	if m.focus == focusRight {
-		hints := keyHint("j/k") + " scroll  " + keyHint("o") + " github  " + keyHint("c") + " changelog  " + keyHint("e") + " edit note  " + keyHint("t") + " edit tags  " + keyHint("←/esc") + " back  " + keyHint("q") + " quit"
+		hints := keyHint("h") + " --help  " + keyHint("m") + " man  " + keyHint("/") + " search  " + keyHint("o") + " github  " + keyHint("c") + " changelog  " + keyHint("e") + " edit note  " + keyHint("t") + " edit tags  " + keyHint("←/esc") + " back  " + keyHint("q") + " quit"
 		return style.Render(hints)
 	}
 	filterHint := ""
@@ -819,10 +981,6 @@ func (m Model) renderChangelogBlock(msg changelogMsg) string {
 	return sb.String()
 }
 
-func (m Model) renderHelpPlaceholder() string {
-	return ui.MetaNoteStyle.Render("Press [h] for --help\nPress [m] for man page")
-}
-
 func (m Model) hasUpdate(toolName string) bool {
 	vi, ok := m.versions[toolName]
 	return ok && version.IsNewer(vi.Installed, vi.Latest)
@@ -945,7 +1103,7 @@ func (m Model) updateHeaderFocus(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cardViewport.GotoTop()
 		m.cardViewport.SetContent(m.renderCard())
 
-	case "left", "h", "esc":
+	case "left", "esc":
 		m.focus = focusLeft
 		m.cardViewport.SetContent(m.renderCard())
 
@@ -1080,4 +1238,108 @@ func stripMarkdown(s string) string {
 		}
 	}
 	return strings.TrimSpace(sb.String())
+}
+
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+func stripANSI(s string) string {
+	return ansiRe.ReplaceAllString(s, "")
+}
+
+func fetchHelpCmd(name string, mode int) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		var output []byte
+		var err error
+
+		if mode == helpModeHelp {
+			cmd := exec.CommandContext(ctx, name, "--help")
+			output, err = cmd.CombinedOutput()
+			if (err != nil || len(output) == 0) && ctx.Err() == nil {
+				cmd2 := exec.CommandContext(ctx, name, "-h")
+				out2, err2 := cmd2.CombinedOutput()
+				if len(out2) > 0 {
+					output, err = out2, err2
+				}
+			}
+		} else {
+			cmd := exec.CommandContext(ctx, "man", name)
+			cmd.Env = append(os.Environ(), "MANPAGER=cat", "MANWIDTH=80", "TERM=dumb")
+			output, err = cmd.Output()
+		}
+
+		if len(output) == 0 {
+			return helpOutputMsg{toolName: name, mode: mode, err: err}
+		}
+		return helpOutputMsg{toolName: name, mode: mode, output: stripANSI(string(output))}
+	}
+}
+
+func findMatches(text, query string) []int {
+	if query == "" {
+		return nil
+	}
+	lq := strings.ToLower(query)
+	var matches []int
+	for i, line := range strings.Split(strings.ToLower(text), "\n") {
+		if strings.Contains(line, lq) {
+			matches = append(matches, i)
+		}
+	}
+	return matches
+}
+
+func highlightMatch(line, query string) string {
+	if query == "" {
+		return line
+	}
+	ll := strings.ToLower(line)
+	lq := strings.ToLower(query)
+	idx := strings.Index(ll, lq)
+	if idx < 0 {
+		return line
+	}
+	return line[:idx] + ui.SearchMatchStyle.Render(line[idx:idx+len(query)]) + line[idx+len(query):]
+}
+
+func (m Model) rawHelpText() string {
+	mt, ok := m.selectedMeta()
+	if !ok {
+		return ""
+	}
+	cached, has := m.helpCache[mt.Name]
+	if !has {
+		return ""
+	}
+	return cached[m.helpMode]
+}
+
+func (m Model) renderHelpContent() string {
+	mt, ok := m.selectedMeta()
+	if !ok {
+		return ui.MetaNoteStyle.Render("No tool selected")
+	}
+	if m.helpLoading {
+		return ui.MetaNoteStyle.Render("Loading...")
+	}
+	cached, has := m.helpCache[mt.Name]
+	if !has || cached[m.helpMode] == "" {
+		if m.helpMode == helpModeHelp {
+			return ui.MetaNoteStyle.Render("Press [h] for --help\nPress [m] for man page")
+		}
+		return ui.MetaNoteStyle.Render("Press [m] for man page\nPress [h] for --help")
+	}
+	text := cached[m.helpMode]
+	if !m.helpSearching || m.helpSearch.Value() == "" {
+		return text
+	}
+	query := m.helpSearch.Value()
+	lines := strings.Split(text, "\n")
+	result := make([]string, len(lines))
+	for i, line := range lines {
+		result[i] = highlightMatch(line, query)
+	}
+	return strings.Join(result, "\n")
 }

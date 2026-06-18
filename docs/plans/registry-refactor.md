@@ -85,14 +85,14 @@
 
 ### Task 6: Вывод `--help` и `man`, поиск по выводу
 
-- [ ] Добавить в `Model`: `helpMode int`, `helpLoading bool`, `helpCache map[string][2]string`, `helpSearching bool`, `helpSearch textinput.Model`, `helpMatches []int`, `helpMatchIdx int`
-- [ ] Реализовать `fetchHelpCmd(name string, mode int) tea.Cmd`: запускать `--help`/`-h` или `man` с таймаутом 5с; `MANPAGER=cat MANWIDTH=80` для man
-- [ ] Реализовать `stripANSI(s string) string` через regexp `\x1b\[[0-9;]*[a-zA-Z]`
-- [ ] Обработать `helpOutputMsg` в `Update()`: заполнить `helpCache`, установить контент `helpViewport`; при ошибке — показать сообщение `"--help not available"` / `"man page not available"`
-- [ ] Запускать `fetchHelpCmd` автоматически при смене инструмента в левой панели (проверять кеш перед запуском)
-- [ ] Клавиши `h` (--help) и `m` (man): переключать `helpMode`, брать из кеша или запускать fetch
-- [ ] Реализовать поиск `/` при фокусе на правой половине: активировать `helpSearch`, вызывать `findMatches()` при каждом изменении запроса
-- [ ] Реализовать `findMatches(text, query string) []int` — возвращает номера строк с совпадениями
-- [ ] Реализовать `highlightMatch(line, query string) string` — подсвечивать совпадение через `SearchMatchStyle`
-- [ ] Клавиши `n`/`N` — следующее/предыдущее совпадение через `helpViewport.SetYOffset(helpMatches[helpMatchIdx])`
-- [ ] Обновить Help Bar: нормальный режим `[h] --help  [m] man  [/] search`; режим поиска `/ query_  [n] next  [N] prev  [Esc] exit  N matches`
+- [x] Добавить в `Model`: `helpMode int`, `helpLoading bool`, `helpCache map[string][2]string`, `helpSearching bool`, `helpSearch textinput.Model`, `helpMatches []int`, `helpMatchIdx int`
+- [x] Реализовать `fetchHelpCmd(name string, mode int) tea.Cmd`: запускать `--help`/`-h` или `man` с таймаутом 5с; `MANPAGER=cat MANWIDTH=80` для man
+- [x] Реализовать `stripANSI(s string) string` через regexp `\x1b\[[0-9;]*[a-zA-Z]`
+- [x] Обработать `helpOutputMsg` в `Update()`: заполнить `helpCache`, установить контент `helpViewport`; при ошибке — показать сообщение `"--help not available"` / `"man page not available"`
+- [x] Запускать `fetchHelpCmd` автоматически при смене инструмента в левой панели (проверять кеш перед запуском)
+- [x] Клавиши `h` (--help) и `m` (man): переключать `helpMode`, брать из кеша или запускать fetch
+- [x] Реализовать поиск `/` при фокусе на правой половине: активировать `helpSearch`, вызывать `findMatches()` при каждом изменении запроса
+- [x] Реализовать `findMatches(text, query string) []int` — возвращает номера строк с совпадениями
+- [x] Реализовать `highlightMatch(line, query string) string` — подсвечивать совпадение через `SearchMatchStyle`
+- [x] Клавиши `n`/`N` — следующее/предыдущее совпадение через `helpViewport.SetYOffset(helpMatches[helpMatchIdx])`
+- [x] Обновить Help Bar: нормальный режим `[h] --help  [m] man  [/] search`; режим поиска `/ query_  [n] next  [N] prev  [Esc] exit  N matches`

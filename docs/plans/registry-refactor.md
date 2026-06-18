@@ -73,15 +73,15 @@
 
 ### Task 5: Переделка правой панели
 
-- [ ] Добавить в `Model`: `cardViewport viewport.Model`, `helpViewport viewport.Model`
-- [ ] Вычислять ширину: `cardWidth = rightTotal / 2`, `helpWidth = rightTotal - cardWidth`
-- [ ] Реализовать `renderRightHeader()`: имя инструмента + статус-символ (без GitHub/версий в заголовке)
-- [ ] Реализовать `renderCard()`: блоки About, Stars + Release, Languages bar, Note + Tags, Changelog — разделённые horizontal divider
-- [ ] Реализовать инлайн-редактирование Note (`e`) и Tags (`t`) прямо в `renderCard()` через `textinput`
-- [ ] Реализовать `renderRight()`: два `viewport` рядом через `lipgloss.JoinHorizontal`
-- [ ] Реализовать клавишу `o` (открыть GitHub в браузере) при фокусе на правой панели
-- [ ] Удалить `renderChangelog()` и `showChangelog` — changelog теперь в блоке Tool Card
-- [ ] Обновить `calcVpHeight()` и расчёты высоты под два viewport
+- [x] Добавить в `Model`: `cardViewport viewport.Model`, `helpViewport viewport.Model`
+- [x] Вычислять ширину: `cardWidth = rightTotal / 2`, `helpWidth = rightTotal - cardWidth`
+- [x] Реализовать `renderRightHeader()`: имя инструмента + статус-символ (без GitHub/версий в заголовке)
+- [x] Реализовать `renderCard()`: блоки About, Stars + Release, Languages bar, Note + Tags, Changelog — разделённые horizontal divider
+- [x] Реализовать инлайн-редактирование Note (`e`) и Tags (`t`) прямо в `renderCard()` через `textinput`
+- [x] Реализовать `renderRight()`: два `viewport` рядом через `lipgloss.JoinHorizontal`
+- [x] Реализовать клавишу `o` (открыть GitHub в браузере) при фокусе на правой панели
+- [x] Удалить `renderChangelog()` и `showChangelog` — changelog теперь в блоке Tool Card
+- [x] Обновить `calcVpHeight()` и расчёты высоты под два viewport
 
 ### Task 6: Вывод `--help` и `man`, поиск по выводу
 

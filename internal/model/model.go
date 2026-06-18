@@ -23,13 +23,6 @@ const (
 	leftWidth   = 22
 )
 
-type viewMode int
-
-const (
-	viewHotkeys viewMode = 0
-	viewMyTools viewMode = 1
-)
-
 type VersionInfo struct {
 	Installed string
 	Latest    string
@@ -70,7 +63,6 @@ type Model struct {
 	repoStatus          map[string]string
 	repoCards           map[string]version.RepoCard
 	checkingVersionTool string
-	selected            int
 	focus               int
 	viewport            viewport.Model
 	search              textinput.Model
@@ -79,8 +71,6 @@ type Model struct {
 	width               int
 	height              int
 	ready               bool
-
-	view viewMode
 
 	showChangelog     bool
 	changelogLoading  bool
@@ -92,11 +82,6 @@ type Model struct {
 	meta         []loader.ToolMeta
 	metaFilter   loader.Status
 	metaSelected int
-	metaDetail   bool
-	editingNote  bool
-	editingTags  bool
-	noteInput    textinput.Model
-	tagsInput    textinput.Model
 }
 
 type Options struct {
@@ -109,14 +94,6 @@ func New(meta []loader.ToolMeta, opts Options) Model {
 	ti.Placeholder = "search..."
 	ti.CharLimit = 64
 
-	noteInput := textinput.New()
-	noteInput.Placeholder = "note text..."
-	noteInput.CharLimit = 256
-
-	tagsInput := textinput.New()
-	tagsInput.Placeholder = "tag1, tag2..."
-	tagsInput.CharLimit = 128
-
 	m := Model{
 		tools:      loader.ToolsFromMeta(meta),
 		versions:   make(map[string]VersionInfo),
@@ -124,14 +101,12 @@ func New(meta []loader.ToolMeta, opts Options) Model {
 		repoCards:  make(map[string]version.RepoCard),
 		search:     ti,
 		meta:       meta,
-		noteInput:  noteInput,
-		tagsInput:  tagsInput,
 	}
 
 	if opts.InitialTool != "" {
-		for i, t := range m.tools {
-			if strings.EqualFold(t.Name, opts.InitialTool) {
-				m.selected = i
+		for i, mt := range m.meta {
+			if strings.EqualFold(mt.Name, opts.InitialTool) {
+				m.metaSelected = i
 				m.focus = focusRight
 				break
 			}
@@ -176,10 +151,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
-		if m.view == viewHotkeys {
-			return m.handleMouse(msg)
-		}
-		return m, nil
+		return m.handleMouse(msg)
 
 	case versionMsg:
 		m.versions[msg.toolName] = VersionInfo{
@@ -252,10 +224,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		m.statusMsg = ""
 
-		if m.view == viewMyTools {
-			return m.updateMyTools(msg)
-		}
-
 		if m.showChangelog {
 			switch msg.String() {
 			case "esc", "q":
@@ -284,10 +252,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.searching = false
 				m.search.SetValue("")
 				m.search.Blur()
+				m.metaSelected = 0
 				m.viewport.SetContent(m.renderContent())
 				return m, nil
 			default:
 				m.search, cmd = m.search.Update(msg)
+				m.metaSelected = 0
 				m.viewport.SetContent(m.renderContent())
 				m.viewport.GotoTop()
 				return m, cmd
@@ -306,14 +276,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 
-		case "tab":
-			if m.focus == focusLeft && !m.searching {
-				m.view = viewMyTools
-				m.metaSelected = 0
-				m.metaDetail = false
-				return m, nil
-			}
-
 		case "right", "l":
 			if m.focus == focusLeft {
 				m.focus = focusHeader
@@ -328,8 +290,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "j", "down":
 			if m.focus == focusLeft {
-				if m.selected < len(m.tools)-1 {
-					m.selected++
+				filtered := m.filteredMeta()
+				if m.metaSelected < len(filtered)-1 {
+					m.metaSelected++
 					m.viewport.Height = m.calcVpHeight()
 					m.viewport.GotoTop()
 					m.viewport.SetContent(m.renderContent())
@@ -338,8 +301,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "k", "up":
 			if m.focus == focusLeft {
-				if m.selected > 0 {
-					m.selected--
+				if m.metaSelected > 0 {
+					m.metaSelected--
 					m.viewport.Height = m.calcVpHeight()
 					m.viewport.GotoTop()
 					m.viewport.SetContent(m.renderContent())
@@ -357,27 +320,61 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.search.Focus()
 			return m, textinput.Blink
 
+		case "f":
+			if m.focus == focusLeft {
+				switch m.metaFilter {
+				case "":
+					m.metaFilter = loader.StatusActive
+				case loader.StatusActive:
+					m.metaFilter = loader.StatusTrying
+				case loader.StatusTrying:
+					m.metaFilter = loader.StatusForgotten
+				case loader.StatusForgotten:
+					m.metaFilter = loader.StatusArchived
+				default:
+					m.metaFilter = ""
+				}
+				m.metaSelected = 0
+				m.viewport.SetContent(m.renderContent())
+			}
+
+		case "1":
+			m.metaFilter = loader.StatusActive
+			m.metaSelected = 0
+			m.viewport.SetContent(m.renderContent())
+		case "2":
+			m.metaFilter = loader.StatusTrying
+			m.metaSelected = 0
+			m.viewport.SetContent(m.renderContent())
+		case "3":
+			m.metaFilter = loader.StatusForgotten
+			m.metaSelected = 0
+			m.viewport.SetContent(m.renderContent())
+		case "4":
+			m.metaFilter = loader.StatusArchived
+			m.metaSelected = 0
+			m.viewport.SetContent(m.renderContent())
+		case "a":
+			m.metaFilter = ""
+			m.metaSelected = 0
+			m.viewport.SetContent(m.renderContent())
+
 		case "v":
-			if m.focus == focusLeft && len(m.tools) > 0 && m.checkingVersionTool == "" {
-				t := m.tools[m.selected]
-				if t.GitHub != "" {
+			if m.focus == focusLeft && m.checkingVersionTool == "" {
+				if t, ok := m.selectedTool(); ok && t.GitHub != "" {
 					m.checkingVersionTool = t.Name
 					return m, fetchVersionCmd(t)
 				}
 			}
 
 		case "o":
-			if len(m.tools) > 0 {
-				t := m.tools[m.selected]
-				if t.GitHub != "" {
-					openBrowser("https://" + t.GitHub)
-				}
+			if t, ok := m.selectedTool(); ok && t.GitHub != "" {
+				openBrowser("https://" + t.GitHub)
 			}
 
 		case "c":
-			if m.focus == focusRight && !m.searching && len(m.tools) > 0 {
-				t := m.tools[m.selected]
-				if t.GitHub != "" {
+			if m.focus == focusRight && !m.searching {
+				if t, ok := m.selectedTool(); ok && t.GitHub != "" {
 					m.showChangelog = true
 					m.changelogLoading = true
 					m.changelogToolName = t.Name
@@ -396,171 +393,57 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-func (m Model) updateMyTools(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+func (m Model) selectedMeta() (loader.ToolMeta, bool) {
 	filtered := m.filteredMeta()
+	if m.metaSelected < 0 || m.metaSelected >= len(filtered) {
+		return loader.ToolMeta{}, false
+	}
+	return filtered[m.metaSelected], true
+}
 
-	if m.editingNote {
-		switch msg.String() {
-		case "enter", "esc":
-			if msg.String() == "enter" && len(filtered) > 0 {
-				entry := filtered[m.metaSelected]
-				entry.Note = m.noteInput.Value()
-				m.meta = loader.UpsertMeta(m.meta, entry)
-				loader.SaveMeta(m.meta) //nolint:errcheck
-			}
-			m.editingNote = false
-			m.noteInput.Blur()
-			return m, nil
-		default:
-			var cmd tea.Cmd
-			m.noteInput, cmd = m.noteInput.Update(msg)
-			return m, cmd
+func (m Model) selectedTool() (loader.Tool, bool) {
+	mt, ok := m.selectedMeta()
+	if !ok {
+		return loader.Tool{}, false
+	}
+	for _, t := range m.tools {
+		if t.Name == mt.Name {
+			return t, true
 		}
 	}
-
-	if m.editingTags {
-		switch msg.String() {
-		case "enter", "esc":
-			if msg.String() == "enter" && len(filtered) > 0 {
-				entry := filtered[m.metaSelected]
-				entry.Tags = splitTagsStr(m.tagsInput.Value())
-				m.meta = loader.UpsertMeta(m.meta, entry)
-				loader.SaveMeta(m.meta) //nolint:errcheck
-			}
-			m.editingTags = false
-			m.tagsInput.Blur()
-			return m, nil
-		default:
-			var cmd tea.Cmd
-			m.tagsInput, cmd = m.tagsInput.Update(msg)
-			return m, cmd
-		}
-	}
-
-	switch msg.String() {
-	case "q", "ctrl+c":
-		return m, tea.Quit
-
-	case "tab":
-		m.view = viewHotkeys
-		m.metaDetail = false
-		return m, nil
-
-	case "esc":
-		if m.metaDetail {
-			m.metaDetail = false
-		} else {
-			m.view = viewHotkeys
-		}
-
-	case "enter":
-		if !m.metaDetail && len(filtered) > 0 {
-			m.metaDetail = true
-		}
-
-	case "j", "down":
-		if !m.metaDetail {
-			if m.metaSelected < len(filtered)-1 {
-				m.metaSelected++
-			}
-		}
-
-	case "k", "up":
-		if !m.metaDetail {
-			if m.metaSelected > 0 {
-				m.metaSelected--
-			}
-		}
-
-	case "s":
-		if len(filtered) > 0 {
-			entry := filtered[m.metaSelected]
-			entry.Status = loader.NextStatus(entry.Status)
-			m.meta = loader.UpsertMeta(m.meta, entry)
-			loader.SaveMeta(m.meta) //nolint:errcheck
-			newFiltered := m.filteredMeta()
-			if m.metaSelected >= len(newFiltered) && len(newFiltered) > 0 {
-				m.metaSelected = len(newFiltered) - 1
-			}
-		}
-
-	case "e":
-		if m.metaDetail && len(filtered) > 0 {
-			entry := filtered[m.metaSelected]
-			m.noteInput.SetValue(entry.Note)
-			m.noteInput.Focus()
-			m.editingNote = true
-			return m, textinput.Blink
-		}
-
-	case "t":
-		if m.metaDetail && len(filtered) > 0 {
-			entry := filtered[m.metaSelected]
-			m.tagsInput.SetValue(strings.Join(entry.Tags, ", "))
-			m.tagsInput.Focus()
-			m.editingTags = true
-			return m, textinput.Blink
-		}
-
-	case "f":
-		if !m.metaDetail {
-			switch m.metaFilter {
-			case "":
-				m.metaFilter = loader.StatusActive
-			case loader.StatusActive:
-				m.metaFilter = loader.StatusTrying
-			case loader.StatusTrying:
-				m.metaFilter = loader.StatusForgotten
-			case loader.StatusForgotten:
-				m.metaFilter = loader.StatusArchived
-			default:
-				m.metaFilter = ""
-			}
-			m.metaSelected = 0
-		}
-
-	case "1":
-		m.metaFilter = loader.StatusActive
-		m.metaSelected = 0
-	case "2":
-		m.metaFilter = loader.StatusTrying
-		m.metaSelected = 0
-	case "3":
-		m.metaFilter = loader.StatusForgotten
-		m.metaSelected = 0
-	case "4":
-		m.metaFilter = loader.StatusArchived
-		m.metaSelected = 0
-	case "a":
-		if !m.metaDetail {
-			m.metaFilter = ""
-			m.metaSelected = 0
-		}
-	}
-
-	return m, nil
+	return loader.Tool{}, false
 }
 
 func (m Model) filteredMeta() []loader.ToolMeta {
-	if m.metaFilter == "" {
-		return m.meta
+	source := m.meta
+	if m.metaFilter != "" {
+		var filtered []loader.ToolMeta
+		for _, mt := range m.meta {
+			if mt.Status == m.metaFilter {
+				filtered = append(filtered, mt)
+			}
+		}
+		source = filtered
 	}
-	var out []loader.ToolMeta
-	for _, mt := range m.meta {
-		if mt.Status == m.metaFilter {
-			out = append(out, mt)
+
+	if m.searching {
+		query := strings.ToLower(strings.TrimSpace(m.search.Value()))
+		if query != "" {
+			var out []loader.ToolMeta
+			for _, mt := range source {
+				if strings.Contains(strings.ToLower(mt.Name), query) {
+					out = append(out, mt)
+				}
+			}
+			return out
 		}
 	}
-	return out
+	return source
 }
 
 func (m Model) View() string {
 	if !m.ready {
 		return "Loading..."
-	}
-
-	if m.view == viewMyTools {
-		return m.renderMyToolsView()
 	}
 
 	left := m.renderLeft()
@@ -574,174 +457,6 @@ func (m Model) View() string {
 	}
 	return base
 }
-
-// --- My Tools rendering ---
-
-func (m Model) renderMyToolsView() string {
-	if m.metaDetail {
-		return m.renderMyToolsDetail()
-	}
-	return m.renderMyToolsList()
-}
-
-func (m Model) renderMyToolsList() string {
-	filtered := m.filteredMeta()
-
-	filterLabel := "all"
-	if m.metaFilter != "" {
-		filterLabel = string(m.metaFilter)
-	}
-
-	var sb strings.Builder
-	sb.WriteString(ui.TitleStyle.Render("My Tools") + "  ")
-
-	hotkeysTab := ui.TopTabInactiveStyle.Render("Tools")
-	myToolsTab := ui.TopTabActiveStyle.Render("[My Tools]")
-	sb.WriteString(hotkeysTab + "  " + myToolsTab + "\n\n")
-
-	filterStr := ui.MetaNoteStyle.Render("Filter: " + filterLabel)
-	sb.WriteString("  " + filterStr + "\n\n")
-
-	if len(filtered) == 0 {
-		sb.WriteString(ui.DescStyle.Render("  No tools. Add one: keys track <tool> --github <repo>") + "\n")
-	} else {
-		for i, mt := range filtered {
-			sym := loader.StatusSymbol[mt.Status]
-			symStyled := ui.StatusStyle(mt.Status).Render(sym)
-			statusStr := ui.StatusStyle(mt.Status).Width(9).Render(string(mt.Status))
-			tags := ui.MetaTagStyle.Render(strings.Join(mt.Tags, ", "))
-			name := mt.Name
-
-			line := fmt.Sprintf("  %s %s  %-16s  %s", symStyled, statusStr, name, tags)
-			if i == m.metaSelected {
-				line = ui.SelectionBarStyle.Render("●") + line[1:]
-			}
-			sb.WriteString(line + "\n")
-		}
-	}
-
-	sb.WriteString("\n")
-	active, trying, forgotten, archived := countStatuses(m.meta)
-	total := len(m.meta)
-	stats := fmt.Sprintf("  %d tools  ·  %d active  ·  %d trying  ·  %d forgotten  ·  %d archived",
-		total, active, trying, forgotten, archived)
-	sb.WriteString(ui.MetaNoteStyle.Render(stats) + "\n")
-
-	content := sb.String()
-
-	panelStyle := ui.PanelBorderFocused.
-		Width(m.width - 4).
-		Height(max(m.height-7, 1))
-
-	help := m.renderMyToolsHelp(false)
-	body := lipgloss.JoinVertical(lipgloss.Left, panelStyle.Render(content), help)
-	return lipgloss.NewStyle().Margin(1).Render(body)
-}
-
-func (m Model) renderMyToolsDetail() string {
-	filtered := m.filteredMeta()
-	if len(filtered) == 0 {
-		return ""
-	}
-	mt := filtered[m.metaSelected]
-
-	sym := loader.StatusSymbol[mt.Status]
-	symStyled := ui.StatusStyle(mt.Status).Render(sym + "  " + string(mt.Status))
-
-	title := ui.TitleStyle.Render(mt.Name) + "  " + symStyled
-
-	var sb strings.Builder
-	sb.WriteString(title + "\n\n")
-
-	added := mt.Added
-	if added == "" {
-		added = "unknown"
-	}
-	sb.WriteString(ui.MetaDetailLabelStyle.Render("Added:") + "  " + ui.MetaDetailValueStyle.Render(added) + "\n")
-
-	tags := strings.Join(mt.Tags, ", ")
-	if tags == "" {
-		tags = "—"
-	}
-	if m.editingTags {
-		sb.WriteString(ui.MetaDetailLabelStyle.Render("Tags:") + "  " + m.tagsInput.View() + "\n")
-	} else {
-		sb.WriteString(ui.MetaDetailLabelStyle.Render("Tags:") + "  " + ui.MetaTagStyle.Render(tags) + "\n")
-	}
-
-	note := mt.Note
-	if note == "" {
-		note = "—"
-	}
-	if m.editingNote {
-		sb.WriteString(ui.MetaDetailLabelStyle.Render("Note:") + "  " + m.noteInput.View() + "\n")
-	} else {
-		sb.WriteString(ui.MetaDetailLabelStyle.Render("Note:") + "  " + ui.MetaNoteStyle.Render(note) + "\n")
-	}
-
-	popupWidth := min(70, m.width-10)
-	panel := ui.PopupStyle.Width(popupWidth).Render(sb.String())
-
-	help := m.renderMyToolsHelp(true)
-	body := lipgloss.JoinVertical(lipgloss.Left, panel, "\n", help)
-
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, body,
-		lipgloss.WithWhitespaceChars(" "),
-		lipgloss.WithWhitespaceForeground(lipgloss.Color("#0A0A0A")),
-	)
-}
-
-func (m Model) renderMyToolsHelp(detail bool) string {
-	style := ui.HelpStyle.Width(m.width - 4)
-	if detail {
-		return style.Render(
-			keyHint("s") + " status  " +
-				keyHint("e") + " edit note  " +
-				keyHint("t") + " edit tags  " +
-				keyHint("esc") + " back  " +
-				keyHint("q") + " quit",
-		)
-	}
-	return style.Render(
-		keyHint("j/k") + " navigate  " +
-			keyHint("enter") + " details  " +
-			keyHint("s") + " status  " +
-			keyHint("f") + " filter  " +
-			keyHint("[1-4]") + " filter by status  " +
-			keyHint("tab") + " tools  " +
-			keyHint("q") + " quit",
-	)
-}
-
-func countStatuses(meta []loader.ToolMeta) (active, trying, forgotten, archived int) {
-	for _, m := range meta {
-		switch m.Status {
-		case loader.StatusActive:
-			active++
-		case loader.StatusTrying:
-			trying++
-		case loader.StatusForgotten:
-			forgotten++
-		case loader.StatusArchived:
-			archived++
-		}
-	}
-	return
-}
-
-func splitTagsStr(s string) []string {
-	parts := strings.Split(s, ",")
-	var out []string
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-// --- Hotkeys view rendering ---
 
 func (m Model) renderHelp() string {
 	style := ui.HelpStyle.Width(m.width - 4)
@@ -765,15 +480,16 @@ func (m Model) renderHelp() string {
 	}
 	if m.focus == focusHeader {
 		hints := keyHint("↓/j") + " select  " + keyHint("←/esc") + " back  " + keyHint("q") + " quit"
-		if len(m.tools) > 0 && m.tools[m.selected].GitHub != "" {
+		if t, ok := m.selectedTool(); ok && t.GitHub != "" {
 			hints = keyHint("v") + " check version  " + keyHint("c") + " changelog  " + hints
 		}
 		return style.Render(hints)
 	}
 	if m.focus == focusRight {
 		changelogHint := ""
-		if len(m.tools) > 0 && m.tools[m.selected].GitHub != "" {
+		if t, ok := m.selectedTool(); ok && t.GitHub != "" {
 			changelogHint = keyHint("c") + " changelog  "
+			_ = t
 		}
 		return style.Render(
 			keyHint("j/k") + " scroll  " +
@@ -783,14 +499,19 @@ func (m Model) renderHelp() string {
 				keyHint("q") + " quit",
 		)
 	}
+	filterHint := ""
+	if m.metaFilter != "" {
+		filterHint = keyHint("a") + " all  "
+	}
 	versionHint := ""
-	if len(m.tools) > 0 && m.tools[m.selected].GitHub != "" {
+	if t, ok := m.selectedTool(); ok && t.GitHub != "" {
 		versionHint = keyHint("v") + " check version  "
 	}
 	return style.Render(
 		keyHint("j/k") + " navigate  " +
 			keyHint("→") + " details  " +
-			keyHint("tab") + " my tools  " +
+			keyHint("f") + " filter  " +
+			filterHint +
 			keyHint("/") + " search  " +
 			keyHint("o") + " github  " +
 			versionHint +
@@ -809,58 +530,70 @@ func (m Model) calcVpHeight() int {
 func (m Model) renderLeft() string {
 	var sb strings.Builder
 
-	toolsTab := ui.TopTabActiveStyle.Render("[Tools]")
-	myToolsTab := ui.TopTabInactiveStyle.Render("My Tools")
-	sb.WriteString(toolsTab + "  " + myToolsTab + "\n\n")
-
+	filtered := m.filteredMeta()
 	maxName := leftWidth - 5
 
-	for i, t := range m.tools {
-		hasUpdate := m.hasUpdate(t.Name)
+	for i, mt := range filtered {
+		sym := loader.StatusSymbol[mt.Status]
+		symStyled := ui.StatusStyle(mt.Status).Render(sym)
 
-		name := t.Name
+		name := mt.Name
 		if len(name) > maxName {
 			name = name[:maxName]
 		}
 
+		hasUpdate := m.hasUpdate(mt.Name)
 		updateMark := ""
 		if hasUpdate {
 			updateMark = " " + ui.UpdateAvailableStyle.Render("↑")
 		}
 
-		isSelected := i == m.selected && m.focus == focusLeft && !m.searching
+		isSelected := i == m.metaSelected && m.focus == focusLeft && !m.searching
 		if isSelected {
 			circle := ui.SelectionBarStyle.Render("●")
-			sb.WriteString(circle + "  " + name + updateMark + "\n")
+			sb.WriteString(circle + " " + symStyled + " " + name + updateMark + "\n")
 		} else {
-			sb.WriteString(ui.ToolNormalStyle.Render("   "+name) + updateMark + "\n")
+			sb.WriteString("  " + symStyled + " " + name + updateMark + "\n")
 		}
 	}
 
-	if len(m.tools) == 0 {
-		sb.WriteString(ui.DescStyle.Render("  No tools.") + "\n")
+	if len(filtered) == 0 {
+		if m.searching {
+			sb.WriteString(ui.DescStyle.Render("  No matches.") + "\n")
+		} else if len(m.meta) == 0 {
+			sb.WriteString(ui.DescStyle.Render("  No tools tracked.\n  Add one:\n  keys track <tool>\n  --github ...") + "\n")
+		} else {
+			sb.WriteString(ui.DescStyle.Render("  No tools match\n  current filter.") + "\n")
+		}
 	}
 
+	total := len(m.meta)
+	footer := fmt.Sprintf("  %d tools", total)
+	if m.metaFilter != "" {
+		footer += " [" + string(m.metaFilter) + "]"
+	}
+	content := sb.String() + "\n" + ui.MetaNoteStyle.Render(footer)
+
 	panelStyle := ui.PanelBorder
-	if m.focus == focusLeft && !m.searching && !m.showChangelog {
+	if m.focus == focusLeft && !m.showChangelog {
 		panelStyle = ui.PanelBorderFocused
 	}
 
 	return panelStyle.
 		Width(leftWidth).
 		Height(max(m.height-7, 1)).
-		Render(sb.String())
+		Render(content)
 }
 
 func (m Model) renderRight() string {
 	rightWidth := m.width - leftWidth - 6
 
 	title := ""
-	if len(m.tools) > 0 && !m.searching {
-		title = m.renderHeader(m.tools[m.selected])
-	} else if m.searching {
+	if m.searching {
 		query := m.search.Value()
 		title = ui.TitleStyle.Render("Search: ") + ui.SearchMatchStyle.Render(query)
+	} else if t, ok := m.selectedTool(); ok {
+		title = m.renderHeader(t)
 	}
 
 	panelStyle := ui.PanelBorder
@@ -913,18 +646,15 @@ func (m Model) renderHeader(t loader.Tool) string {
 }
 
 func (m Model) renderContent() string {
-	if len(m.tools) == 0 {
+	if len(m.meta) == 0 {
 		return ui.DescStyle.Render("No tools tracked. Add one: keys track <tool> --github <repo>")
 	}
 
-	if m.searching {
-		query := strings.ToLower(strings.TrimSpace(m.search.Value()))
-		if query != "" {
-			return m.renderSearchResults(query)
-		}
+	t, ok := m.selectedTool()
+	if !ok {
+		return ui.DescStyle.Render("Select a tool from the left panel.")
 	}
 
-	t := m.tools[m.selected]
 	var sb strings.Builder
 	if t.Description != "" {
 		sb.WriteString(ui.DescStyle.Render(t.Description) + "\n")
@@ -932,25 +662,39 @@ func (m Model) renderContent() string {
 	if t.GitHub != "" {
 		sb.WriteString(ui.GithubStyle.Render("↗ https://"+t.GitHub) + "\n")
 	}
-	return sb.String()
-}
 
-func (m Model) renderSearchResults(query string) string {
-	var sb strings.Builder
-	found := 0
-
-	for _, t := range m.tools {
-		if strings.Contains(strings.ToLower(t.Name), query) ||
-			strings.Contains(strings.ToLower(t.Description), query) {
-			line := ui.TitleStyle.Render(t.Name) + "  " + ui.DescStyle.Render(t.Description)
+	if card, ok := m.repoCards[t.Name]; ok {
+		if card.About != "" {
+			sb.WriteString("\n" + ui.DescStyle.Render(card.About) + "\n")
+		}
+		if card.Stars > 0 {
+			sb.WriteString(ui.MetaNoteStyle.Render(fmt.Sprintf("★ %s stars", formatStars(card.Stars))) + "\n")
+		}
+		if len(card.Languages) > 0 {
+			sb.WriteString(renderLangBar(card.Languages, m.viewport.Width) + "\n")
+		}
+		if card.Latest != "" {
+			line := ui.MetaNoteStyle.Render("Latest: " + card.Latest)
+			if card.PublishedAt != "" {
+				date := card.PublishedAt
+				if len(date) > 10 {
+					date = date[:10]
+				}
+				line += " " + ui.MetaNoteStyle.Render("("+date+")")
+			}
 			sb.WriteString(line + "\n")
-			found++
 		}
 	}
 
-	if found == 0 {
-		sb.WriteString(ui.DescStyle.Render("No matches found."))
+	if mt, ok := m.selectedMeta(); ok {
+		if mt.Note != "" {
+			sb.WriteString("\n" + ui.MetaDetailLabelStyle.Render("Note:") + " " + ui.MetaNoteStyle.Render(mt.Note) + "\n")
+		}
+		if len(mt.Tags) > 0 {
+			sb.WriteString(ui.MetaDetailLabelStyle.Render("Tags:") + " " + ui.MetaTagStyle.Render(strings.Join(mt.Tags, ", ")) + "\n")
+		}
 	}
+
 	return sb.String()
 }
 
@@ -991,10 +735,12 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
-		toolIdx := msg.Y - 4
-		if toolIdx >= 0 && toolIdx < len(m.tools) {
-			if m.selected != toolIdx {
-				m.selected = toolIdx
+		// margin(1) + border(1) = offset 2; no tab headers now
+		toolIdx := msg.Y - 3
+		filtered := m.filteredMeta()
+		if toolIdx >= 0 && toolIdx < len(filtered) {
+			if m.metaSelected != toolIdx {
+				m.metaSelected = toolIdx
 				m.viewport.Height = m.calcVpHeight()
 				m.viewport.GotoTop()
 				m.viewport.SetContent(m.renderContent())
@@ -1035,7 +781,6 @@ func languagePercents(langs map[string]int) []languagePercent {
 	for name, bytes := range langs {
 		out = append(out, languagePercent{Name: name, Pct: float64(bytes) / float64(total) * 100})
 	}
-	// Sort descending by percentage
 	for i := 0; i < len(out)-1; i++ {
 		for j := i + 1; j < len(out); j++ {
 			if out[j].Pct > out[i].Pct {
@@ -1081,33 +826,26 @@ func (m Model) updateHeaderFocus(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.viewport.SetContent(m.renderContent())
 
 	case "v":
-		if len(m.tools) > 0 && m.checkingVersionTool == "" {
-			t := m.tools[m.selected]
-			if t.GitHub != "" {
+		if m.checkingVersionTool == "" {
+			if t, ok := m.selectedTool(); ok && t.GitHub != "" {
 				m.checkingVersionTool = t.Name
 				return m, fetchVersionCmd(t)
 			}
 		}
 
 	case "c":
-		if len(m.tools) > 0 {
-			t := m.tools[m.selected]
-			if t.GitHub != "" {
-				m.showChangelog = true
-				m.changelogLoading = true
-				m.changelogToolName = t.Name
-				m.changelogViewport.SetContent("")
-				m.changelogViewport.GotoTop()
-				return m, fetchChangelogCmd(t.GitHub, t.Name)
-			}
+		if t, ok := m.selectedTool(); ok && t.GitHub != "" {
+			m.showChangelog = true
+			m.changelogLoading = true
+			m.changelogToolName = t.Name
+			m.changelogViewport.SetContent("")
+			m.changelogViewport.GotoTop()
+			return m, fetchChangelogCmd(t.GitHub, t.Name)
 		}
 
 	case "o":
-		if len(m.tools) > 0 {
-			t := m.tools[m.selected]
-			if t.GitHub != "" {
-				openBrowser("https://" + t.GitHub)
-			}
+		if t, ok := m.selectedTool(); ok && t.GitHub != "" {
+			openBrowser("https://" + t.GitHub)
 		}
 	}
 	return m, nil

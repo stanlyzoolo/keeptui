@@ -60,16 +60,16 @@
 
 ### Task 4: Переделка левой панели
 
-- [ ] Удалить `viewHotkeys`/`viewMyTools` — один view-режим
-- [ ] Удалить Top Tabs (`[Hotkeys]  My Tools`) из `renderLeft()`
-- [ ] Удалить `renderMyToolsList()`, `renderMyToolsDetail()`
-- [ ] Удалить из `Model`: `view`, `metaDetail`, `editingNote`, `editingTags` (редактирование переедет в правую панель)
-- [ ] Переписать `renderLeft()`: показывать только tracked tools с символом статуса; footer `N tools`
-- [ ] Реализовать поиск `/` в левой панели: `searching bool` + `search textinput.Model`
-- [ ] Расширить `filteredMeta()`: при `searching == true` фильтровать по `strings.Contains(name, query)`
-- [ ] При изменении поискового запроса — сбрасывать `metaSelected = 0` и запускать загрузку Tool Card + Help для первого результата
-- [ ] Реализовать клавиши фильтра: `f` (цикл), `1`/`2`/`3`/`4`, `a` (сброс)
-- [ ] Показывать пустое состояние: `No tools tracked. Add one: keys track <tool> --github ...`
+- [x] Удалить `viewHotkeys`/`viewMyTools` — один view-режим
+- [x] Удалить Top Tabs (`[Hotkeys]  My Tools`) из `renderLeft()`
+- [x] Удалить `renderMyToolsList()`, `renderMyToolsDetail()`
+- [x] Удалить из `Model`: `view`, `metaDetail`, `editingNote`, `editingTags` (редактирование переедет в правую панель)
+- [x] Переписать `renderLeft()`: показывать только tracked tools с символом статуса; footer `N tools`
+- [x] Реализовать поиск `/` в левой панели: `searching bool` + `search textinput.Model`
+- [x] Расширить `filteredMeta()`: при `searching == true` фильтровать по `strings.Contains(name, query)`
+- [x] При изменении поискового запроса — сбрасывать `metaSelected = 0` и запускать загрузку Tool Card + Help для первого результата
+- [x] Реализовать клавиши фильтра: `f` (цикл), `1`/`2`/`3`/`4`, `a` (сброс)
+- [x] Показывать пустое состояние: `No tools tracked. Add one: keys track <tool> --github ...`
 
 ### Task 5: Переделка правой панели
 

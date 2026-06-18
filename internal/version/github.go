@@ -14,8 +14,20 @@ import (
 const cacheTTL = 24 * time.Hour
 
 type CacheEntry struct {
-	Latest    string    `json:"latest"`
-	CheckedAt time.Time `json:"checked_at"`
+	Latest      string    `json:"latest"`
+	CheckedAt   time.Time `json:"checked_at"`
+	Body        string    `json:"body,omitempty"`
+	HtmlUrl     string    `json:"html_url,omitempty"`
+	PublishedAt string    `json:"published_at,omitempty"`
+	RepoStatus  string    `json:"repo_status,omitempty"` // "active" or "archived"
+}
+
+// ReleaseInfo holds full release metadata from GitHub.
+type ReleaseInfo struct {
+	Tag         string
+	Body        string
+	HtmlUrl     string
+	PublishedAt string
 }
 
 type Cache map[string]CacheEntry
@@ -39,14 +51,40 @@ func GetLatest(githubField string) string {
 		return entry.Latest
 	}
 
-	latest, err := fetchRelease(repo)
+	info, err := fetchRelease(repo)
 	if err != nil {
 		return entry.Latest // stale value or ""
 	}
 
-	cache[repo] = CacheEntry{Latest: latest, CheckedAt: time.Now()}
+	repoStatus, _ := fetchRepoInfo(repo)
+	newEntry := CacheEntry{
+		Latest:      info.Tag,
+		Body:        info.Body,
+		HtmlUrl:     info.HtmlUrl,
+		PublishedAt: info.PublishedAt,
+		CheckedAt:   time.Now(),
+		RepoStatus:  repoStatus,
+	}
+	if repoStatus == "" && cached {
+		newEntry.RepoStatus = entry.RepoStatus
+	}
+	cache[repo] = newEntry
 	SaveCache(cache)
-	return latest
+	return info.Tag
+}
+
+// GetCachedRepoStatus returns the repository status from cache without making a network request.
+// Returns "active", "archived", or "" if not yet known.
+func GetCachedRepoStatus(githubField string) string {
+	if githubField == "" {
+		return ""
+	}
+	repo := extractRepo(githubField)
+	if repo == "" {
+		return ""
+	}
+	cache := LoadCache()
+	return cache[repo].RepoStatus
 }
 
 // FetchAndCache force-fetches the latest release, bypassing the cache TTL.
@@ -55,22 +93,101 @@ func FetchAndCache(githubField string) (string, error) {
 	if repo == "" {
 		return "", fmt.Errorf("cannot parse github field: %q", githubField)
 	}
-	latest, err := fetchRelease(repo)
+	info, err := fetchRelease(repo)
 	if err != nil {
 		return "", err
 	}
+	repoStatus, _ := fetchRepoInfo(repo)
 	cache := LoadCache()
-	cache[repo] = CacheEntry{Latest: latest, CheckedAt: time.Now()}
+	existing := cache[repo]
+	newEntry := CacheEntry{
+		Latest:      info.Tag,
+		Body:        info.Body,
+		HtmlUrl:     info.HtmlUrl,
+		PublishedAt: info.PublishedAt,
+		CheckedAt:   time.Now(),
+		RepoStatus:  repoStatus,
+	}
+	if repoStatus == "" {
+		newEntry.RepoStatus = existing.RepoStatus
+	}
+	cache[repo] = newEntry
 	SaveCache(cache)
-	return latest, nil
+	return info.Tag, nil
 }
 
-func fetchRelease(repo string) (string, error) {
+// GetChangelog returns full release info for a tool's github field.
+// Uses cache when fresh and body is present; fetches otherwise.
+func GetChangelog(githubField string) (ReleaseInfo, error) {
+	if githubField == "" {
+		return ReleaseInfo{}, fmt.Errorf("no github field")
+	}
+	repo := extractRepo(githubField)
+	if repo == "" {
+		return ReleaseInfo{}, fmt.Errorf("cannot parse github field: %q", githubField)
+	}
+
+	cache := LoadCache()
+	entry, cached := cache[repo]
+
+	if cached && time.Since(entry.CheckedAt) < cacheTTL && entry.Body != "" {
+		return ReleaseInfo{Tag: entry.Latest, Body: entry.Body, HtmlUrl: entry.HtmlUrl, PublishedAt: entry.PublishedAt}, nil
+	}
+
+	info, err := fetchRelease(repo)
+	if err != nil {
+		if cached {
+			return ReleaseInfo{Tag: entry.Latest, Body: entry.Body, HtmlUrl: entry.HtmlUrl, PublishedAt: entry.PublishedAt}, nil
+		}
+		return ReleaseInfo{}, err
+	}
+
+	cache[repo] = CacheEntry{Latest: info.Tag, Body: info.Body, HtmlUrl: info.HtmlUrl, PublishedAt: info.PublishedAt, CheckedAt: time.Now()}
+	SaveCache(cache)
+	return info, nil
+}
+
+func fetchRepoInfo(repo string) (string, error) {
+	url := "https://api.github.com/repos/" + repo
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("GitHub API: HTTP %d", resp.StatusCode)
+	}
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	var info struct {
+		Archived bool `json:"archived"`
+	}
+	if err := json.Unmarshal(data, &info); err != nil {
+		return "", err
+	}
+	if info.Archived {
+		return "archived", nil
+	}
+	return "active", nil
+}
+
+func fetchRelease(repo string) (ReleaseInfo, error) {
 	url := "https://api.github.com/repos/" + repo + "/releases/latest"
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return "", err
+		return ReleaseInfo{}, err
 	}
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
 	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
@@ -80,32 +197,40 @@ func fetchRelease(repo string) (string, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return ReleaseInfo{}, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
-		return "", fmt.Errorf("GitHub API rate limit exceeded (set GITHUB_TOKEN to increase quota)")
+		return ReleaseInfo{}, fmt.Errorf("GitHub API rate limit exceeded (set GITHUB_TOKEN to increase quota)")
 	}
 	if resp.StatusCode == http.StatusNotFound {
-		return "", fmt.Errorf("no releases found")
+		return ReleaseInfo{}, fmt.Errorf("no releases found")
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("GitHub API: HTTP %d", resp.StatusCode)
+		return ReleaseInfo{}, fmt.Errorf("GitHub API: HTTP %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return ReleaseInfo{}, err
 	}
 
 	var release struct {
-		TagName string `json:"tag_name"`
+		TagName     string `json:"tag_name"`
+		Body        string `json:"body"`
+		HtmlUrl     string `json:"html_url"`
+		PublishedAt string `json:"published_at"`
 	}
-	if err := json.Unmarshal(body, &release); err != nil {
-		return "", err
+	if err := json.Unmarshal(data, &release); err != nil {
+		return ReleaseInfo{}, err
 	}
-	return release.TagName, nil
+	return ReleaseInfo{
+		Tag:         release.TagName,
+		Body:        release.Body,
+		HtmlUrl:     release.HtmlUrl,
+		PublishedAt: release.PublishedAt,
+	}, nil
 }
 
 func extractRepo(githubField string) string {

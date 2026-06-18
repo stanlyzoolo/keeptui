@@ -18,9 +18,10 @@ import (
 )
 
 const (
-	focusLeft  = 0
-	focusRight = 1
-	leftWidth  = 22
+	focusLeft   = 0
+	focusRight  = 1
+	focusHeader = 2
+	leftWidth   = 22
 
 	tabKeys     = 0
 	tabCommands = 1
@@ -39,32 +40,59 @@ type VersionInfo struct {
 }
 
 type versionMsg struct {
-	toolName  string
-	installed string
-	latest    string
+	toolName   string
+	installed  string
+	latest     string
+	repoStatus string
+}
+
+type checkVersionMsg struct {
+	toolName   string
+	latest     string
+	repoStatus string
+	err        error
+}
+
+type changelogMsg struct {
+	toolName    string
+	tag         string
+	body        string
+	htmlUrl     string
+	publishedAt string
+	err         error
 }
 
 type Model struct {
 	// hotkeys view
-	tools           []loader.Tool
-	versions        map[string]VersionInfo
-	selected        int
-	focus           int
-	selectedBinding int
-	rightTab        int
-	selectedCommand int
-	showPopup       bool
-	popupCommand    loader.Command
-	viewport        viewport.Model
-	search          textinput.Model
-	searching       bool
-	statusMsg       string
-	width           int
-	height          int
-	ready           bool
+	tools               []loader.Tool
+	versions            map[string]VersionInfo
+	repoStatus          map[string]string
+	checkingVersionTool string
+	selected            int
+	focus               int
+	selectedBinding     int
+	rightTab            int
+	selectedCommand     int
+	showPopup           bool
+	popupCommand        loader.Command
+	viewport            viewport.Model
+	search              textinput.Model
+	searching           bool
+	statusMsg           string
+	width               int
+	height              int
+	ready               bool
 
 	// top-level view
 	view viewMode
+
+	// changelog overlay
+	showChangelog     bool
+	changelogLoading  bool
+	changelogViewport viewport.Model
+	changelogReady    bool
+	changelogToolName string
+	changelogHtmlUrl  string
 
 	// my tools view
 	meta         []loader.ToolMeta
@@ -96,12 +124,13 @@ func New(tools []loader.Tool, meta []loader.ToolMeta, opts Options) Model {
 	tagsInput.CharLimit = 128
 
 	m := Model{
-		tools:     tools,
-		versions:  make(map[string]VersionInfo),
-		search:    ti,
-		meta:      meta,
-		noteInput: noteInput,
-		tagsInput: tagsInput,
+		tools:      tools,
+		versions:   make(map[string]VersionInfo),
+		repoStatus: make(map[string]string),
+		search:     ti,
+		meta:       meta,
+		noteInput:  noteInput,
+		tagsInput:  tagsInput,
 	}
 
 	if opts.InitialTool != "" {
@@ -127,10 +156,14 @@ func (m Model) Init() tea.Cmd {
 	cmds := make([]tea.Cmd, len(m.tools))
 	for i, t := range m.tools {
 		cmds[i] = func() tea.Msg {
+			installed := version.InstalledVersion(t)
+			latest := version.GetLatest(t.GitHub) // also fetches and caches repo status
+			repoStatus := version.GetCachedRepoStatus(t.GitHub)
 			return versionMsg{
-				toolName:  t.Name,
-				installed: version.InstalledVersion(t),
-				latest:    version.GetLatest(t.GitHub),
+				toolName:   t.Name,
+				installed:  installed,
+				latest:     latest,
+				repoStatus: repoStatus,
 			}
 		}
 	}
@@ -155,22 +188,60 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			Installed: msg.installed,
 			Latest:    msg.latest,
 		}
+		if msg.repoStatus != "" {
+			m.repoStatus[msg.toolName] = msg.repoStatus
+		}
 		m.viewport.SetContent(m.renderContent())
+		return m, nil
+
+	case checkVersionMsg:
+		if msg.toolName == m.checkingVersionTool {
+			m.checkingVersionTool = ""
+		}
+		if msg.err == nil {
+			vi := m.versions[msg.toolName]
+			vi.Latest = msg.latest
+			m.versions[msg.toolName] = vi
+			if msg.repoStatus != "" {
+				m.repoStatus[msg.toolName] = msg.repoStatus
+			}
+		} else {
+			m.statusMsg = "Version check failed: " + msg.err.Error()
+		}
+		m.viewport.SetContent(m.renderContent())
+		return m, nil
+
+	case changelogMsg:
+		if msg.toolName == m.changelogToolName {
+			m.changelogLoading = false
+			m.changelogHtmlUrl = msg.htmlUrl
+			m.changelogViewport.SetContent(m.renderChangelogContent(msg))
+			m.changelogViewport.GotoTop()
+		}
 		return m, nil
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 		rightWidth := max(m.width-leftWidth-6, 1)
-		vpHeight := max(m.height-9, 1)
 		if !m.ready {
-			m.viewport = viewport.New(rightWidth, vpHeight)
+			m.viewport = viewport.New(rightWidth, m.calcVpHeight())
 			m.ready = true
 		} else {
 			m.viewport.Width = rightWidth
-			m.viewport.Height = vpHeight
+			m.viewport.Height = m.calcVpHeight()
 		}
 		m.viewport.SetContent(m.renderContent())
+
+		clW := min(80, m.width-10)
+		clH := min(24, m.height-10)
+		if !m.changelogReady {
+			m.changelogViewport = viewport.New(max(clW-6, 1), max(clH-6, 1))
+			m.changelogReady = true
+		} else {
+			m.changelogViewport.Width = max(clW-6, 1)
+			m.changelogViewport.Height = max(clH-6, 1)
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -178,6 +249,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.view == viewMyTools {
 			return m.updateMyTools(msg)
+		}
+
+		// --- Changelog overlay ---
+		if m.showChangelog {
+			switch msg.String() {
+			case "esc", "q":
+				m.showChangelog = false
+				m.changelogLoading = false
+				return m, nil
+			case "o":
+				if m.changelogHtmlUrl != "" {
+					openBrowser(m.changelogHtmlUrl)
+				}
+				return m, nil
+			default:
+				var cmd tea.Cmd
+				m.changelogViewport, cmd = m.changelogViewport.Update(msg)
+				return m, cmd
+			}
+		}
+
+		// --- Header focus ---
+		if m.focus == focusHeader {
+			return m.updateHeaderFocus(msg)
 		}
 
 		// --- Hotkeys view ---
@@ -244,12 +339,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "right", "l":
 			if m.focus == focusLeft {
-				m.focus = focusRight
+				m.focus = focusHeader
 				m.selectedBinding = 0
 				m.selectedCommand = 0
 				m.rightTab = tabKeys
 				m.viewport.SetContent(m.renderContent())
-				m.scrollToBinding()
 			}
 
 		case "left", "h":
@@ -268,6 +362,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.selectedBinding = 0
 					m.selectedCommand = 0
 					m.rightTab = tabKeys
+					m.viewport.Height = m.calcVpHeight()
 					m.viewport.GotoTop()
 					m.viewport.SetContent(m.renderContent())
 				}
@@ -291,17 +386,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.selectedBinding = 0
 					m.selectedCommand = 0
 					m.rightTab = tabKeys
+					m.viewport.Height = m.calcVpHeight()
 					m.viewport.GotoTop()
 					m.viewport.SetContent(m.renderContent())
 				}
-			} else if m.rightTab == tabKeys {
-				m.selectedBinding = max(m.selectedBinding-1, 0)
-				m.viewport.SetContent(m.renderContent())
-				m.scrollToBinding()
-			} else {
-				m.selectedCommand = max(m.selectedCommand-1, 0)
-				m.viewport.SetContent(m.renderContent())
-				m.scrollToCommand()
+			} else if m.focus == focusRight {
+				if m.rightTab == tabKeys {
+					if m.selectedBinding > 0 {
+						m.selectedBinding--
+						m.viewport.SetContent(m.renderContent())
+						m.scrollToBinding()
+					} else {
+						m.focus = focusHeader
+						m.viewport.SetContent(m.renderContent())
+					}
+				} else {
+					if m.selectedCommand > 0 {
+						m.selectedCommand--
+						m.viewport.SetContent(m.renderContent())
+						m.scrollToCommand()
+					} else {
+						m.focus = focusHeader
+						m.viewport.SetContent(m.renderContent())
+					}
+				}
 			}
 
 		case "g":
@@ -356,11 +464,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
+		case "v":
+			if m.focus == focusLeft && len(m.tools) > 0 && m.checkingVersionTool == "" {
+				t := m.tools[m.selected]
+				if t.GitHub != "" {
+					m.checkingVersionTool = t.Name
+					return m, fetchVersionCmd(t)
+				}
+			}
+
 		case "o":
 			if len(m.tools) > 0 {
 				t := m.tools[m.selected]
 				if t.GitHub != "" {
 					openBrowser("https://" + t.GitHub)
+				}
+			}
+
+		case "c":
+			if m.focus == focusRight && !m.searching && !m.showPopup && len(m.tools) > 0 {
+				t := m.tools[m.selected]
+				if t.GitHub != "" {
+					m.showChangelog = true
+					m.changelogLoading = true
+					m.changelogToolName = t.Name
+					m.changelogViewport.SetContent("")
+					m.changelogViewport.GotoTop()
+					return m, fetchChangelogCmd(t.GitHub, t.Name)
 				}
 			}
 		}
@@ -552,12 +682,11 @@ func (m Model) View() string {
 	layout := lipgloss.JoinVertical(lipgloss.Left, body, m.renderHelp())
 	base := lipgloss.NewStyle().Margin(1).Render(layout)
 
+	if m.showChangelog {
+		return ui.PlaceOverlay(m.width, m.height, base, m.renderChangelog())
+	}
 	if m.showPopup {
-		popup := m.renderPopup()
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, popup,
-			lipgloss.WithWhitespaceChars(" "),
-			lipgloss.WithWhitespaceForeground(lipgloss.Color("#0A0A0A")),
-		)
+		return ui.PlaceOverlay(m.width, m.height, base, m.renderPopup())
 	}
 	return base
 }
@@ -734,6 +863,13 @@ func splitTagsStr(s string) []string {
 
 func (m Model) renderHelp() string {
 	style := ui.HelpStyle.Width(m.width - 4)
+	if m.showChangelog {
+		hints := keyHint("j/k") + " scroll  " + keyHint("esc") + " close"
+		if m.changelogHtmlUrl != "" {
+			hints += "  " + keyHint("o") + " open in browser"
+		}
+		return style.Render(hints)
+	}
 	if m.searching {
 		return style.Render(fmt.Sprintf(
 			"%s %s  %s exit search",
@@ -751,6 +887,13 @@ func (m Model) renderHelp() string {
 				keyHint("esc") + " close",
 		)
 	}
+	if m.focus == focusHeader {
+		hints := keyHint("↓/j") + " bindings  " + keyHint("←/esc") + " back  " + keyHint("q") + " quit"
+		if len(m.tools) > 0 && m.tools[m.selected].GitHub != "" {
+			hints = keyHint("v") + " check version  " + keyHint("c") + " changelog  " + hints
+		}
+		return style.Render(hints)
+	}
 	if m.focus == focusRight {
 		if m.rightTab == tabCommands {
 			return style.Render(
@@ -762,14 +905,23 @@ func (m Model) renderHelp() string {
 					keyHint("q") + " quit",
 			)
 		}
+		changelogHint := ""
+		if len(m.tools) > 0 && m.tools[m.selected].GitHub != "" {
+			changelogHint = keyHint("c") + " changelog  "
+		}
 		return style.Render(
 			keyHint("j/k") + " scroll  " +
 				keyHint("y") + " copy hotkey  " +
 				keyHint("tab") + " cmds tab  " +
 				keyHint("o") + " github  " +
+				changelogHint +
 				keyHint("←/esc") + " back  " +
 				keyHint("q") + " quit",
 		)
+	}
+	versionHint := ""
+	if len(m.tools) > 0 && m.tools[m.selected].GitHub != "" {
+		versionHint = keyHint("v") + " check version  "
 	}
 	return style.Render(
 		keyHint("j/k") + " navigate  " +
@@ -777,6 +929,7 @@ func (m Model) renderHelp() string {
 			keyHint("tab") + " my tools  " +
 			keyHint("/") + " search  " +
 			keyHint("o") + " github  " +
+			versionHint +
 			keyHint("q") + " quit",
 	)
 }
@@ -785,55 +938,49 @@ func keyHint(k string) string {
 	return ui.SearchPromptStyle.Render("["+k+"]")
 }
 
+// calcVpHeight returns the correct viewport height for the current state,
+// accounting for header lines (title-only vs title+divider+tabs).
+func (m Model) calcVpHeight() int {
+	h := m.height - 9
+	if !m.searching && len(m.tools) > 0 && len(m.tools[m.selected].CommandGroups) > 0 {
+		h -= 2 // inner-tabs divider + tabs line
+	}
+	return max(h, 1)
+}
+
 func (m Model) renderLeft() string {
 	var sb strings.Builder
 
-	// top tabs
 	hotkeysTab := ui.TopTabActiveStyle.Render("[Hotkeys]")
 	myToolsTab := ui.TopTabInactiveStyle.Render("My Tools")
 	sb.WriteString(hotkeysTab + "  " + myToolsTab + "\n\n")
 
-	maxCount := 0
-	for _, t := range m.tools {
-		if c := totalBindingsForTool(t); c > maxCount {
-			maxCount = c
-		}
-	}
-	countW := len(fmt.Sprintf("%d", maxCount))
-	maxName := leftWidth - 2 - 3 - 1 - countW - 1
+	maxName := leftWidth - 5 // space for ● + 2 spaces + optional ↑
 
 	for i, t := range m.tools {
-		count := totalBindingsForTool(t)
-		cmdCount := totalCommandsForTool(t)
 		hasUpdate := m.hasUpdate(t.Name)
 
 		name := t.Name
 		if len(name) > maxName {
 			name = name[:maxName]
 		}
-		padding := strings.Repeat(" ", maxName-len(name))
 
-		countStr := fmt.Sprintf("%*d", countW, count)
-		countRendered := ""
+		updateMark := ""
 		if hasUpdate {
-			countRendered = ui.UpdateAvailableStyle.Render("↑") + ui.BindingCountStyle.Render(countStr)
-		} else {
-			countRendered = ui.BindingCountStyle.Render(countStr)
-		}
-		if cmdCount > 0 {
-			countRendered += ui.CommandCountStyle.Render(fmt.Sprintf("%dc", cmdCount))
+			updateMark = " " + ui.UpdateAvailableStyle.Render("↑")
 		}
 
-		if i == m.selected && !m.searching {
+		isSelected := i == m.selected && m.focus == focusLeft && !m.searching
+		if isSelected {
 			circle := ui.SelectionBarStyle.Render("●")
-			sb.WriteString(circle + "  " + name + padding + " " + countRendered + "\n")
+			sb.WriteString(circle + "  " + name + updateMark + "\n")
 		} else {
-			sb.WriteString(ui.ToolNormalStyle.Render("   "+name+padding+" ") + countRendered + "\n")
+			sb.WriteString(ui.ToolNormalStyle.Render("   "+name) + updateMark + "\n")
 		}
 	}
 
 	panelStyle := ui.PanelBorder
-	if m.focus == focusLeft && !m.searching {
+	if m.focus == focusLeft && !m.searching && !m.showChangelog {
 		panelStyle = ui.PanelBorderFocused
 	}
 
@@ -855,11 +1002,14 @@ func (m Model) renderRight() string {
 	}
 
 	panelStyle := ui.PanelBorder
-	if m.focus == focusRight {
+	if (m.focus == focusRight || m.focus == focusHeader) && !m.showChangelog {
 		panelStyle = ui.PanelBorderFocused
 	}
 
-	inner := lipgloss.JoinVertical(lipgloss.Left, title, "", m.viewport.View())
+	dividerWidth := max(rightWidth-2, 0)
+	divider := lipgloss.NewStyle().Foreground(ui.ColorBorder).Render(strings.Repeat("─", dividerWidth))
+
+	inner := lipgloss.JoinVertical(lipgloss.Left, title, divider, m.viewport.View())
 	return panelStyle.
 		Width(rightWidth).
 		Height(max(m.height-7, 1)).
@@ -867,25 +1017,41 @@ func (m Model) renderRight() string {
 }
 
 func (m Model) renderHeader(t loader.Tool) string {
-	line := ui.TitleStyle.Render(t.Name)
+	prefix := ""
+	if m.focus == focusHeader {
+		prefix = ui.SelectionBarStyle.Render("●") + " "
+	}
 
-	if vi, ok := m.versions[t.Name]; ok {
-		if vi.Installed != "" {
-			line += " " + ui.VersionInstalledStyle.Render(vi.Installed)
-		}
+	line := prefix + ui.TitleStyle.Render(t.Name)
+
+	if m.checkingVersionTool == t.Name {
+		line += " " + ui.VersionInstalledStyle.Render("checking...")
+	} else if vi, ok := m.versions[t.Name]; ok {
 		if version.IsNewer(vi.Installed, vi.Latest) {
-			line += "  " + ui.UpdateAvailableStyle.Render("↑ Update available: "+vi.Latest)
-		} else if vi.Installed != "" && vi.Latest != "" {
-			line += " " + ui.VersionOkStyle.Render("✓")
+			line += " " + ui.UpdateAvailableStyle.Render(vi.Installed+" -> "+vi.Latest)
+		} else if vi.Installed != "" {
+			line += " " + ui.VersionInstalledStyle.Render(vi.Installed)
+			if vi.Latest != "" {
+				line += " " + ui.VersionOkStyle.Render("✓")
+			}
+		} else {
+			line += " " + ui.MetaNoteStyle.Render("not installed")
 		}
 	}
 
 	line += "  " + ui.HeaderDescStyle.Render(t.Description)
 	if t.GitHub != "" {
 		line += "  " + ui.GithubStyle.Render("↗ "+t.GitHub)
+		if status := m.repoStatus[t.Name]; status != "" {
+			line += " " + ui.RepoStatusStyle.Render("("+status+")")
+		}
 	}
 
 	if len(t.CommandGroups) > 0 {
+		rightWidth := m.width - leftWidth - 6
+		dividerWidth := max(rightWidth-2, 0)
+		tabDivider := lipgloss.NewStyle().Foreground(ui.ColorBorder).Render(strings.Repeat("─", dividerWidth))
+
 		var keysTab, cmdsTab string
 		if m.rightTab == tabKeys {
 			keysTab = ui.TabActiveStyle.Render("[Keys]")
@@ -894,7 +1060,7 @@ func (m Model) renderHeader(t loader.Tool) string {
 			keysTab = ui.TabInactiveStyle.Render("Keys")
 			cmdsTab = ui.TabActiveStyle.Render("[Commands]")
 		}
-		line += "\n" + ui.TitleStyle.PaddingLeft(1).Render("") + keysTab + "  " + cmdsTab
+		line += "\n" + tabDivider + "\n" + ui.TitleStyle.PaddingLeft(1).Render("") + keysTab + "  " + cmdsTab
 	}
 
 	return line
@@ -1227,6 +1393,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				m.selectedBinding = 0
 				m.selectedCommand = 0
 				m.rightTab = tabKeys
+				m.viewport.Height = m.calcVpHeight()
 				m.viewport.GotoTop()
 				m.viewport.SetContent(m.renderContent())
 			}
@@ -1234,4 +1401,222 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// updateHeaderFocus handles key events when the header element is focused.
+func (m Model) updateHeaderFocus(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "q", "ctrl+c":
+		return m, tea.Quit
+
+	case "j", "down":
+		m.focus = focusRight
+		m.selectedBinding = 0
+		m.selectedCommand = 0
+		m.viewport.GotoTop()
+		m.viewport.SetContent(m.renderContent())
+
+	case "left", "h", "esc":
+		m.focus = focusLeft
+		m.viewport.SetContent(m.renderContent())
+
+	case "v":
+		if len(m.tools) > 0 && m.checkingVersionTool == "" {
+			t := m.tools[m.selected]
+			if t.GitHub != "" {
+				m.checkingVersionTool = t.Name
+				return m, fetchVersionCmd(t)
+			}
+		}
+
+	case "c":
+		if len(m.tools) > 0 {
+			t := m.tools[m.selected]
+			if t.GitHub != "" {
+				m.showChangelog = true
+				m.changelogLoading = true
+				m.changelogToolName = t.Name
+				m.changelogViewport.SetContent("")
+				m.changelogViewport.GotoTop()
+				return m, fetchChangelogCmd(t.GitHub, t.Name)
+			}
+		}
+
+	case "o":
+		if len(m.tools) > 0 {
+			t := m.tools[m.selected]
+			if t.GitHub != "" {
+				openBrowser("https://" + t.GitHub)
+			}
+		}
+	}
+	return m, nil
+}
+
+func fetchVersionCmd(t loader.Tool) tea.Cmd {
+	return func() tea.Msg {
+		latest, err := version.FetchAndCache(t.GitHub)
+		repoStatus := version.GetCachedRepoStatus(t.GitHub)
+		return checkVersionMsg{
+			toolName:   t.Name,
+			latest:     latest,
+			repoStatus: repoStatus,
+			err:        err,
+		}
+	}
+}
+
+// --- Changelog ---
+
+func fetchChangelogCmd(githubField, toolName string) tea.Cmd {
+	return func() tea.Msg {
+		info, err := version.GetChangelog(githubField)
+		return changelogMsg{
+			toolName:    toolName,
+			tag:         info.Tag,
+			body:        info.Body,
+			htmlUrl:     info.HtmlUrl,
+			publishedAt: info.PublishedAt,
+			err:         err,
+		}
+	}
+}
+
+func (m Model) renderChangelogContent(msg changelogMsg) string {
+	if msg.err != nil {
+		return ui.DescStyle.Render("Failed to load changelog: " + msg.err.Error())
+	}
+
+	var sb strings.Builder
+	sb.WriteString(ui.TitleStyle.Render(msg.tag) + "\n")
+	if msg.publishedAt != "" {
+		date := msg.publishedAt
+		if len(date) > 10 {
+			date = date[:10]
+		}
+		sb.WriteString(ui.MetaNoteStyle.Render("Released: "+date) + "\n")
+	}
+	sb.WriteString("\n")
+
+	body := wrapText(stripMarkdown(msg.body), m.changelogViewport.Width)
+	if body == "" {
+		sb.WriteString(ui.DescStyle.Render("No release notes available.") + "\n")
+	} else {
+		sb.WriteString(ui.DescStyle.Render(body))
+	}
+	return sb.String()
+}
+
+func wrapText(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	var result strings.Builder
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if i > 0 {
+			result.WriteByte('\n')
+		}
+		if len(line) <= width {
+			result.WriteString(line)
+			continue
+		}
+		words := strings.Fields(line)
+		col := 0
+		for j, word := range words {
+			wl := len(word)
+			if j == 0 {
+				result.WriteString(word)
+				col = wl
+			} else if col+1+wl > width {
+				result.WriteByte('\n')
+				result.WriteString(word)
+				col = wl
+			} else {
+				result.WriteByte(' ')
+				result.WriteString(word)
+				col += 1 + wl
+			}
+		}
+	}
+	return result.String()
+}
+
+func stripMarkdown(s string) string {
+	var sb strings.Builder
+	lines := strings.Split(s, "\n")
+	blankCount := 0
+
+	for _, line := range lines {
+		// Remove heading markers.
+		line = strings.TrimLeft(line, "#")
+		line = strings.TrimSpace(line)
+
+		// Remove bold/italic markers ** * __ _
+		for _, marker := range []string{"**", "__"} {
+			line = strings.ReplaceAll(line, marker, "")
+		}
+		// Single * and _ only when they appear as emphasis markers (not in middle of words).
+		// Simple approach: strip leading/trailing occurrences.
+		line = strings.Trim(line, "*_")
+
+		// Remove inline code backticks.
+		line = strings.ReplaceAll(line, "`", "")
+
+		// Remove HTML tags.
+		for strings.Contains(line, "<") && strings.Contains(line, ">") {
+			start := strings.Index(line, "<")
+			end := strings.Index(line[start:], ">")
+			if end < 0 {
+				break
+			}
+			line = line[:start] + line[start+end+1:]
+		}
+
+		line = strings.TrimSpace(line)
+
+		if line == "" {
+			blankCount++
+			if blankCount <= 1 {
+				sb.WriteString("\n")
+			}
+		} else {
+			blankCount = 0
+			sb.WriteString(line + "\n")
+		}
+	}
+	return strings.TrimSpace(sb.String())
+}
+
+func (m Model) renderChangelog() string {
+	popupWidth := min(80, m.width-10)
+	// 2 border + 2 padding each side = 8 columns overhead for PopupStyle-like style
+	innerWidth := max(popupWidth-8, 10)
+
+	m.changelogViewport.Width = innerWidth
+
+	var body string
+	if m.changelogLoading {
+		body = ui.DescStyle.Render("Loading changelog...")
+	} else {
+		body = m.changelogViewport.View()
+	}
+
+	hintStr := "[j/k] scroll  [esc] close"
+	if m.changelogHtmlUrl != "" {
+		hintStr += "  [o] open in browser"
+	}
+	hint := ui.TabInactiveStyle.Render(hintStr)
+	content := lipgloss.JoinVertical(lipgloss.Left,
+		ui.TitleStyle.Render("Changelog: "+m.changelogToolName),
+		"",
+		body,
+		"",
+		hint,
+	)
+	focusedStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(ui.ColorPrimary).
+		Padding(1, 2)
+	return focusedStyle.Width(popupWidth).Render(content)
 }

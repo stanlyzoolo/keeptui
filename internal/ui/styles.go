@@ -99,6 +99,11 @@ var (
 			BorderForeground(ColorPrimary).
 			Padding(1, 2)
 
+	ChangelogPopupStyle = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(ColorBorder).
+				Padding(1, 2)
+
 	CommandCmdStyle = lipgloss.NewStyle().
 				Foreground(ColorKey).
 				Bold(true)
@@ -149,4 +154,8 @@ var (
 
 	MetaDetailValueStyle = lipgloss.NewStyle().
 				Foreground(ColorText)
+
+	RepoStatusStyle = lipgloss.NewStyle().
+				Foreground(ColorMuted).
+				Italic(true)
 )

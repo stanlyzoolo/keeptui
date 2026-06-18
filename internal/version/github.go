@@ -14,12 +14,27 @@ import (
 const cacheTTL = 24 * time.Hour
 
 type CacheEntry struct {
-	Latest      string    `json:"latest"`
-	CheckedAt   time.Time `json:"checked_at"`
-	Body        string    `json:"body,omitempty"`
-	HtmlUrl     string    `json:"html_url,omitempty"`
-	PublishedAt string    `json:"published_at,omitempty"`
-	RepoStatus  string    `json:"repo_status,omitempty"` // "active" or "archived"
+	Latest      string         `json:"latest"`
+	CheckedAt   time.Time      `json:"checked_at"`
+	Body        string         `json:"body,omitempty"`
+	HtmlUrl     string         `json:"html_url,omitempty"`
+	PublishedAt string         `json:"published_at,omitempty"`
+	RepoStatus  string         `json:"repo_status,omitempty"` // "active" or "archived"
+	About       string         `json:"about,omitempty"`
+	Stars       int            `json:"stars,omitempty"`
+	Languages   map[string]int `json:"languages,omitempty"`
+}
+
+// RepoCard holds full repository metadata for display in the TUI.
+type RepoCard struct {
+	About       string
+	Stars       int
+	Languages   map[string]int
+	Latest      string
+	PublishedAt string
+	HtmlUrl     string
+	Body        string
+	RepoStatus  string
 }
 
 // ReleaseInfo holds full release metadata from GitHub.
@@ -56,7 +71,7 @@ func GetLatest(githubField string) string {
 		return entry.Latest // stale value or ""
 	}
 
-	repoStatus, _ := fetchRepoInfo(repo)
+	repoStatus, about, stars, _ := fetchRepoInfo(repo)
 	newEntry := CacheEntry{
 		Latest:      info.Tag,
 		Body:        info.Body,
@@ -64,6 +79,9 @@ func GetLatest(githubField string) string {
 		PublishedAt: info.PublishedAt,
 		CheckedAt:   time.Now(),
 		RepoStatus:  repoStatus,
+		About:       about,
+		Stars:       stars,
+		Languages:   entry.Languages,
 	}
 	if repoStatus == "" && cached {
 		newEntry.RepoStatus = entry.RepoStatus
@@ -97,7 +115,7 @@ func FetchAndCache(githubField string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	repoStatus, _ := fetchRepoInfo(repo)
+	repoStatus, about, stars, _ := fetchRepoInfo(repo)
 	cache := LoadCache()
 	existing := cache[repo]
 	newEntry := CacheEntry{
@@ -107,6 +125,9 @@ func FetchAndCache(githubField string) (string, error) {
 		PublishedAt: info.PublishedAt,
 		CheckedAt:   time.Now(),
 		RepoStatus:  repoStatus,
+		About:       about,
+		Stars:       stars,
+		Languages:   existing.Languages,
 	}
 	if repoStatus == "" {
 		newEntry.RepoStatus = existing.RepoStatus
@@ -147,11 +168,48 @@ func GetChangelog(githubField string) (ReleaseInfo, error) {
 	return info, nil
 }
 
-func fetchRepoInfo(repo string) (string, error) {
+func fetchRepoInfo(repo string) (status, about string, stars int, err error) {
 	url := "https://api.github.com/repos/" + repo
+	req, reqErr := http.NewRequest("GET", url, nil)
+	if reqErr != nil {
+		return "", "", 0, reqErr
+	}
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, doErr := client.Do(req)
+	if doErr != nil {
+		return "", "", 0, doErr
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", "", 0, fmt.Errorf("GitHub API: HTTP %d", resp.StatusCode)
+	}
+	data, readErr := io.ReadAll(resp.Body)
+	if readErr != nil {
+		return "", "", 0, readErr
+	}
+	var info struct {
+		Archived        bool   `json:"archived"`
+		Description     string `json:"description"`
+		StargazersCount int    `json:"stargazers_count"`
+	}
+	if unmarshalErr := json.Unmarshal(data, &info); unmarshalErr != nil {
+		return "", "", 0, unmarshalErr
+	}
+	if info.Archived {
+		return "archived", info.Description, info.StargazersCount, nil
+	}
+	return "active", info.Description, info.StargazersCount, nil
+}
+
+func fetchLanguages(repo string) (map[string]int, error) {
+	url := "https://api.github.com/repos/" + repo + "/languages"
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	req.Header.Set("Accept", "application/vnd.github.v3+json")
 	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
@@ -160,26 +218,21 @@ func fetchRepoInfo(repo string) (string, error) {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("GitHub API: HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("GitHub API: HTTP %d", resp.StatusCode)
 	}
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	var info struct {
-		Archived bool `json:"archived"`
+	var langs map[string]int
+	if err := json.Unmarshal(data, &langs); err != nil {
+		return nil, err
 	}
-	if err := json.Unmarshal(data, &info); err != nil {
-		return "", err
-	}
-	if info.Archived {
-		return "archived", nil
-	}
-	return "active", nil
+	return langs, nil
 }
 
 func fetchRelease(repo string) (ReleaseInfo, error) {
@@ -231,6 +284,65 @@ func fetchRelease(repo string) (ReleaseInfo, error) {
 		HtmlUrl:     release.HtmlUrl,
 		PublishedAt: release.PublishedAt,
 	}, nil
+}
+
+// GetRepoCard returns repository metadata for display. Reads from cache when
+// fresh and languages are populated; otherwise fetches from GitHub API.
+func GetRepoCard(githubField string) RepoCard {
+	if githubField == "" {
+		return RepoCard{}
+	}
+	repo := extractRepo(githubField)
+	if repo == "" {
+		return RepoCard{}
+	}
+
+	cache := LoadCache()
+	entry, cached := cache[repo]
+
+	if cached && time.Since(entry.CheckedAt) < cacheTTL && entry.Languages != nil {
+		return RepoCard{
+			About:       entry.About,
+			Stars:       entry.Stars,
+			Languages:   entry.Languages,
+			Latest:      entry.Latest,
+			PublishedAt: entry.PublishedAt,
+			HtmlUrl:     entry.HtmlUrl,
+			Body:        entry.Body,
+			RepoStatus:  entry.RepoStatus,
+		}
+	}
+
+	repoStatus, about, stars, _ := fetchRepoInfo(repo)
+	langs, _ := fetchLanguages(repo)
+
+	newEntry := CacheEntry{
+		Latest:      entry.Latest,
+		Body:        entry.Body,
+		HtmlUrl:     entry.HtmlUrl,
+		PublishedAt: entry.PublishedAt,
+		CheckedAt:   time.Now(),
+		RepoStatus:  repoStatus,
+		About:       about,
+		Stars:       stars,
+		Languages:   langs,
+	}
+	if repoStatus == "" && cached {
+		newEntry.RepoStatus = entry.RepoStatus
+	}
+	cache[repo] = newEntry
+	SaveCache(cache)
+
+	return RepoCard{
+		About:       about,
+		Stars:       stars,
+		Languages:   langs,
+		Latest:      newEntry.Latest,
+		PublishedAt: newEntry.PublishedAt,
+		HtmlUrl:     newEntry.HtmlUrl,
+		Body:        newEntry.Body,
+		RepoStatus:  newEntry.RepoStatus,
+	}
 }
 
 func extractRepo(githubField string) string {

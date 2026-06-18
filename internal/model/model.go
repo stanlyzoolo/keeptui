@@ -58,10 +58,17 @@ type changelogMsg struct {
 	err         error
 }
 
+type repoCardMsg struct {
+	toolName string
+	card     version.RepoCard
+	err      error
+}
+
 type Model struct {
 	tools               []loader.Tool
 	versions            map[string]VersionInfo
 	repoStatus          map[string]string
+	repoCards           map[string]version.RepoCard
 	checkingVersionTool string
 	selected            int
 	focus               int
@@ -114,6 +121,7 @@ func New(meta []loader.ToolMeta, opts Options) Model {
 		tools:      loader.ToolsFromMeta(meta),
 		versions:   make(map[string]VersionInfo),
 		repoStatus: make(map[string]string),
+		repoCards:  make(map[string]version.RepoCard),
 		search:     ti,
 		meta:       meta,
 		noteInput:  noteInput,
@@ -140,9 +148,9 @@ func New(meta []loader.ToolMeta, opts Options) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	cmds := make([]tea.Cmd, len(m.tools))
-	for i, t := range m.tools {
-		cmds[i] = func() tea.Msg {
+	cmds := make([]tea.Cmd, 0, len(m.tools)*2)
+	for _, t := range m.tools {
+		cmds = append(cmds, func() tea.Msg {
 			installed := version.InstalledVersion(t)
 			latest := version.GetLatest(t.GitHub)
 			repoStatus := version.GetCachedRepoStatus(t.GitHub)
@@ -152,6 +160,9 @@ func (m Model) Init() tea.Cmd {
 				latest:     latest,
 				repoStatus: repoStatus,
 			}
+		})
+		if t.GitHub != "" {
+			cmds = append(cmds, fetchRepoCardCmd(t))
 		}
 	}
 	if m.searching {
@@ -204,6 +215,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.changelogHtmlUrl = msg.htmlUrl
 			m.changelogViewport.SetContent(m.renderChangelogContent(msg))
 			m.changelogViewport.GotoTop()
+		}
+		return m, nil
+
+	case repoCardMsg:
+		if msg.err == nil {
+			m.repoCards[msg.toolName] = msg.card
+			m.viewport.SetContent(m.renderContent())
 		}
 		return m, nil
 
@@ -987,6 +1005,67 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// formatStars formats a star count with K suffix for thousands.
+func formatStars(n int) string {
+	if n >= 1000 {
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
+	}
+	return fmt.Sprintf("%d", n)
+}
+
+// languagePercent holds a language name and its percentage share.
+type languagePercent struct {
+	Name string
+	Pct  float64
+}
+
+// languagePercents converts raw byte counts to sorted percentage slice (top 5).
+func languagePercents(langs map[string]int) []languagePercent {
+	if len(langs) == 0 {
+		return nil
+	}
+	total := 0
+	for _, v := range langs {
+		total += v
+	}
+	if total == 0 {
+		return nil
+	}
+	out := make([]languagePercent, 0, len(langs))
+	for name, bytes := range langs {
+		out = append(out, languagePercent{Name: name, Pct: float64(bytes) / float64(total) * 100})
+	}
+	// Sort descending by percentage
+	for i := 0; i < len(out)-1; i++ {
+		for j := i + 1; j < len(out); j++ {
+			if out[j].Pct > out[i].Pct {
+				out[i], out[j] = out[j], out[i]
+			}
+		}
+	}
+	if len(out) > 5 {
+		out = out[:5]
+	}
+	return out
+}
+
+// renderLangBar renders a horizontal language bar with percentages.
+func renderLangBar(langs map[string]int, width int) string {
+	percents := languagePercents(langs)
+	if len(percents) == 0 {
+		return ""
+	}
+	var parts []string
+	for _, lp := range percents {
+		parts = append(parts, fmt.Sprintf("%s %.0f%%", lp.Name, lp.Pct))
+	}
+	line := strings.Join(parts, "  ")
+	if len(line) > width && width > 3 {
+		line = line[:width-3] + "..."
+	}
+	return ui.MetaNoteStyle.Render(line)
+}
+
 func (m Model) updateHeaderFocus(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "q", "ctrl+c":
@@ -1044,6 +1123,13 @@ func fetchVersionCmd(t loader.Tool) tea.Cmd {
 			repoStatus: repoStatus,
 			err:        err,
 		}
+	}
+}
+
+func fetchRepoCardCmd(t loader.Tool) tea.Cmd {
+	return func() tea.Msg {
+		card := version.GetRepoCard(t.GitHub)
+		return repoCardMsg{toolName: t.Name, card: card}
 	}
 }
 

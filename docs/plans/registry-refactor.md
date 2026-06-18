@@ -49,14 +49,14 @@
 
 ### Task 3: Расширение GitHub API
 
-- [ ] Добавить в `version.CacheEntry` поля: `About string`, `Stars int`, `Languages map[string]int`
-- [ ] Расширить `fetchRepoInfo()`: парсить `description` и `stargazers_count` из `/repos/{owner}/{repo}`
-- [ ] Добавить `fetchLanguages()`: запрос к `/repos/{owner}/{repo}/languages`, кешировать результат
-- [ ] Создать тип `version.RepoCard` с полями: `About`, `Stars`, `Languages`, `Latest`, `PublishedAt`, `HtmlUrl`, `Body`, `RepoStatus`
-- [ ] Создать `version.GetRepoCard(githubField string) RepoCard` — читает из кеша или запускает fetch
-- [ ] Добавить в `Model` поле `repoCards map[string]version.RepoCard`
-- [ ] Добавить `repoCardMsg` и `fetchRepoCardCmd()` в `model.go`; запускать в `Init()` для каждого инструмента с GitHub
-- [ ] Добавить вспомогательные функции рендеринга: `formatStars()`, `languagePercents()`, `renderLangBar()`
+- [x] Добавить в `version.CacheEntry` поля: `About string`, `Stars int`, `Languages map[string]int`
+- [x] Расширить `fetchRepoInfo()`: парсить `description` и `stargazers_count` из `/repos/{owner}/{repo}`
+- [x] Добавить `fetchLanguages()`: запрос к `/repos/{owner}/{repo}/languages`, кешировать результат
+- [x] Создать тип `version.RepoCard` с полями: `About`, `Stars`, `Languages`, `Latest`, `PublishedAt`, `HtmlUrl`, `Body`, `RepoStatus`
+- [x] Создать `version.GetRepoCard(githubField string) RepoCard` — читает из кеша или запускает fetch
+- [x] Добавить в `Model` поле `repoCards map[string]version.RepoCard`
+- [x] Добавить `repoCardMsg` и `fetchRepoCardCmd()` в `model.go`; запускать в `Init()` для каждого инструмента с GitHub
+- [x] Добавить вспомогательные функции рендеринга: `formatStars()`, `languagePercents()`, `renderLangBar()`
 
 ### Task 4: Переделка левой панели
 

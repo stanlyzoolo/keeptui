@@ -116,16 +116,14 @@ func parseListFlags(args []string) cmd.ListFlags {
 }
 
 func runTUI(opts tuiOptions) {
-	tools, err := loader.Load()
+	meta, err := loader.LoadMeta()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error loading tools: %v\n", err)
 		os.Exit(1)
 	}
 
-	meta, _ := loader.LoadMeta()
-
 	p := tea.NewProgram(
-		model.New(tools, meta, model.Options{
+		model.New(meta, model.Options{
 			InitialTool:   opts.initialTool,
 			InitialSearch: opts.initialSearch,
 		}),

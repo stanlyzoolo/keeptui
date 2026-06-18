@@ -39,13 +39,13 @@
 
 ### Task 2: Новая модель данных Registry
 
-- [ ] Добавить поле `GitHub string` в `loader.ToolMeta` (`meta.go`)
-- [ ] Переписать `loader.Load()` — строить `[]Tool` из `meta.yaml` вместо embedded YAML
-- [ ] Обновить `internal/cmd/track.go`: добавить флаг `--github`, сохранять в `ToolMeta.GitHub`
-- [ ] Обновить `helpText` в `main.go`: `keys track <tool> [--github <repo>] [--status ...] [--tags ...] [--note "..."]`
-- [ ] Обновить `main.go`: убрать отдельный `loader.Load()`, передавать только `meta` в модель
-- [ ] Убедиться, что `keys track bat --github github.com/sharkdp/bat` сохраняется корректно
-- [ ] Убедиться, что `keys list` отображает инструменты из `meta.yaml`
+- [x] Добавить поле `GitHub string` в `loader.ToolMeta` (`meta.go`)
+- [x] Переписать `loader.Load()` — строить `[]Tool` из `meta.yaml` вместо embedded YAML
+- [x] Обновить `internal/cmd/track.go`: добавить флаг `--github`, сохранять в `ToolMeta.GitHub`
+- [x] Обновить `helpText` в `main.go`: `keys track <tool> [--github <repo>] [--status ...] [--tags ...] [--note "..."]`
+- [x] Обновить `main.go`: убрать отдельный `loader.Load()`, передавать только `meta` в модель
+- [x] Убедиться, что `keys track bat --github github.com/sharkdp/bat` сохраняется корректно
+- [x] Убедиться, что `keys list` отображает инструменты из `meta.yaml`
 
 ### Task 3: Расширение GitHub API
 

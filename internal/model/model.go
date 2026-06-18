@@ -97,7 +97,7 @@ type Options struct {
 	InitialSearch string
 }
 
-func New(tools []loader.Tool, meta []loader.ToolMeta, opts Options) Model {
+func New(meta []loader.ToolMeta, opts Options) Model {
 	ti := textinput.New()
 	ti.Placeholder = "search..."
 	ti.CharLimit = 64
@@ -111,7 +111,7 @@ func New(tools []loader.Tool, meta []loader.ToolMeta, opts Options) Model {
 	tagsInput.CharLimit = 128
 
 	m := Model{
-		tools:      tools,
+		tools:      loader.ToolsFromMeta(meta),
 		versions:   make(map[string]VersionInfo),
 		repoStatus: make(map[string]string),
 		search:     ti,
@@ -121,7 +121,7 @@ func New(tools []loader.Tool, meta []loader.ToolMeta, opts Options) Model {
 	}
 
 	if opts.InitialTool != "" {
-		for i, t := range tools {
+		for i, t := range m.tools {
 			if strings.EqualFold(t.Name, opts.InitialTool) {
 				m.selected = i
 				m.focus = focusRight

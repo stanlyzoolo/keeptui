@@ -7,8 +7,10 @@ import (
 	"os/exec"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -101,7 +103,7 @@ type Model struct {
 	metaSelected int
 
 	helpMode      int
-	helpLoading   bool
+	helpLoadingFor string
 	helpCache     map[string][2]string
 	helpSearching bool
 	helpSearch    textinput.Model
@@ -246,7 +248,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case helpOutputMsg:
-		m.helpLoading = false
+		m.helpLoadingFor = ""
 		cached := m.helpCache[msg.toolName]
 		if msg.err == nil && msg.output != "" {
 			cached[msg.mode] = msg.output
@@ -382,8 +384,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// auto-fetch --help for newly selected tool
 					if mt, ok := m.selectedMeta(); ok {
 						cached := m.helpCache[mt.Name]
-						if cached[m.helpMode] == "" && !m.helpLoading {
-							m.helpLoading = true
+						if cached[m.helpMode] == "" {
+							m.helpLoadingFor = mt.Name
 							m.helpViewport.SetContent(m.renderHelpContent())
 							return m, fetchHelpCmd(mt.Name, m.helpMode)
 						}
@@ -403,8 +405,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// auto-fetch --help for newly selected tool
 					if mt, ok := m.selectedMeta(); ok {
 						cached := m.helpCache[mt.Name]
-						if cached[m.helpMode] == "" && !m.helpLoading {
-							m.helpLoading = true
+						if cached[m.helpMode] == "" {
+							m.helpLoadingFor = mt.Name
 							m.helpViewport.SetContent(m.renderHelpContent())
 							return m, fetchHelpCmd(mt.Name, m.helpMode)
 						}
@@ -435,8 +437,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.helpMode = helpModeHelp
 				if mt, ok := m.selectedMeta(); ok {
 					cached := m.helpCache[mt.Name]
-					if cached[helpModeHelp] == "" && !m.helpLoading {
-						m.helpLoading = true
+					if cached[helpModeHelp] == "" {
+						m.helpLoadingFor = mt.Name
 						m.helpViewport.SetContent(m.renderHelpContent())
 						return m, fetchHelpCmd(mt.Name, helpModeHelp)
 					}
@@ -450,8 +452,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.helpMode = helpModeMan
 				if mt, ok := m.selectedMeta(); ok {
 					cached := m.helpCache[mt.Name]
-					if cached[helpModeMan] == "" && !m.helpLoading {
-						m.helpLoading = true
+					if cached[helpModeMan] == "" {
+						m.helpLoadingFor = mt.Name
 						m.helpViewport.SetContent(m.renderHelpContent())
 						return m, fetchHelpCmd(mt.Name, helpModeMan)
 					}
@@ -874,6 +876,7 @@ func (m Model) renderCard() string {
 	}
 
 	cardW, _ := m.calcPanelWidths()
+	inner := max(cardW-2, 1)
 	divW := max(cardW-4, 1)
 	divider := "\n" + lipgloss.NewStyle().Foreground(ui.ColorBorder).Render(strings.Repeat("─", divW)) + "\n"
 
@@ -881,12 +884,10 @@ func (m Model) renderCard() string {
 
 	// About block
 	if card, ok := m.repoCards[t.Name]; ok && card.About != "" {
-		sb.WriteString(ui.DescStyle.Render(card.About) + "\n")
-	} else if t.Description != "" {
-		sb.WriteString(ui.DescStyle.Render(t.Description) + "\n")
+		sb.WriteString(ui.DescStyle.Render(wrapText(card.About, inner)) + "\n")
 	}
 	if t.GitHub != "" {
-		sb.WriteString(ui.GithubStyle.Render("↗ https://"+t.GitHub) + "\n")
+		sb.WriteString(ui.GithubStyle.Render(wrapText("↗ https://"+t.GitHub, inner)) + "\n")
 	}
 
 	sb.WriteString(divider)
@@ -1063,13 +1064,7 @@ func languagePercents(langs map[string]int) []languagePercent {
 	for name, bytes := range langs {
 		out = append(out, languagePercent{Name: name, Pct: float64(bytes) / float64(total) * 100})
 	}
-	for i := 0; i < len(out)-1; i++ {
-		for j := i + 1; j < len(out); j++ {
-			if out[j].Pct > out[i].Pct {
-				out[i], out[j] = out[j], out[i]
-			}
-		}
-	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Pct > out[j].Pct })
 	if len(out) > 5 {
 		out = out[:5]
 	}
@@ -1176,14 +1171,14 @@ func wrapText(s string, width int) string {
 		if i > 0 {
 			result.WriteByte('\n')
 		}
-		if len(line) <= width {
+		if utf8.RuneCountInString(line) <= width {
 			result.WriteString(line)
 			continue
 		}
 		words := strings.Fields(line)
 		col := 0
 		for j, word := range words {
-			wl := len(word)
+			wl := utf8.RuneCountInString(word)
 			if j == 0 {
 				result.WriteString(word)
 				col = wl
@@ -1321,9 +1316,11 @@ func (m Model) renderHelpContent() string {
 	if !ok {
 		return ui.MetaNoteStyle.Render("No tool selected")
 	}
-	if m.helpLoading {
+
+	if m.helpLoadingFor != "" {
 		return ui.MetaNoteStyle.Render("Loading...")
 	}
+
 	cached, has := m.helpCache[mt.Name]
 	if !has || cached[m.helpMode] == "" {
 		if m.helpMode == helpModeHelp {

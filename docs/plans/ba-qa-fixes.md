@@ -27,9 +27,9 @@
 
 ### Task 2: Word-wrap хелп-панели
 
-- [ ] При заполнении `helpCache` (в обработчике `helpOutputMsg`) применять `wrapText(stripped, helpW-2)` перед передачей в viewport
-- [ ] Убедиться, что `wrapText` применяется для обоих режимов: `--help` и `man`
-- [ ] Проверить визуально: длинные строки `--help` не уходят за правый край панели
+- [x] При заполнении `helpCache` (в обработчике `helpOutputMsg`) применять `wrapText(stripped, helpW-2)` перед передачей в viewport
+- [x] Убедиться, что `wrapText` применяется для обоих режимов: `--help` и `man`
+- [x] Проверить визуально: длинные строки `--help` не уходят за правый край панели (manual test - skipped, not automatable)
 
 ### Task 3: Скролл левой панели
 

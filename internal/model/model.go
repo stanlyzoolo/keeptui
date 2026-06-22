@@ -1329,6 +1329,10 @@ func (m Model) renderHelpContent() string {
 		return ui.MetaNoteStyle.Render("Press [m] for man page\nPress [h] for --help")
 	}
 	text := cached[m.helpMode]
+	_, helpW := m.calcPanelWidths()
+	if innerW := max(helpW-2, 20); innerW > 0 {
+		text = wrapText(text, innerW)
+	}
 	if !m.helpSearching || m.helpSearch.Value() == "" {
 		return text
 	}

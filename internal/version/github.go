@@ -8,10 +8,19 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
 const cacheTTL = 24 * time.Hour
+
+var cacheMu sync.Mutex
+
+// testCacheDir overrides the cache directory in tests.
+var testCacheDir string
+
+// testAPIBase overrides the GitHub API base URL in tests.
+var testAPIBase string
 
 type CacheEntry struct {
 	Latest      string         `json:"latest"`
@@ -106,6 +115,8 @@ func GetCachedRepoStatus(githubField string) string {
 }
 
 // FetchAndCache force-fetches the latest release, bypassing the cache TTL.
+// Network requests happen without holding the mutex; only the read-modify-write
+// of cache.json is serialized so concurrent goroutines don't overwrite each other.
 func FetchAndCache(githubField string) (string, error) {
 	repo := extractRepo(githubField)
 	if repo == "" {
@@ -116,6 +127,10 @@ func FetchAndCache(githubField string) (string, error) {
 		return "", err
 	}
 	repoStatus, about, stars, _ := fetchRepoInfo(repo)
+
+	cacheMu.Lock()
+	defer cacheMu.Unlock()
+
 	cache := LoadCache()
 	existing := cache[repo]
 	newEntry := CacheEntry{
@@ -163,13 +178,31 @@ func GetChangelog(githubField string) (ReleaseInfo, error) {
 		return ReleaseInfo{}, err
 	}
 
-	cache[repo] = CacheEntry{Latest: info.Tag, Body: info.Body, HtmlUrl: info.HtmlUrl, PublishedAt: info.PublishedAt, CheckedAt: time.Now()}
+	existing := cache[repo]
+	cache[repo] = CacheEntry{
+		Latest:      info.Tag,
+		Body:        info.Body,
+		HtmlUrl:     info.HtmlUrl,
+		PublishedAt: info.PublishedAt,
+		CheckedAt:   time.Now(),
+		RepoStatus:  existing.RepoStatus,
+		About:       existing.About,
+		Stars:       existing.Stars,
+		Languages:   existing.Languages,
+	}
 	SaveCache(cache)
 	return info, nil
 }
 
+func apiBase() string {
+	if testAPIBase != "" {
+		return testAPIBase
+	}
+	return "https://api.github.com"
+}
+
 func fetchRepoInfo(repo string) (status, about string, stars int, err error) {
-	url := "https://api.github.com/repos/" + repo
+	url := apiBase() + "/repos/" + repo
 	req, reqErr := http.NewRequest("GET", url, nil)
 	if reqErr != nil {
 		return "", "", 0, reqErr
@@ -206,7 +239,7 @@ func fetchRepoInfo(repo string) (status, about string, stars int, err error) {
 }
 
 func fetchLanguages(repo string) (map[string]int, error) {
-	url := "https://api.github.com/repos/" + repo + "/languages"
+	url := apiBase() + "/repos/" + repo + "/languages"
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -236,7 +269,7 @@ func fetchLanguages(repo string) (map[string]int, error) {
 }
 
 func fetchRelease(repo string) (ReleaseInfo, error) {
-	url := "https://api.github.com/repos/" + repo + "/releases/latest"
+	url := apiBase() + "/repos/" + repo + "/releases/latest"
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -357,6 +390,9 @@ func extractRepo(githubField string) string {
 }
 
 func cacheFilePath() (string, error) {
+	if testCacheDir != "" {
+		return filepath.Join(testCacheDir, "cache.json"), nil
+	}
 	base, err := os.UserConfigDir()
 	if err != nil {
 		return "", err

@@ -74,7 +74,7 @@
 
 ### Task 7: Mutex на cache.json
 
-- [ ] Добавить `var cacheMu sync.Mutex` в `internal/version/github.go`
-- [ ] Обернуть `LoadCache` + мутацию + `SaveCache` в `cacheMu.Lock()` / `cacheMu.Unlock()` внутри `FetchAndCache()`
-- [ ] Убедиться, что `Init()` в `model.go` по-прежнему запускает горутины параллельно — только запись сериализована
-- [ ] Написать тест `TestConcurrentFetch` (3+ инструмента, параллельный вызов `FetchAndCache`): убедиться, что итоговый кеш содержит записи для всех инструментов
+- [x] Добавить `var cacheMu sync.Mutex` в `internal/version/github.go`
+- [x] Обернуть `LoadCache` + мутацию + `SaveCache` в `cacheMu.Lock()` / `cacheMu.Unlock()` внутри `FetchAndCache()`
+- [x] Убедиться, что `Init()` в `model.go` по-прежнему запускает горутины параллельно — только запись сериализована
+- [x] Написать тест `TestConcurrentFetch` (3+ инструмента, параллельный вызов `FetchAndCache`): убедиться, что итоговый кеш содержит записи для всех инструментов

@@ -188,12 +188,15 @@ func (m Model) Init() tea.Cmd {
 	if m.searching {
 		cmds = append(cmds, textinput.Blink)
 	}
-	// Auto-fetch --help for initial selected tool
+	// Auto-fetch --help and changelog for initial selected tool
 	if mt, ok := m.selectedMeta(); ok {
 		cached := m.helpCache[mt.Name]
 		if cached[helpModeHelp] == "" {
 			cmds = append(cmds, fetchHelpCmd(mt.Name, helpModeHelp))
 		}
+	}
+	if t, ok := m.selectedTool(); ok && t.GitHub != "" {
+		cmds = append(cmds, fetchChangelogCmd(t.GitHub, t.Name))
 	}
 	return tea.Batch(cmds...)
 }
@@ -396,17 +399,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.cardViewport.Height = m.calcVpHeight()
 					m.cardViewport.GotoTop()
 					m.cardViewport.SetContent(m.renderCard())
-					// auto-fetch --help for newly selected tool
-					if mt, ok := m.selectedMeta(); ok {
-						cached := m.helpCache[mt.Name]
-						if cached[m.helpMode] == "" {
-							m.helpLoadingFor = mt.Name
-							m.helpViewport.SetContent(m.renderHelpContent())
-							return m, fetchHelpCmd(mt.Name, m.helpMode)
-						}
-						m.helpViewport.SetContent(m.renderHelpContent())
-						m.helpViewport.GotoTop()
-					}
+					return m, m.autoFetchCmdsForSelected()
 				}
 			}
 
@@ -418,17 +411,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.cardViewport.Height = m.calcVpHeight()
 					m.cardViewport.GotoTop()
 					m.cardViewport.SetContent(m.renderCard())
-					// auto-fetch --help for newly selected tool
-					if mt, ok := m.selectedMeta(); ok {
-						cached := m.helpCache[mt.Name]
-						if cached[m.helpMode] == "" {
-							m.helpLoadingFor = mt.Name
-							m.helpViewport.SetContent(m.renderHelpContent())
-							return m, fetchHelpCmd(mt.Name, m.helpMode)
-						}
-						m.helpViewport.SetContent(m.renderHelpContent())
-						m.helpViewport.GotoTop()
-					}
+					return m, m.autoFetchCmdsForSelected()
 				}
 			}
 
@@ -439,16 +422,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.setLeftContent()
 				m.cardViewport.GotoTop()
 				m.cardViewport.SetContent(m.renderCard())
-				if mt, ok := m.selectedMeta(); ok {
-					cached := m.helpCache[mt.Name]
-					if cached[m.helpMode] == "" {
-						m.helpLoadingFor = mt.Name
-						m.helpViewport.SetContent(m.renderHelpContent())
-						return m, fetchHelpCmd(mt.Name, m.helpMode)
-					}
-					m.helpViewport.SetContent(m.renderHelpContent())
-					m.helpViewport.GotoTop()
-				}
+				return m, m.autoFetchCmdsForSelected()
 			}
 
 		case "pgdown", "ctrl+f":
@@ -459,16 +433,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.setLeftContent()
 				m.cardViewport.GotoTop()
 				m.cardViewport.SetContent(m.renderCard())
-				if mt, ok := m.selectedMeta(); ok {
-					cached := m.helpCache[mt.Name]
-					if cached[m.helpMode] == "" {
-						m.helpLoadingFor = mt.Name
-						m.helpViewport.SetContent(m.renderHelpContent())
-						return m, fetchHelpCmd(mt.Name, m.helpMode)
-					}
-					m.helpViewport.SetContent(m.renderHelpContent())
-					m.helpViewport.GotoTop()
-				}
+				return m, m.autoFetchCmdsForSelected()
 			}
 
 		case "g":
@@ -573,15 +538,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "o":
 			if t, ok := m.selectedTool(); ok && t.GitHub != "" {
 				openBrowser("https://" + t.GitHub)
-			}
-
-		case "c":
-			if t, ok := m.selectedTool(); ok && t.GitHub != "" {
-				if _, already := m.changelogData[t.Name]; !already && m.changelogLoadingFor != t.Name {
-					m.changelogLoadingFor = t.Name
-					m.cardViewport.SetContent(m.renderCard())
-					return m, fetchChangelogCmd(t.GitHub, t.Name)
-				}
 			}
 
 		case "e":
@@ -777,7 +733,7 @@ func (m Model) renderHelp() string {
 		return style.Render(hints)
 	}
 	if m.focus == focusRight {
-		hints := keyHint("h") + " --help  " + keyHint("m") + " man  " + keyHint("/") + " search  " + keyHint("o") + " github  " + keyHint("c") + " changelog  " + keyHint("e") + " edit note  " + keyHint("t") + " edit tags  " + keyHint("←/esc") + " back  " + keyHint("q") + " quit"
+		hints := keyHint("h") + " --help  " + keyHint("m") + " man  " + keyHint("/") + " search  " + keyHint("o") + " github  " + keyHint("e") + " edit note  " + keyHint("t") + " edit tags  " + keyHint("←/esc") + " back  " + keyHint("q") + " quit"
 		return style.Render(hints)
 	}
 	filterHint := ""
@@ -1022,15 +978,18 @@ func (m Model) renderCard() string {
 		}
 	}
 
-	sb.WriteString(divider)
-
-	// Changelog block
+	// Changelog block (divider only shown when there's content)
+	var changelogContent string
 	if m.changelogLoadingFor == t.Name {
-		sb.WriteString(ui.DescStyle.Render("Loading changelog...") + "\n")
+		changelogContent = ui.DescStyle.Render("Loading changelog...") + "\n"
 	} else if data, ok := m.changelogData[t.Name]; ok {
-		sb.WriteString(m.renderChangelogBlock(data))
+		changelogContent = m.renderChangelogBlock(data)
 	} else if t.GitHub != "" {
-		sb.WriteString(ui.MetaNoteStyle.Render("Press [c] to load changelog") + "\n")
+		changelogContent = ui.DescStyle.Render("Loading changelog...") + "\n"
+	}
+	if changelogContent != "" {
+		sb.WriteString(divider)
+		sb.WriteString(changelogContent)
 	}
 
 	return sb.String()
@@ -1199,14 +1158,6 @@ func (m Model) updateHeaderFocus(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			openBrowser("https://" + t.GitHub)
 		}
 
-	case "c":
-		if t, ok := m.selectedTool(); ok && t.GitHub != "" {
-			if _, already := m.changelogData[t.Name]; !already && m.changelogLoadingFor != t.Name {
-				m.changelogLoadingFor = t.Name
-				m.cardViewport.SetContent(m.renderCard())
-				return m, fetchChangelogCmd(t.GitHub, t.Name)
-			}
-		}
 	}
 	return m, nil
 }
@@ -1243,6 +1194,32 @@ func fetchChangelogCmd(githubField, toolName string) tea.Cmd {
 			err:         err,
 		}
 	}
+}
+
+// autoFetchCmdsForSelected returns a batched Cmd that auto-fetches changelog
+// and --help for the currently selected tool if not yet cached.
+// Uses a pointer receiver so it can update loading state fields on m.
+func (m *Model) autoFetchCmdsForSelected() tea.Cmd {
+	var cmds []tea.Cmd
+	if t, ok := m.selectedTool(); ok && t.GitHub != "" {
+		if _, already := m.changelogData[t.Name]; !already && m.changelogLoadingFor != t.Name {
+			m.changelogLoadingFor = t.Name
+			m.cardViewport.SetContent(m.renderCard())
+			cmds = append(cmds, fetchChangelogCmd(t.GitHub, t.Name))
+		}
+	}
+	if mt, ok := m.selectedMeta(); ok {
+		cached := m.helpCache[mt.Name]
+		if cached[m.helpMode] == "" {
+			m.helpLoadingFor = mt.Name
+			m.helpViewport.SetContent(m.renderHelpContent())
+			cmds = append(cmds, fetchHelpCmd(mt.Name, m.helpMode))
+		} else {
+			m.helpViewport.SetContent(m.renderHelpContent())
+			m.helpViewport.GotoTop()
+		}
+	}
+	return tea.Batch(cmds...)
 }
 
 func wrapText(s string, width int) string {

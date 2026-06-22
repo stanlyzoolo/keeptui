@@ -84,6 +84,7 @@ type Model struct {
 	changelogLoadingFor string
 	checkingVersionTool string
 	focus               int
+	leftViewport        viewport.Model
 	cardViewport        viewport.Model
 	helpViewport        viewport.Model
 	search              textinput.Model
@@ -212,6 +213,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.repoStatus != "" {
 			m.repoStatus[msg.toolName] = msg.repoStatus
 		}
+		m.leftViewport.SetContent(m.renderLeftContent())
 		m.cardViewport.SetContent(m.renderCard())
 		return m, nil
 
@@ -229,6 +231,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.statusMsg = "Version check failed: " + msg.err.Error()
 		}
+		m.leftViewport.SetContent(m.renderLeftContent())
 		m.cardViewport.SetContent(m.renderCard())
 		return m, nil
 
@@ -268,17 +271,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		cardW, helpW := m.calcPanelWidths()
 		vpH := m.calcVpHeight()
+		leftVpH := max(max(m.height-7, 1)-2, 1)
 		if !m.ready {
+			m.leftViewport = viewport.New(leftWidth-2, leftVpH)
 			m.cardViewport = viewport.New(cardW, vpH)
 			m.helpViewport = viewport.New(helpW, vpH)
 			m.helpViewport.SetContent(m.renderHelpContent())
 			m.ready = true
 		} else {
+			m.leftViewport.Width = leftWidth - 2
+			m.leftViewport.Height = leftVpH
 			m.cardViewport.Width = cardW
 			m.cardViewport.Height = vpH
 			m.helpViewport.Width = helpW
 			m.helpViewport.Height = vpH
 		}
+		m.leftViewport.SetContent(m.renderLeftContent())
+		m.syncLeftViewport()
 		m.cardViewport.SetContent(m.renderCard())
 		return m, nil
 
@@ -338,11 +347,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.search.SetValue("")
 				m.search.Blur()
 				m.metaSelected = 0
+				m.setLeftContent()
 				m.cardViewport.SetContent(m.renderCard())
 				return m, nil
 			default:
 				m.search, cmd = m.search.Update(msg)
 				m.metaSelected = 0
+				m.setLeftContent()
 				m.cardViewport.SetContent(m.renderCard())
 				m.cardViewport.GotoTop()
 				return m, cmd
@@ -356,6 +367,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			if m.focus == focusRight {
 				m.focus = focusLeft
+				m.setLeftContent()
 				m.cardViewport.SetContent(m.renderCard())
 			} else {
 				return m, tea.Quit
@@ -364,12 +376,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "right", "l":
 			if m.focus == focusLeft {
 				m.focus = focusHeader
+				m.setLeftContent()
 				m.cardViewport.SetContent(m.renderCard())
 			}
 
 		case "left":
 			if m.focus == focusRight {
 				m.focus = focusLeft
+				m.setLeftContent()
 				m.cardViewport.SetContent(m.renderCard())
 			}
 
@@ -378,6 +392,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				filtered := m.filteredMeta()
 				if m.metaSelected < len(filtered)-1 {
 					m.metaSelected++
+					m.setLeftContent()
 					m.cardViewport.Height = m.calcVpHeight()
 					m.cardViewport.GotoTop()
 					m.cardViewport.SetContent(m.renderCard())
@@ -399,6 +414,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focus == focusLeft {
 				if m.metaSelected > 0 {
 					m.metaSelected--
+					m.setLeftContent()
 					m.cardViewport.Height = m.calcVpHeight()
 					m.cardViewport.GotoTop()
 					m.cardViewport.SetContent(m.renderCard())
@@ -413,6 +429,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.helpViewport.SetContent(m.renderHelpContent())
 						m.helpViewport.GotoTop()
 					}
+				}
+			}
+
+		case "pgup", "ctrl+b":
+			if m.focus == focusLeft {
+				step := max(m.leftViewport.Height, 1)
+				m.metaSelected = max(m.metaSelected-step, 0)
+				m.setLeftContent()
+				m.cardViewport.GotoTop()
+				m.cardViewport.SetContent(m.renderCard())
+				if mt, ok := m.selectedMeta(); ok {
+					cached := m.helpCache[mt.Name]
+					if cached[m.helpMode] == "" {
+						m.helpLoadingFor = mt.Name
+						m.helpViewport.SetContent(m.renderHelpContent())
+						return m, fetchHelpCmd(mt.Name, m.helpMode)
+					}
+					m.helpViewport.SetContent(m.renderHelpContent())
+					m.helpViewport.GotoTop()
+				}
+			}
+
+		case "pgdown", "ctrl+f":
+			if m.focus == focusLeft {
+				filtered := m.filteredMeta()
+				step := max(m.leftViewport.Height, 1)
+				m.metaSelected = min(m.metaSelected+step, max(len(filtered)-1, 0))
+				m.setLeftContent()
+				m.cardViewport.GotoTop()
+				m.cardViewport.SetContent(m.renderCard())
+				if mt, ok := m.selectedMeta(); ok {
+					cached := m.helpCache[mt.Name]
+					if cached[m.helpMode] == "" {
+						m.helpLoadingFor = mt.Name
+						m.helpViewport.SetContent(m.renderHelpContent())
+						return m, fetchHelpCmd(mt.Name, m.helpMode)
+					}
+					m.helpViewport.SetContent(m.renderHelpContent())
+					m.helpViewport.GotoTop()
 				}
 			}
 
@@ -477,28 +532,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.metaFilter = ""
 				}
 				m.metaSelected = 0
+				m.setLeftContent()
 				m.cardViewport.SetContent(m.renderCard())
 			}
 
 		case "1":
 			m.metaFilter = loader.StatusActive
 			m.metaSelected = 0
+			m.setLeftContent()
 			m.cardViewport.SetContent(m.renderCard())
 		case "2":
 			m.metaFilter = loader.StatusTrying
 			m.metaSelected = 0
+			m.setLeftContent()
 			m.cardViewport.SetContent(m.renderCard())
 		case "3":
 			m.metaFilter = loader.StatusForgotten
 			m.metaSelected = 0
+			m.setLeftContent()
 			m.cardViewport.SetContent(m.renderCard())
 		case "4":
 			m.metaFilter = loader.StatusArchived
 			m.metaSelected = 0
+			m.setLeftContent()
 			m.cardViewport.SetContent(m.renderCard())
 		case "a":
 			m.metaFilter = ""
 			m.metaSelected = 0
+			m.setLeftContent()
 			m.cardViewport.SetContent(m.renderCard())
 
 		case "v":
@@ -754,9 +815,8 @@ func (m Model) calcPanelWidths() (cardW, helpW int) {
 	return
 }
 
-func (m Model) renderLeft() string {
+func (m Model) renderLeftContent() string {
 	var sb strings.Builder
-
 	filtered := m.filteredMeta()
 	maxName := leftWidth - 5
 
@@ -799,8 +859,29 @@ func (m Model) renderLeft() string {
 	if m.metaFilter != "" {
 		footer += " [" + string(m.metaFilter) + "]"
 	}
-	content := sb.String() + "\n" + ui.MetaNoteStyle.Render(footer)
+	return sb.String() + "\n" + ui.MetaNoteStyle.Render(footer)
+}
 
+// syncLeftViewport adjusts YOffset so that metaSelected is visible.
+func (m *Model) syncLeftViewport() {
+	vpH := m.leftViewport.Height
+	if vpH <= 0 {
+		return
+	}
+	if m.metaSelected < m.leftViewport.YOffset {
+		m.leftViewport.SetYOffset(m.metaSelected)
+	} else if m.metaSelected >= m.leftViewport.YOffset+vpH {
+		m.leftViewport.SetYOffset(m.metaSelected - vpH + 1)
+	}
+}
+
+// setLeftContent refreshes viewport content and syncs scroll position.
+func (m *Model) setLeftContent() {
+	m.leftViewport.SetContent(m.renderLeftContent())
+	m.syncLeftViewport()
+}
+
+func (m Model) renderLeft() string {
 	panelStyle := ui.PanelBorder
 	if m.focus == focusLeft {
 		panelStyle = ui.PanelBorderFocused
@@ -809,7 +890,7 @@ func (m Model) renderLeft() string {
 	return panelStyle.
 		Width(leftWidth).
 		Height(max(m.height-7, 1)).
-		Render(content)
+		Render(m.leftViewport.View())
 }
 
 func (m Model) renderRight() string {
@@ -1024,6 +1105,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if toolIdx >= 0 && toolIdx < len(filtered) {
 			if m.metaSelected != toolIdx {
 				m.metaSelected = toolIdx
+				m.setLeftContent()
 				m.cardViewport.Height = m.calcVpHeight()
 				m.cardViewport.GotoTop()
 				m.cardViewport.SetContent(m.renderCard())
@@ -1095,11 +1177,13 @@ func (m Model) updateHeaderFocus(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "j", "down":
 		m.focus = focusRight
+		m.setLeftContent()
 		m.cardViewport.GotoTop()
 		m.cardViewport.SetContent(m.renderCard())
 
 	case "left", "esc":
 		m.focus = focusLeft
+		m.setLeftContent()
 		m.cardViewport.SetContent(m.renderCard())
 
 	case "v":

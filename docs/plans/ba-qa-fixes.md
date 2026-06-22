@@ -33,12 +33,12 @@
 
 ### Task 3: Скролл левой панели
 
-- [ ] Заменить `strings.Builder` в `renderLeft()` на `viewport.Model` (`leftViewport`)
-- [ ] Добавить `leftViewport viewport.Model` в `Model`; инициализировать в `New()` с правильными `Width`/`Height`
-- [ ] Пересчитывать высоту `leftViewport` в `WindowSizeMsg` (аналогично `cardViewport`/`helpViewport`)
-- [ ] Передавать `KeyDown`/`KeyUp`/`KeyPgDown`/`KeyPgUp` в `leftViewport`, когда фокус на левой панели
-- [ ] Синхронизировать видимый диапазон с `metaSelected`: при выборе инструмента за пределами viewport сдвигать `YOffset` так, чтобы выбранный элемент был виден
-- [ ] Убедиться, что рамка вокруг левой панели не обрезает контент
+- [x] Заменить `strings.Builder` в `renderLeft()` на `viewport.Model` (`leftViewport`)
+- [x] Добавить `leftViewport viewport.Model` в `Model`; инициализировать в `New()` с правильными `Width`/`Height`
+- [x] Пересчитывать высоту `leftViewport` в `WindowSizeMsg` (аналогично `cardViewport`/`helpViewport`)
+- [x] Передавать `KeyDown`/`KeyUp`/`KeyPgDown`/`KeyPgUp` в `leftViewport`, когда фокус на левой панели
+- [x] Синхронизировать видимый диапазон с `metaSelected`: при выборе инструмента за пределами viewport сдвигать `YOffset` так, чтобы выбранный элемент был виден
+- [x] Убедиться, что рамка вокруг левой панели не обрезает контент (manual test - skipped, not automatable)
 
 ### Task 4: Автозагрузка Changelog
 

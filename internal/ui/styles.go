@@ -141,6 +141,16 @@ var (
 	TopTabInactiveStyle = lipgloss.NewStyle().
 				Foreground(ColorMuted)
 
+	HelpFlagStyle = lipgloss.NewStyle().
+			Foreground(ColorPrimary)
+
+	HelpSectionStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(ColorCategory)
+
+	HelpMetaStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#5588AA"))
+
 	MetaTagStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#5588AA"))
 

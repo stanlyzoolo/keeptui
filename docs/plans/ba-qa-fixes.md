@@ -50,14 +50,14 @@
 
 ### Task 5: Подсветка флагов и команд в `--help` выводе
 
-- [ ] Написать `colorizeHelp(s string) string`: применять Lip Gloss стили к строкам через regexp
+- [x] Написать `colorizeHelp(s string) string`: применять Lip Gloss стили к строкам через regexp
   - Флаги (`-f`, `--flag`) → один цвет
   - Заголовки секций (строка без ведущих пробелов, заканчивается `:`) → другой цвет
   - Метавары в `<angle>` и `[brackets]` → третий цвет
-- [ ] Добавить стили `HelpFlagStyle`, `HelpSectionStyle`, `HelpMetaStyle` в `internal/ui/styles.go`
-- [ ] Применять `colorizeHelp()` после `stripANSI()` и до `wrapText()` при заполнении `helpCache`
-- [ ] Убедиться, что поиск (`findMatches`, `highlightMatch`) работает по plain-text версии, а не по ANSI-строкам
-- [ ] Проверить визуально на `bat --help` и `yazi --help`
+- [x] Добавить стили `HelpFlagStyle`, `HelpSectionStyle`, `HelpMetaStyle` в `internal/ui/styles.go`
+- [x] Применять `colorizeHelp()` после `wrapText()` в `renderHelpContent()` (только вне режима поиска)
+- [x] Убедиться, что поиск (`findMatches`, `highlightMatch`) работает по plain-text версии, а не по ANSI-строкам
+- [x] Проверить визуально на `bat --help` и `yazi --help` (manual test - skipped, not automatable)
 
 ### Task 6: Удаление мёртвого кода
 

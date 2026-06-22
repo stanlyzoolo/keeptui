@@ -1302,6 +1302,34 @@ func stripANSI(s string) string {
 	return ansiRe.ReplaceAllString(s, "")
 }
 
+var (
+	helpFlagRe    = regexp.MustCompile(`(--?[a-zA-Z][a-zA-Z0-9\-_]*)`)
+	helpMetaAngle = regexp.MustCompile(`<[^>]+>`)
+	helpMetaBrack = regexp.MustCompile(`\[[^\]]+\]`)
+)
+
+func colorizeHelp(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimRight(line, " ")
+		if trimmed != "" && trimmed[0] != ' ' && trimmed[0] != '\t' && strings.HasSuffix(trimmed, ":") {
+			lines[i] = ui.HelpSectionStyle.Render(line)
+			continue
+		}
+		line = helpFlagRe.ReplaceAllStringFunc(line, func(m string) string {
+			return ui.HelpFlagStyle.Render(m)
+		})
+		line = helpMetaAngle.ReplaceAllStringFunc(line, func(m string) string {
+			return ui.HelpMetaStyle.Render(m)
+		})
+		line = helpMetaBrack.ReplaceAllStringFunc(line, func(m string) string {
+			return ui.HelpMetaStyle.Render(m)
+		})
+		lines[i] = line
+	}
+	return strings.Join(lines, "\n")
+}
+
 func fetchHelpCmd(name string, mode int) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -1395,7 +1423,7 @@ func (m Model) renderHelpContent() string {
 		text = wrapText(text, innerW)
 	}
 	if !m.helpSearching || m.helpSearch.Value() == "" {
-		return text
+		return colorizeHelp(text)
 	}
 	query := m.helpSearch.Value()
 	lines := strings.Split(text, "\n")

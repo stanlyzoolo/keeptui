@@ -5,10 +5,8 @@ import "github.com/charmbracelet/lipgloss"
 var (
 	ColorPrimary  = lipgloss.Color("#DA7756")
 	ColorMuted    = lipgloss.Color("#AAAAAA")
-	ColorBg       = lipgloss.Color("#0A0A0A")
 	ColorBorder   = lipgloss.Color("#555555")
 	ColorText     = lipgloss.Color("#E8E8E8")
-	ColorSelected = lipgloss.Color("#DA7756")
 	ColorCategory = lipgloss.Color("#E8A87C")
 	ColorKey      = lipgloss.Color("#C8A97E")
 
@@ -24,30 +22,10 @@ var (
 	SelectionBarStyle = lipgloss.NewStyle().
 				Foreground(ColorPrimary)
 
-	// SelectedBindingStyle is kept minimal — selection is indicated by ● only
-	SelectedBindingStyle = lipgloss.NewStyle()
-
-	BindingCountStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#666666"))
-
 	TitleStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(ColorPrimary).
 			PaddingLeft(1)
-
-	// ToolSelectedStyle has no special foreground — circle indicator does the work
-	ToolSelectedStyle = lipgloss.NewStyle()
-
-	ToolNormalStyle = lipgloss.NewStyle().
-			Foreground(ColorMuted)
-
-	CategoryStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(ColorCategory)
-
-	KeyStyle = lipgloss.NewStyle().
-			Foreground(ColorKey).
-			Width(22)
 
 	DescStyle = lipgloss.NewStyle().
 			Foreground(ColorText)
@@ -70,10 +48,6 @@ var (
 				Foreground(ColorKey).
 				Bold(true)
 
-	HeaderDescStyle = lipgloss.NewStyle().
-			Foreground(ColorMuted).
-			Italic(true)
-
 	GithubStyle = lipgloss.NewStyle().
 			Foreground(ColorMuted)
 
@@ -86,33 +60,6 @@ var (
 	UpdateAvailableStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#E5A040")).
 				Bold(true)
-
-	TabActiveStyle = lipgloss.NewStyle().
-			Foreground(ColorPrimary).
-			Bold(true)
-
-	TabInactiveStyle = lipgloss.NewStyle().
-				Foreground(ColorMuted)
-
-	PopupStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(ColorPrimary).
-			Padding(1, 2)
-
-	ChangelogPopupStyle = lipgloss.NewStyle().
-				Border(lipgloss.RoundedBorder()).
-				BorderForeground(ColorBorder).
-				Padding(1, 2)
-
-	CommandCmdStyle = lipgloss.NewStyle().
-				Foreground(ColorKey).
-				Bold(true)
-
-	CommandDescStyle = lipgloss.NewStyle().
-				Foreground(ColorText)
-
-	CommandCountStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#5588AA"))
 
 	// My Tools status colors
 	StatusColorActive    = lipgloss.Color("#6AAF6A")
@@ -133,13 +80,6 @@ var (
 
 	StatusStyleArchived = lipgloss.NewStyle().
 				Foreground(StatusColorArchived)
-
-	TopTabActiveStyle = lipgloss.NewStyle().
-				Foreground(ColorPrimary).
-				Bold(true)
-
-	TopTabInactiveStyle = lipgloss.NewStyle().
-				Foreground(ColorMuted)
 
 	HelpFlagStyle = lipgloss.NewStyle().
 			Foreground(ColorPrimary)

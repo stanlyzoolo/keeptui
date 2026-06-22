@@ -61,8 +61,8 @@
 
 ### Task 6: Удаление мёртвого кода
 
-- [ ] Удалить `internal/ui/overlay.go` (`Overlay()`, `PlaceOverlay()` — не вызываются после удаления popup)
-- [ ] Удалить из `internal/ui/styles.go` неиспользуемые переменные:
+- [x] Удалить `internal/ui/overlay.go` (`Overlay()`, `PlaceOverlay()` — не вызываются после удаления popup)
+- [x] Удалить из `internal/ui/styles.go` неиспользуемые переменные:
   `SelectedBindingStyle`, `BindingCountStyle`, `ToolSelectedStyle`, `ToolNormalStyle`,
   `CategoryStyle`, `KeyStyle`, `HeaderDescStyle`,
   `TabActiveStyle`, `TabInactiveStyle`,
@@ -70,7 +70,7 @@
   `CommandCmdStyle`, `CommandDescStyle`, `CommandCountStyle`,
   `TopTabActiveStyle`, `TopTabInactiveStyle`,
   `ColorBg`, `ColorSelected`
-- [ ] Убедиться, что `go build .` и `go vet ./...` проходят без ошибок после удаления
+- [x] Убедиться, что `go build .` и `go vet ./...` проходят без ошибок после удаления
 
 ### Task 7: Mutex на cache.json
 

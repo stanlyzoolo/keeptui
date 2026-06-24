@@ -795,7 +795,9 @@ func (m Model) calcVpHeight() int {
 }
 
 func (m Model) calcPanelWidths() (toolsW, briefW, helpW int) {
-	// 20%-40%-40% layout with 6 chars overhead (2 border chars per panel)
+	// 20%-40%-40% layout with 6 chars overhead (2 border chars per panel: left border + right border per panel)
+	// Returns panel widths that include borders. Content width = panelW - 2.
+	// Dividers and text wrapping use panelW - 2 to account for left/right borders.
 	available := max(m.width-6, 1)
 	toolsW = max((available * 20) / 100, 15)
 	briefW = max((available * 40) / 100, 30)
@@ -806,6 +808,13 @@ func (m Model) calcPanelWidths() (toolsW, briefW, helpW int) {
 		if briefW < 30 {
 			briefW = 30
 			toolsW = available - briefW - helpW
+			// Ensure toolsW doesn't go negative on very small terminals
+			if toolsW < 1 {
+				toolsW = 1
+				// Reduce other panels proportionally
+				briefW = max((available - toolsW - 5) / 2, 1)
+				helpW = available - toolsW - briefW
+			}
 		}
 	}
 	return

@@ -75,10 +75,10 @@ Current implementation state (after `20260625-ui-layout-redesign.md`):
   - [x] Note: Help Bar is full-width; right border should align with its right edge
 
 ### Task 7: Update width calculations for dividers
-- [ ] Review `calcPanelWidths()` to ensure `briefW` and `helpW` account for borders
-  - [ ] Divider width should use `briefW - 2` (account for left/right padding)
-  - [ ] Verify no overflow when rendering long text or dividers
-  - [ ] Test formula on edge cases: very small screens (80 chars), very large (200+ chars)
+- [x] Review `calcPanelWidths()` to ensure `briefW` and `helpW` account for borders
+  - [x] Divider width should use `briefW - 2` (account for left/right padding)
+  - [x] Verify no overflow when rendering long text or dividers
+  - [x] Test formula on edge cases: very small screens (80 chars), very large (200+ chars)
 
 ### Task 8: Visual verification and testing
 - [ ] Manual test on 80-char terminal:

@@ -81,10 +81,10 @@ Replace current context-sensitive Help Bar with panel-specific hints:
   - [x] Note: Tab not needed, arrow keys + h/m provide sufficient navigation
 
 ### Task 8: Remove emoji from styles
-- [ ] Delete emoji-heavy rendering from `renderCard()`:
-  - [ ] Remove `★` prefix from stars line (replace with text "Stars: ")
-  - [ ] Already handles Languages line without emoji (commit ba-qa-fixes shows this)
-  - [ ] Verify changelog rendering has no emoji
+- [x] Delete emoji-heavy rendering from `renderCard()`:
+  - [x] Remove `★` prefix from stars line (replace with text "Stars: ") — verified line 971
+  - [x] Already handles Languages line without emoji (commit ba-qa-fixes shows this)
+  - [x] Verify changelog rendering has no emoji — verified lines 1034-1057
 
 ### Task 9: Update text wrapping and viewport content synchronization
 - [ ] Ensure all viewport content calls `wrapText(content, panelWidth-2)` before rendering

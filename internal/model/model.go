@@ -83,8 +83,8 @@ type Model struct {
 	changelogLoadingFor string
 	checkingVersionTool string
 	focus               int
-	leftViewport        viewport.Model
-	cardViewport        viewport.Model
+	toolsViewport       viewport.Model
+	briefViewport       viewport.Model
 	helpViewport        viewport.Model
 	search              textinput.Model
 	searching           bool
@@ -219,8 +219,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.repoStatus != "" {
 			m.repoStatus[msg.toolName] = msg.repoStatus
 		}
-		m.leftViewport.SetContent(m.renderLeftContent())
-		m.cardViewport.SetContent(m.renderCard())
+		m.toolsViewport.SetContent(m.renderLeftContent())
+		m.briefViewport.SetContent(m.renderCard())
 		return m, nil
 
 	case checkVersionMsg:
@@ -237,8 +237,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else {
 			m.statusMsg = "Version check failed: " + msg.err.Error()
 		}
-		m.leftViewport.SetContent(m.renderLeftContent())
-		m.cardViewport.SetContent(m.renderCard())
+		m.toolsViewport.SetContent(m.renderLeftContent())
+		m.briefViewport.SetContent(m.renderCard())
 		return m, nil
 
 	case changelogMsg:
@@ -246,13 +246,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.changelogLoadingFor = ""
 		}
 		m.changelogData[msg.toolName] = msg
-		m.cardViewport.SetContent(m.renderCard())
+		m.briefViewport.SetContent(m.renderCard())
 		return m, nil
 
 	case repoCardMsg:
 		if msg.err == nil {
 			m.repoCards[msg.toolName] = msg.card
-			m.cardViewport.SetContent(m.renderCard())
+			m.briefViewport.SetContent(m.renderCard())
 		}
 		return m, nil
 
@@ -279,22 +279,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		vpH := m.calcVpHeight()
 		leftVpH := max(max(m.height-7, 1)-2, 1)
 		if !m.ready {
-			m.leftViewport = viewport.New(m.toolsW-2, leftVpH)
-			m.cardViewport = viewport.New(m.briefW, vpH)
+			m.toolsViewport = viewport.New(m.toolsW-2, leftVpH)
+			m.briefViewport = viewport.New(m.briefW, vpH)
 			m.helpViewport = viewport.New(m.helpW, vpH)
 			m.helpViewport.SetContent(m.renderHelpContent())
 			m.ready = true
 		} else {
-			m.leftViewport.Width = m.toolsW - 2
-			m.leftViewport.Height = leftVpH
-			m.cardViewport.Width = m.briefW
-			m.cardViewport.Height = vpH
+			m.toolsViewport.Width = m.toolsW - 2
+			m.toolsViewport.Height = leftVpH
+			m.briefViewport.Width = m.briefW
+			m.briefViewport.Height = vpH
 			m.helpViewport.Width = m.helpW
 			m.helpViewport.Height = vpH
 		}
-		m.leftViewport.SetContent(m.renderLeftContent())
-		m.syncLeftViewport()
-		m.cardViewport.SetContent(m.renderCard())
+		m.toolsViewport.SetContent(m.renderLeftContent())
+		m.syncToolsViewport()
+		m.briefViewport.SetContent(m.renderCard())
 		return m, nil
 
 	case tea.KeyMsg:
@@ -353,15 +353,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.search.SetValue("")
 				m.search.Blur()
 				m.metaSelected = 0
-				m.setLeftContent()
-				m.cardViewport.SetContent(m.renderCard())
+				m.setToolsContent()
+				m.briefViewport.SetContent(m.renderCard())
 				return m, nil
 			default:
 				m.search, cmd = m.search.Update(msg)
 				m.metaSelected = 0
-				m.setLeftContent()
-				m.cardViewport.SetContent(m.renderCard())
-				m.cardViewport.GotoTop()
+				m.setToolsContent()
+				m.briefViewport.SetContent(m.renderCard())
+				m.briefViewport.GotoTop()
 				return m, cmd
 			}
 		}
@@ -373,8 +373,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "esc":
 			if m.focus == focusRight {
 				m.focus = focusLeft
-				m.setLeftContent()
-				m.cardViewport.SetContent(m.renderCard())
+				m.setToolsContent()
+				m.briefViewport.SetContent(m.renderCard())
 			} else {
 				return m, tea.Quit
 			}
@@ -382,15 +382,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "right", "l":
 			if m.focus == focusLeft {
 				m.focus = focusHeader
-				m.setLeftContent()
-				m.cardViewport.SetContent(m.renderCard())
+				m.setToolsContent()
+				m.briefViewport.SetContent(m.renderCard())
 			}
 
 		case "left":
 			if m.focus == focusRight {
 				m.focus = focusLeft
-				m.setLeftContent()
-				m.cardViewport.SetContent(m.renderCard())
+				m.setToolsContent()
+				m.briefViewport.SetContent(m.renderCard())
 			}
 
 		case "j", "down":
@@ -398,10 +398,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				filtered := m.filteredMeta()
 				if m.metaSelected < len(filtered)-1 {
 					m.metaSelected++
-					m.setLeftContent()
-					m.cardViewport.Height = m.calcVpHeight()
-					m.cardViewport.GotoTop()
-					m.cardViewport.SetContent(m.renderCard())
+					m.setToolsContent()
+					m.briefViewport.Height = m.calcVpHeight()
+					m.briefViewport.GotoTop()
+					m.briefViewport.SetContent(m.renderCard())
 					return m, m.autoFetchCmdsForSelected()
 				}
 			}
@@ -410,40 +410,40 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focus == focusLeft {
 				if m.metaSelected > 0 {
 					m.metaSelected--
-					m.setLeftContent()
-					m.cardViewport.Height = m.calcVpHeight()
-					m.cardViewport.GotoTop()
-					m.cardViewport.SetContent(m.renderCard())
+					m.setToolsContent()
+					m.briefViewport.Height = m.calcVpHeight()
+					m.briefViewport.GotoTop()
+					m.briefViewport.SetContent(m.renderCard())
 					return m, m.autoFetchCmdsForSelected()
 				}
 			}
 
 		case "pgup", "ctrl+b":
 			if m.focus == focusLeft {
-				step := max(m.leftViewport.Height, 1)
+				step := max(m.toolsViewport.Height, 1)
 				m.metaSelected = max(m.metaSelected-step, 0)
-				m.setLeftContent()
-				m.cardViewport.GotoTop()
-				m.cardViewport.SetContent(m.renderCard())
+				m.setToolsContent()
+				m.briefViewport.GotoTop()
+				m.briefViewport.SetContent(m.renderCard())
 				return m, m.autoFetchCmdsForSelected()
 			}
 
 		case "pgdown", "ctrl+f":
 			if m.focus == focusLeft {
 				filtered := m.filteredMeta()
-				step := max(m.leftViewport.Height, 1)
+				step := max(m.toolsViewport.Height, 1)
 				m.metaSelected = min(m.metaSelected+step, max(len(filtered)-1, 0))
-				m.setLeftContent()
-				m.cardViewport.GotoTop()
-				m.cardViewport.SetContent(m.renderCard())
+				m.setToolsContent()
+				m.briefViewport.GotoTop()
+				m.briefViewport.SetContent(m.renderCard())
 				return m, m.autoFetchCmdsForSelected()
 			}
 
 		case "g":
-			m.cardViewport.GotoTop()
+			m.briefViewport.GotoTop()
 
 		case "G":
-			m.cardViewport.GotoBottom()
+			m.briefViewport.GotoBottom()
 
 		case "/":
 			if m.focus == focusRight {
@@ -500,35 +500,35 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.metaFilter = ""
 				}
 				m.metaSelected = 0
-				m.setLeftContent()
-				m.cardViewport.SetContent(m.renderCard())
+				m.setToolsContent()
+				m.briefViewport.SetContent(m.renderCard())
 			}
 
 		case "1":
 			m.metaFilter = loader.StatusActive
 			m.metaSelected = 0
-			m.setLeftContent()
-			m.cardViewport.SetContent(m.renderCard())
+			m.setToolsContent()
+			m.briefViewport.SetContent(m.renderCard())
 		case "2":
 			m.metaFilter = loader.StatusTrying
 			m.metaSelected = 0
-			m.setLeftContent()
-			m.cardViewport.SetContent(m.renderCard())
+			m.setToolsContent()
+			m.briefViewport.SetContent(m.renderCard())
 		case "3":
 			m.metaFilter = loader.StatusForgotten
 			m.metaSelected = 0
-			m.setLeftContent()
-			m.cardViewport.SetContent(m.renderCard())
+			m.setToolsContent()
+			m.briefViewport.SetContent(m.renderCard())
 		case "4":
 			m.metaFilter = loader.StatusArchived
 			m.metaSelected = 0
-			m.setLeftContent()
-			m.cardViewport.SetContent(m.renderCard())
+			m.setToolsContent()
+			m.briefViewport.SetContent(m.renderCard())
 		case "a":
 			m.metaFilter = ""
 			m.metaSelected = 0
-			m.setLeftContent()
-			m.cardViewport.SetContent(m.renderCard())
+			m.setToolsContent()
+			m.briefViewport.SetContent(m.renderCard())
 
 		case "v":
 			if m.focus == focusLeft && m.checkingVersionTool == "" {
@@ -549,7 +549,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.editingNote = true
 					m.noteInput.SetValue(mt.Note)
 					m.noteInput.Focus()
-					m.cardViewport.SetContent(m.renderCard())
+					m.briefViewport.SetContent(m.renderCard())
 					return m, textinput.Blink
 				}
 			}
@@ -560,14 +560,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.editingTags = true
 					m.tagsInput.SetValue(strings.Join(mt.Tags, ", "))
 					m.tagsInput.Focus()
-					m.cardViewport.SetContent(m.renderCard())
+					m.briefViewport.SetContent(m.renderCard())
 					return m, textinput.Blink
 				}
 			}
 		}
 
 		if m.focus == focusRight {
-			m.cardViewport, cmd = m.cardViewport.Update(msg)
+			m.briefViewport, cmd = m.briefViewport.Update(msg)
 		}
 	}
 
@@ -584,17 +584,17 @@ func (m Model) updateNoteEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.meta = loader.UpsertMeta(m.meta, mt)
 			loader.SaveMeta(m.meta) //nolint:errcheck
 		}
-		m.cardViewport.SetContent(m.renderCard())
+		m.briefViewport.SetContent(m.renderCard())
 		return m, nil
 	case "esc":
 		m.editingNote = false
 		m.noteInput.Blur()
-		m.cardViewport.SetContent(m.renderCard())
+		m.briefViewport.SetContent(m.renderCard())
 		return m, nil
 	default:
 		var cmd tea.Cmd
 		m.noteInput, cmd = m.noteInput.Update(msg)
-		m.cardViewport.SetContent(m.renderCard())
+		m.briefViewport.SetContent(m.renderCard())
 		return m, cmd
 	}
 }
@@ -617,17 +617,17 @@ func (m Model) updateTagsEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.meta = loader.UpsertMeta(m.meta, mt)
 			loader.SaveMeta(m.meta) //nolint:errcheck
 		}
-		m.cardViewport.SetContent(m.renderCard())
+		m.briefViewport.SetContent(m.renderCard())
 		return m, nil
 	case "esc":
 		m.editingTags = false
 		m.tagsInput.Blur()
-		m.cardViewport.SetContent(m.renderCard())
+		m.briefViewport.SetContent(m.renderCard())
 		return m, nil
 	default:
 		var cmd tea.Cmd
 		m.tagsInput, cmd = m.tagsInput.Update(msg)
-		m.cardViewport.SetContent(m.renderCard())
+		m.briefViewport.SetContent(m.renderCard())
 		return m, cmd
 	}
 }
@@ -831,23 +831,23 @@ func (m Model) renderLeftContent() string {
 	return sb.String() + "\n" + ui.MetaNoteStyle.Render(footer)
 }
 
-// syncLeftViewport adjusts YOffset so that metaSelected is visible.
-func (m *Model) syncLeftViewport() {
-	vpH := m.leftViewport.Height
+// syncToolsViewport adjusts YOffset so that metaSelected is visible.
+func (m *Model) syncToolsViewport() {
+	vpH := m.toolsViewport.Height
 	if vpH <= 0 {
 		return
 	}
-	if m.metaSelected < m.leftViewport.YOffset {
-		m.leftViewport.SetYOffset(m.metaSelected)
-	} else if m.metaSelected >= m.leftViewport.YOffset+vpH {
-		m.leftViewport.SetYOffset(m.metaSelected - vpH + 1)
+	if m.metaSelected < m.toolsViewport.YOffset {
+		m.toolsViewport.SetYOffset(m.metaSelected)
+	} else if m.metaSelected >= m.toolsViewport.YOffset+vpH {
+		m.toolsViewport.SetYOffset(m.metaSelected - vpH + 1)
 	}
 }
 
-// setLeftContent refreshes viewport content and syncs scroll position.
-func (m *Model) setLeftContent() {
-	m.leftViewport.SetContent(m.renderLeftContent())
-	m.syncLeftViewport()
+// setToolsContent refreshes viewport content and syncs scroll position.
+func (m *Model) setToolsContent() {
+	m.toolsViewport.SetContent(m.renderLeftContent())
+	m.syncToolsViewport()
 }
 
 func (m Model) renderLeft() string {
@@ -859,7 +859,7 @@ func (m Model) renderLeft() string {
 	return panelStyle.
 		Width(m.toolsW).
 		Height(max(m.height-7, 1)).
-		Render(m.leftViewport.View())
+		Render(m.toolsViewport.View())
 }
 
 func (m Model) renderRight() string {
@@ -875,7 +875,7 @@ func (m Model) renderRight() string {
 		BorderRight(true).
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderForeground(ui.ColorBorder).
-		Render(m.cardViewport.View())
+		Render(m.briefViewport.View())
 
 	helpBox := m.helpViewport.View()
 
@@ -1056,12 +1056,12 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		switch msg.Button {
 		case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
 			var cmd tea.Cmd
-			m.cardViewport, cmd = m.cardViewport.Update(msg)
+			m.briefViewport, cmd = m.briefViewport.Update(msg)
 			return m, cmd
 		case tea.MouseButtonLeft:
 			if msg.Action == tea.MouseActionPress && m.focus != focusRight {
 				m.focus = focusRight
-				m.cardViewport.SetContent(m.renderCard())
+				m.briefViewport.SetContent(m.renderCard())
 			}
 		}
 		return m, nil
@@ -1073,10 +1073,10 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if toolIdx >= 0 && toolIdx < len(filtered) {
 			if m.metaSelected != toolIdx {
 				m.metaSelected = toolIdx
-				m.setLeftContent()
-				m.cardViewport.Height = m.calcVpHeight()
-				m.cardViewport.GotoTop()
-				m.cardViewport.SetContent(m.renderCard())
+				m.setToolsContent()
+				m.briefViewport.Height = m.calcVpHeight()
+				m.briefViewport.GotoTop()
+				m.briefViewport.SetContent(m.renderCard())
 			}
 			m.focus = focusLeft
 		}
@@ -1145,14 +1145,14 @@ func (m Model) updateHeaderFocus(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "j", "down":
 		m.focus = focusRight
-		m.setLeftContent()
-		m.cardViewport.GotoTop()
-		m.cardViewport.SetContent(m.renderCard())
+		m.setToolsContent()
+		m.briefViewport.GotoTop()
+		m.briefViewport.SetContent(m.renderCard())
 
 	case "left", "esc":
 		m.focus = focusLeft
-		m.setLeftContent()
-		m.cardViewport.SetContent(m.renderCard())
+		m.setToolsContent()
+		m.briefViewport.SetContent(m.renderCard())
 
 	case "v":
 		if m.checkingVersionTool == "" {
@@ -1213,7 +1213,7 @@ func (m *Model) autoFetchCmdsForSelected() tea.Cmd {
 	if t, ok := m.selectedTool(); ok && t.GitHub != "" {
 		if _, already := m.changelogData[t.Name]; !already && m.changelogLoadingFor != t.Name {
 			m.changelogLoadingFor = t.Name
-			m.cardViewport.SetContent(m.renderCard())
+			m.briefViewport.SetContent(m.renderCard())
 			cmds = append(cmds, fetchChangelogCmd(t.GitHub, t.Name))
 		}
 	}

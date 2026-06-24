@@ -29,12 +29,12 @@ Current implementation (`internal/model/model.go`, `internal/ui/styles.go`):
 - [x] Update `calcVpHeight()` to account for new layout (currently uses `height - 10` for content)
 
 ### Task 2: Rename and restructure viewport fields
-- [ ] Rename `leftViewport` → `toolsViewport` (list of tools)
-- [ ] Rename `cardViewport` → `briefViewport` (tool metadata/about)
-- [ ] Rename `helpViewport` → `helpViewport` (unchanged — tool man/help)
-- [ ] Update `WindowSizeMsg` handler to initialize/resize all three with new widths from `calcPanelWidths()`
-- [ ] Update `setLeftContent()` → `setToolsContent()` / `setToolsContent()` (reflects new purpose)
-- [ ] Update `syncLeftViewport()` → `syncToolsViewport()`
+- [x] Rename `leftViewport` → `toolsViewport` (list of tools)
+- [x] Rename `cardViewport` → `briefViewport` (tool metadata/about)
+- [x] Rename `helpViewport` → `helpViewport` (unchanged — tool man/help)
+- [x] Update `WindowSizeMsg` handler to initialize/resize all three with new widths from `calcPanelWidths()`
+- [x] Update `setLeftContent()` → `setToolsContent()` / `setToolsContent()` (reflects new purpose)
+- [x] Update `syncLeftViewport()` → `syncToolsViewport()`
 
 ### Task 3: Update focus state constants
 - [ ] `focusLeft = 0` → `focusTools` (Tools Panel)

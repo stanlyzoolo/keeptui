@@ -44,14 +44,14 @@ Current implementation (`internal/model/model.go`, `internal/ui/styles.go`):
 
 ### Task 4: Restructure right-side rendering
 Split current `renderRight()` into two methods:
-- [ ] `renderBrief()` — render middle panel (Tool Brief Panel)
-  - [ ] Keep current `renderCard()` logic (About, Repo, Stars, Languages, Changelog)
-  - [ ] Remove emoji decorations
-  - [ ] Ensure text wraps within `briefW` bounds
-- [ ] `renderHelp()` — render right panel (Tool man/help output)
-  - [ ] Move `renderHelpContent()` body here
-  - [ ] Ensure proper word wrapping at `helpW` boundary
-- [ ] Update `View()` to call: `left := renderTools()`, `middle := renderBrief()`, `right := renderHelp()`, then join horizontally
+- [x] `renderBrief()` — render middle panel (Tool Brief Panel)
+  - [x] Keep current `renderCard()` logic (About, Repo, Stars, Languages, Changelog)
+  - [x] Remove emoji decorations
+  - [x] Ensure text wraps within `briefW` bounds
+- [x] `renderHelp()` — render right panel (Tool man/help output)
+  - [x] Move `renderHelpContent()` body here
+  - [x] Ensure proper word wrapping at `helpW` boundary
+- [x] Update `View()` to call: `left := renderTools()`, `middle := renderBrief()`, `right := renderHelp()`, then join horizontally
 
 ### Task 5: Render tools list (left panel)
 - [ ] Create `renderTools()` method that wraps `toolsViewport.View()` with border

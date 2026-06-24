@@ -686,13 +686,14 @@ func (m Model) View() string {
 	}
 
 	left := m.renderLeft()
-	right := m.renderRight()
-	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
-	layout := lipgloss.JoinVertical(lipgloss.Left, body, m.renderHelp())
+	middle := m.renderBrief()
+	right := m.renderHelp()
+	body := lipgloss.JoinHorizontal(lipgloss.Top, left, middle, right)
+	layout := lipgloss.JoinVertical(lipgloss.Left, body, m.renderStatusBar())
 	return lipgloss.NewStyle().Margin(1).Render(layout)
 }
 
-func (m Model) renderHelp() string {
+func (m Model) renderStatusBar() string {
 	style := ui.HelpStyle.Width(m.width - 4)
 	if m.helpSearching {
 		matchInfo := ""
@@ -862,35 +863,30 @@ func (m Model) renderLeft() string {
 		Render(m.toolsViewport.View())
 }
 
-func (m Model) renderRight() string {
-	rightTotal := max(m.width-m.toolsW-6, 4)
-
+func (m Model) renderBrief() string {
 	header := m.renderRightHeader()
-
-	dividerWidth := max(rightTotal-2, 0)
+	dividerWidth := max(m.briefW-2, 0)
 	divider := lipgloss.NewStyle().Foreground(ui.ColorBorder).Render(strings.Repeat("─", dividerWidth))
-
-	cardBox := lipgloss.NewStyle().
-		Width(m.briefW).
-		BorderRight(true).
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(ui.ColorBorder).
-		Render(m.briefViewport.View())
-
-	helpBox := m.helpViewport.View()
-
-	panels := lipgloss.JoinHorizontal(lipgloss.Top, cardBox, helpBox)
 
 	panelStyle := ui.PanelBorder
 	if m.focus == focusBrief || m.focus == focusHeader {
 		panelStyle = ui.PanelBorderFocused
 	}
 
-	inner := lipgloss.JoinVertical(lipgloss.Left, header, divider, panels)
+	inner := lipgloss.JoinVertical(lipgloss.Left, header, divider, m.briefViewport.View())
 	return panelStyle.
-		Width(rightTotal).
+		Width(m.briefW).
 		Height(max(m.height-7, 1)).
 		Render(inner)
+}
+
+func (m Model) renderHelp() string {
+	panelStyle := ui.PanelBorder
+
+	return panelStyle.
+		Width(m.helpW).
+		Height(max(m.height-7, 1)).
+		Render(m.helpViewport.View())
 }
 
 func (m Model) renderRightHeader() string {
@@ -935,7 +931,7 @@ func (m Model) renderCard() string {
 		sb.WriteString(ui.DescStyle.Render(wrapText(card.About, inner)) + "\n")
 	}
 	if t.GitHub != "" {
-		sb.WriteString(ui.GithubStyle.Render(wrapText("↗ https://"+t.GitHub, inner)) + "\n")
+		sb.WriteString(ui.GithubStyle.Render(wrapText("https://"+t.GitHub, inner)) + "\n")
 	}
 
 	sb.WriteString(divider)
@@ -943,7 +939,7 @@ func (m Model) renderCard() string {
 	// Stars + Release + Languages block
 	if card, ok := m.repoCards[t.Name]; ok {
 		if card.Stars > 0 {
-			sb.WriteString(ui.MetaNoteStyle.Render(fmt.Sprintf("★ %s stars", formatStars(card.Stars))) + "\n")
+			sb.WriteString(ui.MetaNoteStyle.Render(fmt.Sprintf("Stars: %s", formatStars(card.Stars))) + "\n")
 		}
 		if card.Latest != "" {
 			line := "Latest: " + card.Latest
@@ -1020,7 +1016,7 @@ func (m Model) renderChangelogBlock(msg changelogMsg) string {
 		sb.WriteString(ui.MetaNoteStyle.Render("Released: "+date) + "\n")
 	}
 	if msg.htmlUrl != "" {
-		sb.WriteString(ui.GithubStyle.Render("↗ "+msg.htmlUrl) + "\n")
+		sb.WriteString(ui.GithubStyle.Render(msg.htmlUrl) + "\n")
 	}
 	sb.WriteString("\n")
 	body := wrapText(stripMarkdown(msg.body), max(m.briefW-6, 10))

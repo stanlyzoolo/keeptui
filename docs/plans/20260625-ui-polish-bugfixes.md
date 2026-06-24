@@ -43,11 +43,11 @@ Current implementation state (after `20260625-ui-layout-redesign.md`):
   - [x] If name is very long, truncate to prevent panel overflow
 
 ### Task 3: Add repo link to Tool Brief Panel (before Stars)
-- [ ] Update `renderBrief()` to insert repo URL line after first divider
-  - [ ] Line format: `repo: github.com/owner/repo` (plain text)
-  - [ ] Position: between first divider and Stars line
-  - [ ] Apply `ui.GithubStyle` or plain gray for link
-  - [ ] If no repo (t.GitHub empty), omit this line
+- [x] Update `renderBrief()` to insert repo URL line after first divider
+  - [x] Line format: `repo: github.com/owner/repo` (plain text)
+  - [x] Position: between first divider and Stars line
+  - [x] Apply `ui.GithubStyle` or plain gray for link
+  - [x] If no repo (t.GitHub empty), omit this line
 
 ### Task 4: Add Status field to Tool Brief Panel (before Note)
 - [ ] Update `renderBrief()` to insert Status line before Note

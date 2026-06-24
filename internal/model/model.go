@@ -963,11 +963,13 @@ func (m Model) renderCard() string {
 
 		sb.WriteString(nameRendered + " " + aboutRendered + "\n")
 	}
-	if t.GitHub != "" {
-		sb.WriteString(ui.GithubStyle.Render(wrapText("https://"+t.GitHub, inner)) + "\n")
-	}
 
 	sb.WriteString(divider)
+
+	// Repo link
+	if t.GitHub != "" {
+		sb.WriteString(ui.GithubStyle.Render("repo: "+t.GitHub) + "\n")
+	}
 
 	// Stars + Release + Languages block
 	if card, ok := m.repoCards[t.Name]; ok {

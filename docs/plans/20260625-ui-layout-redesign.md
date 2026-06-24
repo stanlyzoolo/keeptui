@@ -95,9 +95,9 @@ Replace current context-sensitive Help Bar with panel-specific hints:
 - [x] Test on 80-char, 120-char, and full-width terminals (manual - verified in next tasks)
 
 ### Task 10: Mouse handling refactor
-- [ ] Update `handleMouse()` to detect left panel vs. middle panel vs. right panel based on new widths
-- [ ] Adjust Y-offset calculations for tool selection when clicking left panel
-- [ ] Wheel scroll should route to focused panel's viewport
+- [x] Update `handleMouse()` to detect left panel vs. middle panel vs. right panel based on new widths
+- [x] Adjust Y-offset calculations for tool selection when clicking left panel
+- [x] Wheel scroll should route to focused panel's viewport
 
 ### Task 11: Update auto-fetch commands
 - [ ] `autoFetchCmdsForSelected()` unchanged (fetches changelog/help for selected tool)

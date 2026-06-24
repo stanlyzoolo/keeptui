@@ -1076,37 +1076,53 @@ func openBrowser(url string) {
 }
 
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	leftPanelEdge := m.toolsW + 3
-	if msg.X >= leftPanelEdge {
+	toolsPanelEnd := m.toolsW + 1
+	briefPanelEnd := toolsPanelEnd + m.briefW + 1
+
+	// Detect which panel the click is in
+	var cmd tea.Cmd
+	if msg.X < toolsPanelEnd {
+		// Left panel (Tools)
+		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
+			toolIdx := msg.Y - 3
+			filtered := m.filteredMeta()
+			if toolIdx >= 0 && toolIdx < len(filtered) {
+				if m.metaSelected != toolIdx {
+					m.metaSelected = toolIdx
+					m.setToolsContent()
+					m.briefViewport.Height = m.calcVpHeight()
+					m.briefViewport.GotoTop()
+					m.briefViewport.SetContent(m.renderCard())
+				}
+				m.focus = focusTools
+			}
+		} else if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
+			m.toolsViewport, cmd = m.toolsViewport.Update(msg)
+		}
+	} else if msg.X < briefPanelEnd {
+		// Middle panel (Brief)
 		switch msg.Button {
 		case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
-			var cmd tea.Cmd
 			m.briefViewport, cmd = m.briefViewport.Update(msg)
-			return m, cmd
 		case tea.MouseButtonLeft:
 			if msg.Action == tea.MouseActionPress && m.focus != focusBrief {
 				m.focus = focusBrief
 				m.briefViewport.SetContent(m.renderCard())
 			}
 		}
-		return m, nil
-	}
-
-	if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
-		toolIdx := msg.Y - 3
-		filtered := m.filteredMeta()
-		if toolIdx >= 0 && toolIdx < len(filtered) {
-			if m.metaSelected != toolIdx {
-				m.metaSelected = toolIdx
-				m.setToolsContent()
-				m.briefViewport.Height = m.calcVpHeight()
-				m.briefViewport.GotoTop()
-				m.briefViewport.SetContent(m.renderCard())
+	} else {
+		// Right panel (Help)
+		switch msg.Button {
+		case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
+			m.helpViewport, cmd = m.helpViewport.Update(msg)
+		case tea.MouseButtonLeft:
+			if msg.Action == tea.MouseActionPress && m.focus != focusHelp {
+				m.focus = focusHelp
+				m.helpViewport.SetContent(m.renderHelpContent())
 			}
-			m.focus = focusTools
 		}
 	}
-	return m, nil
+	return m, cmd
 }
 
 // formatStars formats a star count with K suffix for thousands.

@@ -940,7 +940,7 @@ func (m Model) renderCard() string {
 	}
 
 	inner := max(m.briefW-2, 1)
-	divW := max(m.briefW-4, 1)
+	divW := max(m.briefW-2, 1)
 	divider := "\n" + lipgloss.NewStyle().Foreground(ui.ColorBorder).Render(strings.Repeat("─", divW)) + "\n"
 
 	var sb strings.Builder
@@ -988,7 +988,7 @@ func (m Model) renderCard() string {
 			sb.WriteString(ui.MetaNoteStyle.Render(line) + "\n")
 		}
 		if len(card.Languages) > 0 {
-			sb.WriteString(renderLangBar(card.Languages, m.briefW-4) + "\n")
+			sb.WriteString(renderLangBar(card.Languages, inner) + "\n")
 		}
 		if card.RepoStatus != "" {
 			sb.WriteString(ui.RepoStatusStyle.Render(card.RepoStatus) + "\n")
@@ -1061,7 +1061,7 @@ func (m Model) renderChangelogBlock(msg changelogMsg) string {
 		sb.WriteString(ui.GithubStyle.Render(msg.htmlUrl) + "\n")
 	}
 	sb.WriteString("\n")
-	body := wrapText(stripMarkdown(msg.body), max(m.briefW-6, 10))
+	body := wrapText(stripMarkdown(msg.body), max(m.briefW-2, 10))
 	if body == "" {
 		sb.WriteString(ui.DescStyle.Render("No release notes available.") + "\n")
 	} else {

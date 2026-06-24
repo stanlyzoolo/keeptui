@@ -58,12 +58,12 @@ Current implementation state (after `20260625-ui-layout-redesign.md`):
   - [x] If no status or empty, still show label with placeholder
 
 ### Task 5: Fix dividers — extend full width with right-edge alignment
-- [ ] Update divider rendering in `renderBrief()`
-  - [ ] Current dividers use `divW = max(cardW-4, 1)` — too short
-  - [ ] Change to: `divW = briefW - 2` (full width within panel bounds, accounting for padding)
-  - [ ] Verify dividers span from left edge to right edge of content area
-  - [ ] Test on different panel widths (80, 120, 150 char screens)
-  - [ ] Ensure no overflow beyond panel boundary
+- [x] Update divider rendering in `renderBrief()`
+  - [x] Current dividers use `divW = max(cardW-4, 1)` — too short
+  - [x] Change to: `divW = briefW - 2` (full width within panel bounds, accounting for padding)
+  - [x] Verify dividers span from left edge to right edge of content area
+  - [x] Test on different panel widths (80, 120, 150 char screens)
+  - [x] Ensure no overflow beyond panel boundary
 
 ### Task 6: Add right border to Tool Man Panel
 - [ ] Modify `renderHelp()` method (or inline in `View()`)

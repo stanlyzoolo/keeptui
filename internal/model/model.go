@@ -820,10 +820,8 @@ func (m Model) renderLeftContent() string {
 		sym := loader.StatusSymbol[mt.Status]
 		symStyled := ui.StatusStyle(mt.Status).Render(sym)
 
-		name := mt.Name
-		if len(name) > maxName {
-			name = name[:maxName]
-		}
+		name := wrapText(mt.Name, maxName)
+		name = strings.TrimRight(name, "\n")
 
 		hasUpdate := m.hasUpdate(mt.Name)
 		updateMark := ""
@@ -1000,7 +998,8 @@ func (m Model) renderCard() string {
 			if noteText == "" {
 				noteText = "— (press e to edit)"
 			}
-			sb.WriteString(ui.MetaDetailLabelStyle.Render("Note:") + " " + ui.MetaNoteStyle.Render(noteText) + "\n")
+			wrapped := wrapText(noteText, inner)
+			sb.WriteString(ui.MetaDetailLabelStyle.Render("Note:") + " " + ui.MetaNoteStyle.Render(wrapped) + "\n")
 		}
 
 		if m.editingTags {
@@ -1010,7 +1009,8 @@ func (m Model) renderCard() string {
 			if tagsText == "" {
 				tagsText = "— (press t to edit)"
 			}
-			sb.WriteString(ui.MetaDetailLabelStyle.Render("Tags:") + " " + ui.MetaTagStyle.Render(tagsText) + "\n")
+			wrapped := wrapText(tagsText, inner)
+			sb.WriteString(ui.MetaDetailLabelStyle.Render("Tags:") + " " + ui.MetaTagStyle.Render(wrapped) + "\n")
 		}
 	}
 

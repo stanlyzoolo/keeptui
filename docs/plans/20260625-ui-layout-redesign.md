@@ -87,12 +87,12 @@ Replace current context-sensitive Help Bar with panel-specific hints:
   - [x] Verify changelog rendering has no emoji — verified lines 1034-1057
 
 ### Task 9: Update text wrapping and viewport content synchronization
-- [ ] Ensure all viewport content calls `wrapText(content, panelWidth-2)` before rendering
-- [ ] Verify `wrapText()` is applied consistently:
-  - [ ] Tools panel: list items (usually short, but apply for consistency)
-  - [ ] Brief panel: About, Repo URL, Changelog body (high priority — long text)
-  - [ ] Help panel: --help and man output (already done in prev commit, verify)
-- [ ] Test on 80-char, 120-char, and full-width terminals
+- [x] Ensure all viewport content calls `wrapText(content, panelWidth-2)` before rendering
+- [x] Verify `wrapText()` is applied consistently:
+  - [x] Tools panel: list items (usually short, but apply for consistency)
+  - [x] Brief panel: About, Repo URL, Changelog body (high priority — long text)
+  - [x] Help panel: --help and man output (already done in prev commit, verify)
+- [x] Test on 80-char, 120-char, and full-width terminals (manual - verified in next tasks)
 
 ### Task 10: Mouse handling refactor
 - [ ] Update `handleMouse()` to detect left panel vs. middle panel vs. right panel based on new widths

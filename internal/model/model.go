@@ -26,6 +26,7 @@ const (
 	focusTools  = 0
 	focusBrief  = 1
 	focusHeader = 2
+	focusHelp   = 3
 )
 
 type VersionInfo struct {
@@ -737,7 +738,11 @@ func (m Model) renderStatusBar() string {
 		return style.Render(hints)
 	}
 	if m.focus == focusBrief {
-		hints := keyHint("h") + " --help  " + keyHint("m") + " man  " + keyHint("/") + " search  " + keyHint("o") + " github  " + keyHint("e") + " edit note  " + keyHint("t") + " edit tags  " + keyHint("←/esc") + " back  " + keyHint("q") + " quit"
+		hints := keyHint("↑↓") + " scroll  " + keyHint("→") + " help  " + keyHint("←") + " back  " + keyHint("e") + " edit note  " + keyHint("t") + " edit tags  " + keyHint("q") + " quit"
+		return style.Render(hints)
+	}
+	if m.focus == focusHelp {
+		hints := keyHint("↑↓") + " scroll  " + keyHint("h") + " --help  " + keyHint("m") + " man  " + keyHint("/") + " search  " + keyHint("←") + " back  " + keyHint("q") + " quit"
 		return style.Render(hints)
 	}
 	filterHint := ""
@@ -746,7 +751,7 @@ func (m Model) renderStatusBar() string {
 	}
 	versionHint := ""
 	if t, ok := m.selectedTool(); ok && t.GitHub != "" {
-		versionHint = keyHint("v") + " check version  "
+		versionHint = keyHint("v") + " check  "
 	}
 	return style.Render(
 		keyHint("j/k") + " navigate  " +
@@ -754,8 +759,8 @@ func (m Model) renderStatusBar() string {
 			keyHint("f") + " filter  " +
 			filterHint +
 			keyHint("/") + " search  " +
-			keyHint("o") + " github  " +
 			versionHint +
+			keyHint("o") + " github  " +
 			keyHint("q") + " quit",
 	)
 }
@@ -882,6 +887,9 @@ func (m Model) renderBrief() string {
 
 func (m Model) renderHelp() string {
 	panelStyle := ui.PanelBorder
+	if m.focus == focusHelp {
+		panelStyle = ui.PanelBorderFocused
+	}
 
 	return panelStyle.
 		Width(m.helpW).

@@ -62,10 +62,10 @@ Split current `renderRight()` into two methods:
 
 ### Task 6: Update Help Bar (renderHelp method)
 Replace current context-sensitive Help Bar with panel-specific hints:
-- [ ] **focusTools**: `j/k navigate  → details  f filter  a all  / search  v check  o github  q quit`
-- [ ] **focusBrief**: `↑↓ scroll  → help  ← back  e edit note  t edit tags  q quit`
-- [ ] **focusHelp**: `↑↓ scroll  h --help  m man  / search  ← back  q quit`
-- [ ] Preserve existing search/edit mode hints (unchanged)
+- [x] **focusTools**: `j/k navigate  → details  f filter  a all  / search  v check  o github  q quit`
+- [x] **focusBrief**: `↑↓ scroll  → help  ← back  e edit note  t edit tags  q quit`
+- [x] **focusHelp**: `↑↓ scroll  h --help  m man  / search  ← back  q quit`
+- [x] Preserve existing search/edit mode hints (unchanged)
 
 ### Task 7: Update navigation and key bindings
 - [ ] **Arrow keys**:

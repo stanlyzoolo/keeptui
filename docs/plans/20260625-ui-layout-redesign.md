@@ -100,9 +100,9 @@ Replace current context-sensitive Help Bar with panel-specific hints:
 - [x] Wheel scroll should route to focused panel's viewport
 
 ### Task 11: Update auto-fetch commands
-- [ ] `autoFetchCmdsForSelected()` unchanged (fetches changelog/help for selected tool)
-- [ ] Verify that switching tools via focusTools updates Brief and Help panels correctly
-- [ ] Test that switching focus does NOT re-fetch data unnecessarily
+- [x] `autoFetchCmdsForSelected()` unchanged (fetches changelog/help for selected tool)
+- [x] Verify that switching tools via focusTools updates Brief and Help panels correctly
+- [x] Test that switching focus does NOT re-fetch data unnecessarily
 
 ### Task 12: Verification and testing
 - [ ] `go build .` — no errors

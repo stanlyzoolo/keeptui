@@ -50,12 +50,12 @@ Current implementation state (after `20260625-ui-layout-redesign.md`):
   - [x] If no repo (t.GitHub empty), omit this line
 
 ### Task 4: Add Status field to Tool Brief Panel (before Note)
-- [ ] Update `renderBrief()` to insert Status line before Note
-  - [ ] Get status: `mt.Status` from selected meta
-  - [ ] Format: `Status: [Active|Trying|Forgotten|Archived]` with appropriate color
-  - [ ] Use existing `ui.StatusStyle(mt.Status)` for color
-  - [ ] Position: before "Note:" line
-  - [ ] If no status or empty, still show label with placeholder
+- [x] Update `renderBrief()` to insert Status line before Note
+  - [x] Get status: `mt.Status` from selected meta
+  - [x] Format: `Status: [Active|Trying|Forgotten|Archived]` with appropriate color
+  - [x] Use existing `ui.StatusStyle(mt.Status)` for color
+  - [x] Position: before "Note:" line
+  - [x] If no status or empty, still show label with placeholder
 
 ### Task 5: Fix dividers — extend full width with right-edge alignment
 - [ ] Update divider rendering in `renderBrief()`

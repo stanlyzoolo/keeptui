@@ -997,8 +997,13 @@ func (m Model) renderCard() string {
 
 	sb.WriteString(divider)
 
-	// Note + Tags block (with inline editing)
+	// Status + Note + Tags block (with inline editing)
 	if mt, ok := m.selectedMeta(); ok {
+		// Status field
+		sym := loader.StatusSymbol[mt.Status]
+		symStyled := ui.StatusStyle(mt.Status).Render(sym + " " + string(mt.Status))
+		sb.WriteString(ui.MetaDetailLabelStyle.Render("Status:") + " " + symStyled + "\n")
+
 		if m.editingNote {
 			sb.WriteString(ui.MetaDetailLabelStyle.Render("Note:") + " " + m.noteInput.View() + "\n")
 		} else {

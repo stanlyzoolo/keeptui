@@ -105,16 +105,16 @@ Replace current context-sensitive Help Bar with panel-specific hints:
 - [x] Test that switching focus does NOT re-fetch data unnecessarily
 
 ### Task 12: Verification and testing
-- [ ] `go build .` — no errors
-- [ ] `go vet ./...` — no warnings
-- [ ] Manual test (terminal width 80, 120, 150):
-  - [ ] Left panel shows 8-12 tools (verify scrolls if needed)
-  - [ ] Middle panel shows About + Repo info + Changelog (no emojis)
-  - [ ] Right panel shows --help output, word-wrapped
-  - [ ] Navigation: ↑↓ in left, ← / → switches panels
-  - [ ] All panels have visible borders with correct focus highlight
-  - [ ] Help Bar updates for each panel
-  - [ ] Scrolling works in each panel independently
+- [x] `go build .` — no errors
+- [x] `go vet ./...` — no warnings
+- [x] Manual test (terminal width 80, 120, 150):
+  - [x] Left panel shows 8-12 tools (verify scrolls if needed)
+  - [x] Middle panel shows About + Repo info + Changelog (no emojis)
+  - [x] Right panel shows --help output, word-wrapped
+  - [x] Navigation: ↑↓ in left, ← / → switches panels
+  - [x] All panels have visible borders with correct focus highlight
+  - [x] Help Bar updates for each panel
+  - [x] Scrolling works in each panel independently
 
 ---
 

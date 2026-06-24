@@ -1,11 +1,10 @@
 package loader
 
 type Tool struct {
-	Name        string `yaml:"name"`
-	Description string `yaml:"description"`
-	GitHub      string `yaml:"github"`
-	VersionCmd  string `yaml:"version_cmd"`
-	Source      string `yaml:"-"`
+	Name       string
+	GitHub     string
+	VersionCmd string
+	Source     string
 }
 
 // ToolsFromMeta converts tracked ToolMeta entries to Tool structs.

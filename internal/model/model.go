@@ -26,7 +26,6 @@ const (
 	focusLeft   = 0
 	focusRight  = 1
 	focusHeader = 2
-	leftWidth   = 22
 )
 
 type VersionInfo struct {
@@ -110,6 +109,10 @@ type Model struct {
 	helpSearch    textinput.Model
 	helpMatches   []int
 	helpMatchIdx  int
+
+	toolsW int
+	briefW int
+	helpW  int
 }
 
 type Options struct {
@@ -272,21 +275,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		cardW, helpW := m.calcPanelWidths()
+		m.toolsW, m.briefW, m.helpW = m.calcPanelWidths()
 		vpH := m.calcVpHeight()
 		leftVpH := max(max(m.height-7, 1)-2, 1)
 		if !m.ready {
-			m.leftViewport = viewport.New(leftWidth-2, leftVpH)
-			m.cardViewport = viewport.New(cardW, vpH)
-			m.helpViewport = viewport.New(helpW, vpH)
+			m.leftViewport = viewport.New(m.toolsW-2, leftVpH)
+			m.cardViewport = viewport.New(m.briefW, vpH)
+			m.helpViewport = viewport.New(m.helpW, vpH)
 			m.helpViewport.SetContent(m.renderHelpContent())
 			m.ready = true
 		} else {
-			m.leftViewport.Width = leftWidth - 2
+			m.leftViewport.Width = m.toolsW - 2
 			m.leftViewport.Height = leftVpH
-			m.cardViewport.Width = cardW
+			m.cardViewport.Width = m.briefW
 			m.cardViewport.Height = vpH
-			m.helpViewport.Width = helpW
+			m.helpViewport.Width = m.helpW
 			m.helpViewport.Height = vpH
 		}
 		m.leftViewport.SetContent(m.renderLeftContent())
@@ -764,17 +767,27 @@ func (m Model) calcVpHeight() int {
 	return max(m.height-10, 1)
 }
 
-func (m Model) calcPanelWidths() (cardW, helpW int) {
-	rightTotal := max(m.width-leftWidth-6, 4)
-	cardW = rightTotal / 2
-	helpW = rightTotal - cardW
+func (m Model) calcPanelWidths() (toolsW, briefW, helpW int) {
+	// 20%-40%-40% layout with 6 chars overhead (2 border chars per panel)
+	available := max(m.width-6, 1)
+	toolsW = max((available * 20) / 100, 15)
+	briefW = max((available * 40) / 100, 30)
+	helpW = available - toolsW - briefW
+	if helpW < 30 {
+		helpW = 30
+		briefW = available - toolsW - helpW
+		if briefW < 30 {
+			briefW = 30
+			toolsW = available - briefW - helpW
+		}
+	}
 	return
 }
 
 func (m Model) renderLeftContent() string {
 	var sb strings.Builder
 	filtered := m.filteredMeta()
-	maxName := leftWidth - 5
+	maxName := m.toolsW - 5
 
 	for i, mt := range filtered {
 		sym := loader.StatusSymbol[mt.Status]
@@ -844,14 +857,13 @@ func (m Model) renderLeft() string {
 	}
 
 	return panelStyle.
-		Width(leftWidth).
+		Width(m.toolsW).
 		Height(max(m.height-7, 1)).
 		Render(m.leftViewport.View())
 }
 
 func (m Model) renderRight() string {
-	rightTotal := max(m.width-leftWidth-6, 4)
-	cardW, _ := m.calcPanelWidths()
+	rightTotal := max(m.width-m.toolsW-6, 4)
 
 	header := m.renderRightHeader()
 
@@ -859,7 +871,7 @@ func (m Model) renderRight() string {
 	divider := lipgloss.NewStyle().Foreground(ui.ColorBorder).Render(strings.Repeat("─", dividerWidth))
 
 	cardBox := lipgloss.NewStyle().
-		Width(cardW).
+		Width(m.briefW).
 		BorderRight(true).
 		BorderStyle(lipgloss.NormalBorder()).
 		BorderForeground(ui.ColorBorder).
@@ -912,9 +924,8 @@ func (m Model) renderCard() string {
 		return ui.DescStyle.Render("Select a tool from the left panel.")
 	}
 
-	cardW, _ := m.calcPanelWidths()
-	inner := max(cardW-2, 1)
-	divW := max(cardW-4, 1)
+	inner := max(m.briefW-2, 1)
+	divW := max(m.briefW-4, 1)
 	divider := "\n" + lipgloss.NewStyle().Foreground(ui.ColorBorder).Render(strings.Repeat("─", divW)) + "\n"
 
 	var sb strings.Builder
@@ -946,7 +957,7 @@ func (m Model) renderCard() string {
 			sb.WriteString(ui.MetaNoteStyle.Render(line) + "\n")
 		}
 		if len(card.Languages) > 0 {
-			sb.WriteString(renderLangBar(card.Languages, cardW-4) + "\n")
+			sb.WriteString(renderLangBar(card.Languages, m.briefW-4) + "\n")
 		}
 		if card.RepoStatus != "" {
 			sb.WriteString(ui.RepoStatusStyle.Render(card.RepoStatus) + "\n")
@@ -1012,8 +1023,7 @@ func (m Model) renderChangelogBlock(msg changelogMsg) string {
 		sb.WriteString(ui.GithubStyle.Render("↗ "+msg.htmlUrl) + "\n")
 	}
 	sb.WriteString("\n")
-	cardW, _ := m.calcPanelWidths()
-	body := wrapText(stripMarkdown(msg.body), max(cardW-6, 10))
+	body := wrapText(stripMarkdown(msg.body), max(m.briefW-6, 10))
 	if body == "" {
 		sb.WriteString(ui.DescStyle.Render("No release notes available.") + "\n")
 	} else {
@@ -1040,9 +1050,8 @@ func openBrowser(url string) {
 	exec.Command(cmd, url).Start() //nolint:errcheck
 }
 
-const leftPanelEdge = leftWidth + 3
-
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	leftPanelEdge := m.toolsW + 3
 	if msg.X >= leftPanelEdge {
 		switch msg.Button {
 		case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
@@ -1418,8 +1427,7 @@ func (m Model) renderHelpContent() string {
 		return ui.MetaNoteStyle.Render("Press [m] for man page\nPress [h] for --help")
 	}
 	text := cached[m.helpMode]
-	_, helpW := m.calcPanelWidths()
-	if innerW := max(helpW-2, 20); innerW > 0 {
+	if innerW := max(m.helpW-2, 20); innerW > 0 {
 		text = wrapText(text, innerW)
 	}
 	if !m.helpSearching || m.helpSearch.Value() == "" {

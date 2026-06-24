@@ -36,9 +36,13 @@ func RunListWithFlags(flags ListFlags) error {
 		return nil
 	}
 
-	nameWidth, descWidth := columnWidths(tools)
+	nameWidth := columnWidths(tools)
 	for _, t := range tools {
-		fmt.Printf("%-*s  %-*s  [%s]\n", nameWidth, t.Name, descWidth, t.Description, t.Source)
+		github := t.GitHub
+		if github == "" {
+			github = "—"
+		}
+		fmt.Printf("%-*s  %s\n", nameWidth, t.Name, github)
 	}
 	return nil
 }
@@ -105,13 +109,10 @@ func hasTag(tags []string, tag string) bool {
 	return false
 }
 
-func columnWidths(tools []loader.Tool) (nameW, descW int) {
+func columnWidths(tools []loader.Tool) (nameW int) {
 	for _, t := range tools {
 		if len(t.Name) > nameW {
 			nameW = len(t.Name)
-		}
-		if len(t.Description) > descW {
-			descW = len(t.Description)
 		}
 	}
 	return

@@ -817,9 +817,6 @@ func (m Model) renderLeftContent() string {
 	maxName := m.toolsW - 5
 
 	for i, mt := range filtered {
-		sym := loader.StatusSymbol[mt.Status]
-		symStyled := ui.StatusStyle(mt.Status).Render(sym)
-
 		name := wrapText(mt.Name, maxName)
 		name = strings.TrimRight(name, "\n")
 
@@ -832,9 +829,9 @@ func (m Model) renderLeftContent() string {
 		isSelected := i == m.metaSelected && m.focus == focusTools && !m.searching
 		if isSelected {
 			circle := ui.SelectionBarStyle.Render("●")
-			sb.WriteString(circle + " " + symStyled + " " + name + updateMark + "\n")
+			sb.WriteString(circle + " " + name + updateMark + "\n")
 		} else {
-			sb.WriteString("  " + symStyled + " " + name + updateMark + "\n")
+			sb.WriteString("  " + name + updateMark + "\n")
 		}
 	}
 
@@ -848,12 +845,7 @@ func (m Model) renderLeftContent() string {
 		}
 	}
 
-	total := len(m.meta)
-	footer := fmt.Sprintf("  %d tools", total)
-	if m.metaFilter != "" {
-		footer += " [" + string(m.metaFilter) + "]"
-	}
-	return sb.String() + "\n" + ui.MetaNoteStyle.Render(footer)
+	return sb.String()
 }
 
 // syncToolsViewport adjusts YOffset so that metaSelected is visible.

@@ -37,10 +37,10 @@ Current implementation (`internal/model/model.go`, `internal/ui/styles.go`):
 - [x] Update `syncLeftViewport()` → `syncToolsViewport()`
 
 ### Task 3: Update focus state constants
-- [ ] `focusLeft = 0` → `focusTools` (Tools Panel)
-- [ ] `focusRight = 1` → `focusBrief` (Tool Brief Panel) — **new focus point**
-- [ ] `focusHeader = 2` → `focusHeader` (tool name header — unchanged)
-- [ ] Update all `switch m.focus` statements to use new constants
+- [x] `focusLeft = 0` → `focusTools` (Tools Panel)
+- [x] `focusRight = 1` → `focusBrief` (Tool Brief Panel) — **new focus point**
+- [x] `focusHeader = 2` → `focusHeader` (tool name header — unchanged)
+- [x] Update all `switch m.focus` statements to use new constants
 
 ### Task 4: Restructure right-side rendering
 Split current `renderRight()` into two methods:

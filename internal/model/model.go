@@ -23,8 +23,8 @@ import (
 )
 
 const (
-	focusLeft   = 0
-	focusRight  = 1
+	focusTools  = 0
+	focusBrief  = 1
 	focusHeader = 2
 )
 
@@ -155,7 +155,7 @@ func New(meta []loader.ToolMeta, opts Options) Model {
 		for i, mt := range m.meta {
 			if strings.EqualFold(mt.Name, opts.InitialTool) {
 				m.metaSelected = i
-				m.focus = focusRight
+				m.focus = focusBrief
 				break
 			}
 		}
@@ -371,8 +371,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "esc":
-			if m.focus == focusRight {
-				m.focus = focusLeft
+			if m.focus == focusBrief {
+				m.focus = focusTools
 				m.setToolsContent()
 				m.briefViewport.SetContent(m.renderCard())
 			} else {
@@ -380,21 +380,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "right", "l":
-			if m.focus == focusLeft {
+			if m.focus == focusTools {
 				m.focus = focusHeader
 				m.setToolsContent()
 				m.briefViewport.SetContent(m.renderCard())
 			}
 
 		case "left":
-			if m.focus == focusRight {
-				m.focus = focusLeft
+			if m.focus == focusBrief {
+				m.focus = focusTools
 				m.setToolsContent()
 				m.briefViewport.SetContent(m.renderCard())
 			}
 
 		case "j", "down":
-			if m.focus == focusLeft {
+			if m.focus == focusTools {
 				filtered := m.filteredMeta()
 				if m.metaSelected < len(filtered)-1 {
 					m.metaSelected++
@@ -407,7 +407,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "k", "up":
-			if m.focus == focusLeft {
+			if m.focus == focusTools {
 				if m.metaSelected > 0 {
 					m.metaSelected--
 					m.setToolsContent()
@@ -419,7 +419,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "pgup", "ctrl+b":
-			if m.focus == focusLeft {
+			if m.focus == focusTools {
 				step := max(m.toolsViewport.Height, 1)
 				m.metaSelected = max(m.metaSelected-step, 0)
 				m.setToolsContent()
@@ -429,7 +429,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "pgdown", "ctrl+f":
-			if m.focus == focusLeft {
+			if m.focus == focusTools {
 				filtered := m.filteredMeta()
 				step := max(m.toolsViewport.Height, 1)
 				m.metaSelected = min(m.metaSelected+step, max(len(filtered)-1, 0))
@@ -446,7 +446,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.briefViewport.GotoBottom()
 
 		case "/":
-			if m.focus == focusRight {
+			if m.focus == focusBrief {
 				m.helpSearching = true
 				m.helpSearch.Focus()
 				return m, textinput.Blink
@@ -456,7 +456,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, textinput.Blink
 
 		case "h":
-			if m.focus == focusRight {
+			if m.focus == focusBrief {
 				m.helpMode = helpModeHelp
 				if mt, ok := m.selectedMeta(); ok {
 					cached := m.helpCache[mt.Name]
@@ -471,7 +471,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "m":
-			if m.focus == focusRight {
+			if m.focus == focusBrief {
 				m.helpMode = helpModeMan
 				if mt, ok := m.selectedMeta(); ok {
 					cached := m.helpCache[mt.Name]
@@ -486,7 +486,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "f":
-			if m.focus == focusLeft {
+			if m.focus == focusTools {
 				switch m.metaFilter {
 				case "":
 					m.metaFilter = loader.StatusActive
@@ -531,7 +531,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.briefViewport.SetContent(m.renderCard())
 
 		case "v":
-			if m.focus == focusLeft && m.checkingVersionTool == "" {
+			if m.focus == focusTools && m.checkingVersionTool == "" {
 				if t, ok := m.selectedTool(); ok && t.GitHub != "" {
 					m.checkingVersionTool = t.Name
 					return m, fetchVersionCmd(t)
@@ -544,7 +544,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "e":
-			if m.focus == focusRight {
+			if m.focus == focusBrief {
 				if mt, ok := m.selectedMeta(); ok {
 					m.editingNote = true
 					m.noteInput.SetValue(mt.Note)
@@ -555,7 +555,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "t":
-			if m.focus == focusRight {
+			if m.focus == focusBrief {
 				if mt, ok := m.selectedMeta(); ok {
 					m.editingTags = true
 					m.tagsInput.SetValue(strings.Join(mt.Tags, ", "))
@@ -566,7 +566,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		if m.focus == focusRight {
+		if m.focus == focusBrief {
 			m.briefViewport, cmd = m.briefViewport.Update(msg)
 		}
 	}
@@ -735,7 +735,7 @@ func (m Model) renderHelp() string {
 		}
 		return style.Render(hints)
 	}
-	if m.focus == focusRight {
+	if m.focus == focusBrief {
 		hints := keyHint("h") + " --help  " + keyHint("m") + " man  " + keyHint("/") + " search  " + keyHint("o") + " github  " + keyHint("e") + " edit note  " + keyHint("t") + " edit tags  " + keyHint("←/esc") + " back  " + keyHint("q") + " quit"
 		return style.Render(hints)
 	}
@@ -804,7 +804,7 @@ func (m Model) renderLeftContent() string {
 			updateMark = " " + ui.UpdateAvailableStyle.Render("↑")
 		}
 
-		isSelected := i == m.metaSelected && m.focus == focusLeft && !m.searching
+		isSelected := i == m.metaSelected && m.focus == focusTools && !m.searching
 		if isSelected {
 			circle := ui.SelectionBarStyle.Render("●")
 			sb.WriteString(circle + " " + symStyled + " " + name + updateMark + "\n")
@@ -852,7 +852,7 @@ func (m *Model) setToolsContent() {
 
 func (m Model) renderLeft() string {
 	panelStyle := ui.PanelBorder
-	if m.focus == focusLeft {
+	if m.focus == focusTools {
 		panelStyle = ui.PanelBorderFocused
 	}
 
@@ -882,7 +882,7 @@ func (m Model) renderRight() string {
 	panels := lipgloss.JoinHorizontal(lipgloss.Top, cardBox, helpBox)
 
 	panelStyle := ui.PanelBorder
-	if m.focus == focusRight || m.focus == focusHeader {
+	if m.focus == focusBrief || m.focus == focusHeader {
 		panelStyle = ui.PanelBorderFocused
 	}
 
@@ -1059,8 +1059,8 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.briefViewport, cmd = m.briefViewport.Update(msg)
 			return m, cmd
 		case tea.MouseButtonLeft:
-			if msg.Action == tea.MouseActionPress && m.focus != focusRight {
-				m.focus = focusRight
+			if msg.Action == tea.MouseActionPress && m.focus != focusBrief {
+				m.focus = focusBrief
 				m.briefViewport.SetContent(m.renderCard())
 			}
 		}
@@ -1078,7 +1078,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 				m.briefViewport.GotoTop()
 				m.briefViewport.SetContent(m.renderCard())
 			}
-			m.focus = focusLeft
+			m.focus = focusTools
 		}
 	}
 	return m, nil
@@ -1144,13 +1144,13 @@ func (m Model) updateHeaderFocus(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "j", "down":
-		m.focus = focusRight
+		m.focus = focusBrief
 		m.setToolsContent()
 		m.briefViewport.GotoTop()
 		m.briefViewport.SetContent(m.renderCard())
 
 	case "left", "esc":
-		m.focus = focusLeft
+		m.focus = focusTools
 		m.setToolsContent()
 		m.briefViewport.SetContent(m.renderCard())
 

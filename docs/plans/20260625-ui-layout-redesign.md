@@ -54,11 +54,11 @@ Split current `renderRight()` into two methods:
 - [x] Update `View()` to call: `left := renderTools()`, `middle := renderBrief()`, `right := renderHelp()`, then join horizontally
 
 ### Task 5: Render tools list (left panel)
-- [ ] Create `renderTools()` method that wraps `toolsViewport.View()` with border
-  - [ ] Content: current `renderLeftContent()` (tool names + status symbols)
-  - [ ] Focus state: cyan border if `m.focus == focusTools`
-  - [ ] Apply styles from `ui.PanelBorder` / `ui.PanelBorderFocused`
-- [ ] Keep selection logic (orange dot `●` at cursor position)
+- [x] Create `renderTools()` method that wraps `toolsViewport.View()` with border
+  - [x] Content: current `renderLeftContent()` (tool names + status symbols)
+  - [x] Focus state: cyan border if `m.focus == focusTools`
+  - [x] Apply styles from `ui.PanelBorder` / `ui.PanelBorderFocused`
+- [x] Keep selection logic (orange dot `●` at cursor position)
 
 ### Task 6: Update Help Bar (renderHelp method)
 Replace current context-sensitive Help Bar with panel-specific hints:

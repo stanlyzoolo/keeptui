@@ -685,7 +685,7 @@ func (m Model) View() string {
 		return "Loading..."
 	}
 
-	left := m.renderLeft()
+	left := m.renderTools()
 	middle := m.renderBrief()
 	right := m.renderHelp()
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, middle, right)
@@ -851,7 +851,7 @@ func (m *Model) setToolsContent() {
 	m.syncToolsViewport()
 }
 
-func (m Model) renderLeft() string {
+func (m Model) renderTools() string {
 	panelStyle := ui.PanelBorder
 	if m.focus == focusTools {
 		panelStyle = ui.PanelBorderFocused

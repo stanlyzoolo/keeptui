@@ -945,9 +945,23 @@ func (m Model) renderCard() string {
 
 	var sb strings.Builder
 
-	// About block
+	// About block - format as: name (orange bold) about_text (gray italic)
 	if card, ok := m.repoCards[t.Name]; ok && card.About != "" {
-		sb.WriteString(ui.DescStyle.Render(wrapText(card.About, inner)) + "\n")
+		// Tool name in bold orange, truncate if very long to prevent overflow
+		name := t.Name
+		maxNameLen := 30
+		if utf8.RuneCountInString(name) > maxNameLen {
+			name = name[:maxNameLen-3] + "..."
+		}
+		nameStyle := lipgloss.NewStyle().Bold(true).Foreground(ui.ColorOrange)
+		nameRendered := nameStyle.Render(name)
+
+		// About text in gray italic, wrapped to fit within panel
+		aboutWidth := max(inner-utf8.RuneCountInString(name)-1, 20)
+		aboutWrapped := wrapText(card.About, aboutWidth)
+		aboutRendered := ui.MetaNoteStyle.Render(aboutWrapped)
+
+		sb.WriteString(nameRendered + " " + aboutRendered + "\n")
 	}
 	if t.GitHub != "" {
 		sb.WriteString(ui.GithubStyle.Render(wrapText("https://"+t.GitHub, inner)) + "\n")

@@ -4,6 +4,7 @@ import "github.com/charmbracelet/lipgloss"
 
 var (
 	ColorPrimary  = lipgloss.Color("#DA7756")
+	ColorOrange   = lipgloss.Color("#E5A040")
 	ColorMuted    = lipgloss.Color("#AAAAAA")
 	ColorBorder   = lipgloss.Color("#555555")
 	ColorText     = lipgloss.Color("#E8E8E8")

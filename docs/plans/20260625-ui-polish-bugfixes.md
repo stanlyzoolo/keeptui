@@ -31,16 +31,16 @@ Current implementation state (after `20260625-ui-layout-redesign.md`):
   - [x] Return `sb.String()` without appending footer
 
 ### Task 2: Redesign Tool Brief Panel first line — formatted About
-- [ ] Update `renderBrief()` to format About line as: `name (bold orange) description (gray italic)`
-  - [ ] Extract tool name: `t.Name`
-  - [ ] Extract About text: `card.About`
-  - [ ] Apply styles:
-    - [ ] `ui.TitleStyle.Bold().Foreground(ui.ColorOrange).Render(t.Name)`
-    - [ ] Build divider or space between name and About
-    - [ ] `ui.DescStyle.Italic().Foreground(lipgloss.Color("8")).Render(about_text)` (or use existing dim/gray style)
-  - [ ] Join on same line with proper spacing
-  - [ ] If About is empty, show only name
-  - [ ] If name is very long, truncate to prevent panel overflow
+- [x] Update `renderBrief()` to format About line as: `name (bold orange) description (gray italic)`
+  - [x] Extract tool name: `t.Name`
+  - [x] Extract About text: `card.About`
+  - [x] Apply styles:
+    - [x] `ui.TitleStyle.Bold().Foreground(ui.ColorOrange).Render(t.Name)`
+    - [x] Build divider or space between name and About
+    - [x] `ui.DescStyle.Italic().Foreground(lipgloss.Color("8")).Render(about_text)` (or use existing dim/gray style)
+  - [x] Join on same line with proper spacing
+  - [x] If About is empty, show only name
+  - [x] If name is very long, truncate to prevent panel overflow
 
 ### Task 3: Add repo link to Tool Brief Panel (before Stars)
 - [ ] Update `renderBrief()` to insert repo URL line after first divider

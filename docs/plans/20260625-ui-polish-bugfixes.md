@@ -66,13 +66,13 @@ Current implementation state (after `20260625-ui-layout-redesign.md`):
   - [x] Ensure no overflow beyond panel boundary
 
 ### Task 6: Add right border to Tool Man Panel
-- [ ] Modify `renderHelp()` method (or inline in `View()`)
-  - [ ] Current render: `helpViewport.View()` without borders
-  - [ ] Add `lipgloss.NewStyle().BorderRight(true)` around help panel
-  - [ ] Use `ui.ColorBorder` for border color (matches left/top/bottom in other panels)
-  - [ ] Ensure right border aligns vertically with Help Bar bottom edge
-  - [ ] Test with different terminal widths to verify alignment
-  - [ ] Note: Help Bar is full-width; right border should align with its right edge
+- [x] Modify `renderHelp()` method (or inline in `View()`)
+  - [x] Current render: `helpViewport.View()` without borders
+  - [x] Add `lipgloss.NewStyle().BorderRight(true)` around help panel
+  - [x] Use `ui.ColorBorder` for border color (matches left/top/bottom in other panels)
+  - [x] Ensure right border aligns vertically with Help Bar bottom edge
+  - [x] Test with different terminal widths to verify alignment
+  - [x] Note: Help Bar is full-width; right border should align with its right edge
 
 ### Task 7: Update width calculations for dividers
 - [ ] Review `calcPanelWidths()` to ensure `briefW` and `helpW` account for borders

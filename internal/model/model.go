@@ -902,6 +902,8 @@ func (m Model) renderHelp() string {
 		panelStyle = ui.PanelBorderFocused
 	}
 
+	panelStyle = panelStyle.BorderRight(true)
+
 	return panelStyle.
 		Width(m.helpW).
 		Height(max(m.height-7, 1)).

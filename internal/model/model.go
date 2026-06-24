@@ -372,7 +372,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "esc":
-			if m.focus == focusBrief {
+			if m.focus == focusHelp {
+				m.focus = focusBrief
+				m.briefViewport.SetContent(m.renderCard())
+			} else if m.focus == focusBrief {
 				m.focus = focusTools
 				m.setToolsContent()
 				m.briefViewport.SetContent(m.renderCard())
@@ -382,13 +385,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "right", "l":
 			if m.focus == focusTools {
-				m.focus = focusHeader
+				m.focus = focusBrief
 				m.setToolsContent()
 				m.briefViewport.SetContent(m.renderCard())
+			} else if m.focus == focusBrief {
+				m.focus = focusHelp
+				m.helpViewport.SetContent(m.renderHelpContent())
 			}
 
 		case "left":
-			if m.focus == focusBrief {
+			if m.focus == focusHelp {
+				m.focus = focusBrief
+				m.briefViewport.SetContent(m.renderCard())
+			} else if m.focus == focusBrief {
 				m.focus = focusTools
 				m.setToolsContent()
 				m.briefViewport.SetContent(m.renderCard())
@@ -441,13 +450,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "g":
-			m.briefViewport.GotoTop()
+			if m.focus == focusBrief {
+				m.briefViewport.GotoTop()
+			} else if m.focus == focusHelp {
+				m.helpViewport.GotoTop()
+			}
 
 		case "G":
-			m.briefViewport.GotoBottom()
+			if m.focus == focusBrief {
+				m.briefViewport.GotoBottom()
+			} else if m.focus == focusHelp {
+				m.helpViewport.GotoBottom()
+			}
 
 		case "/":
-			if m.focus == focusBrief {
+			if m.focus == focusBrief || m.focus == focusHelp {
 				m.helpSearching = true
 				m.helpSearch.Focus()
 				return m, textinput.Blink
@@ -457,7 +474,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, textinput.Blink
 
 		case "h":
-			if m.focus == focusBrief {
+			if m.focus == focusBrief || m.focus == focusHelp {
+				m.focus = focusHelp
 				m.helpMode = helpModeHelp
 				if mt, ok := m.selectedMeta(); ok {
 					cached := m.helpCache[mt.Name]
@@ -472,7 +490,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "m":
-			if m.focus == focusBrief {
+			if m.focus == focusBrief || m.focus == focusHelp {
+				m.focus = focusHelp
 				m.helpMode = helpModeMan
 				if mt, ok := m.selectedMeta(); ok {
 					cached := m.helpCache[mt.Name]
@@ -569,6 +588,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		if m.focus == focusBrief {
 			m.briefViewport, cmd = m.briefViewport.Update(msg)
+		} else if m.focus == focusHelp {
+			m.helpViewport, cmd = m.helpViewport.Update(msg)
 		}
 	}
 

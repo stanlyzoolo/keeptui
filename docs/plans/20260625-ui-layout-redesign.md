@@ -68,17 +68,17 @@ Replace current context-sensitive Help Bar with panel-specific hints:
 - [x] Preserve existing search/edit mode hints (unchanged)
 
 ### Task 7: Update navigation and key bindings
-- [ ] **Arrow keys**:
-  - [ ] `→/l` from focusTools → focusBrief
-  - [ ] `→/l` from focusBrief → focusHelp
-  - [ ] `←/h` from focusHelp → focusBrief
-  - [ ] `←/h` from focusBrief → focusTools
-- [ ] **Vertical navigation**:
-  - [ ] `j/k/↑/↓` only in focusTools (tool list)
-  - [ ] `j/k/↑/↓/PgUp/PgDn` in focusBrief and focusHelp (panel scrolling)
-- [ ] **Tab-based navigation** (optional enhancement):
-  - [ ] Preserve existing left/right arrow semantics
-  - [ ] Consider: Tab cycles focusTools → focusBrief → focusHelp → focusTools
+- [x] **Arrow keys**:
+  - [x] `→/l` from focusTools → focusBrief
+  - [x] `→/l` from focusBrief → focusHelp
+  - [x] `←` from focusHelp → focusBrief
+  - [x] `←` from focusBrief → focusTools
+- [x] **Vertical navigation**:
+  - [x] `j/k/↑/↓` only in focusTools (tool list)
+  - [x] `j/k/↑/↓/PgUp/PgDn` in focusBrief and focusHelp (panel scrolling)
+- [x] **Tab-based navigation** (optional enhancement):
+  - [x] Preserve existing left/right arrow semantics
+  - [x] Note: Tab not needed, arrow keys + h/m provide sufficient navigation
 
 ### Task 8: Remove emoji from styles
 - [ ] Delete emoji-heavy rendering from `renderCard()`:

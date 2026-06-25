@@ -4,11 +4,11 @@ import "github.com/charmbracelet/lipgloss"
 
 var (
 	ColorPrimary  = lipgloss.Color("#DA7756")
+	ColorOrange   = lipgloss.Color("#E5A040")
 	ColorMuted    = lipgloss.Color("#AAAAAA")
-	ColorBg       = lipgloss.Color("#0A0A0A")
+	ColorDim      = lipgloss.Color("#888888")
 	ColorBorder   = lipgloss.Color("#555555")
 	ColorText     = lipgloss.Color("#E8E8E8")
-	ColorSelected = lipgloss.Color("#DA7756")
 	ColorCategory = lipgloss.Color("#E8A87C")
 	ColorKey      = lipgloss.Color("#C8A97E")
 
@@ -24,37 +24,16 @@ var (
 	SelectionBarStyle = lipgloss.NewStyle().
 				Foreground(ColorPrimary)
 
-	// SelectedBindingStyle is kept minimal — selection is indicated by ● only
-	SelectedBindingStyle = lipgloss.NewStyle()
-
-	BindingCountStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#666666"))
-
 	TitleStyle = lipgloss.NewStyle().
 			Bold(true).
 			Foreground(ColorPrimary).
 			PaddingLeft(1)
-
-	// ToolSelectedStyle has no special foreground — circle indicator does the work
-	ToolSelectedStyle = lipgloss.NewStyle()
-
-	ToolNormalStyle = lipgloss.NewStyle().
-			Foreground(ColorMuted)
-
-	CategoryStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(ColorCategory)
-
-	KeyStyle = lipgloss.NewStyle().
-			Foreground(ColorKey).
-			Width(22)
 
 	DescStyle = lipgloss.NewStyle().
 			Foreground(ColorText)
 
 	HelpStyle = lipgloss.NewStyle().
 			Foreground(ColorMuted).
-			PaddingLeft(1).
 			BorderTop(true).
 			BorderBottom(true).
 			BorderLeft(true).
@@ -70,10 +49,6 @@ var (
 				Foreground(ColorKey).
 				Bold(true)
 
-	HeaderDescStyle = lipgloss.NewStyle().
-			Foreground(ColorMuted).
-			Italic(true)
-
 	GithubStyle = lipgloss.NewStyle().
 			Foreground(ColorMuted)
 
@@ -86,28 +61,6 @@ var (
 	UpdateAvailableStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#E5A040")).
 				Bold(true)
-
-	TabActiveStyle = lipgloss.NewStyle().
-			Foreground(ColorPrimary).
-			Bold(true)
-
-	TabInactiveStyle = lipgloss.NewStyle().
-				Foreground(ColorMuted)
-
-	PopupStyle = lipgloss.NewStyle().
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(ColorPrimary).
-			Padding(1, 2)
-
-	CommandCmdStyle = lipgloss.NewStyle().
-				Foreground(ColorKey).
-				Bold(true)
-
-	CommandDescStyle = lipgloss.NewStyle().
-				Foreground(ColorText)
-
-	CommandCountStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#5588AA"))
 
 	// My Tools status colors
 	StatusColorActive    = lipgloss.Color("#6AAF6A")
@@ -129,12 +82,15 @@ var (
 	StatusStyleArchived = lipgloss.NewStyle().
 				Foreground(StatusColorArchived)
 
-	TopTabActiveStyle = lipgloss.NewStyle().
-				Foreground(ColorPrimary).
-				Bold(true)
+	HelpFlagStyle = lipgloss.NewStyle().
+			Foreground(ColorPrimary)
 
-	TopTabInactiveStyle = lipgloss.NewStyle().
-				Foreground(ColorMuted)
+	HelpSectionStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(ColorCategory)
+
+	HelpMetaStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#5588AA"))
 
 	MetaTagStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#5588AA"))
@@ -149,4 +105,25 @@ var (
 
 	MetaDetailValueStyle = lipgloss.NewStyle().
 				Foreground(ColorText)
+
+	RepoStatusStyle = lipgloss.NewStyle().
+				Foreground(ColorMuted).
+				Italic(true)
+
+	// SectionLabelStyle renders the bracketed section headers in the brief
+	// panel, e.g. "[info]". Bold + category color to stand out from the line.
+	SectionLabelStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(ColorCategory)
+
+	// InfoStyle is the non-italic muted style for the [info] section lines.
+	InfoStyle = lipgloss.NewStyle().
+			Foreground(ColorMuted)
+
+	// Scrollbar thumb: peach when the panel is focused, dim otherwise.
+	ScrollThumbStyle = lipgloss.NewStyle().
+				Foreground(ColorPrimary)
+
+	ScrollThumbDimStyle = lipgloss.NewStyle().
+				Foreground(ColorDim)
 )

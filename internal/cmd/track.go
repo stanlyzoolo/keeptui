@@ -20,6 +20,7 @@ func RunTrack(args []string) error {
 	statusFlag := fs.String("status", "trying", "status: active|trying|forgotten|archived")
 	tagsFlag := fs.String("tags", "", "comma-separated tags")
 	noteFlag := fs.String("note", "", "note text")
+	githubFlag := fs.String("github", "", "GitHub repo, e.g. github.com/owner/repo")
 
 	if err := fs.Parse(rest); err != nil {
 		return err
@@ -53,6 +54,9 @@ func RunTrack(args []string) error {
 		if *noteFlag != "" {
 			entry.Note = *noteFlag
 		}
+		if *githubFlag != "" {
+			entry.GitHub = *githubFlag
+		}
 	} else {
 		entry = loader.ToolMeta{
 			Name:   name,
@@ -64,6 +68,9 @@ func RunTrack(args []string) error {
 		}
 		if *noteFlag != "" {
 			entry.Note = *noteFlag
+		}
+		if *githubFlag != "" {
+			entry.GitHub = *githubFlag
 		}
 	}
 

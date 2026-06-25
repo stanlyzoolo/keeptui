@@ -1,12 +1,17 @@
 package model
 
 import (
+	"context"
 	"fmt"
+	"os"
 	"os/exec"
+	"regexp"
 	"runtime"
+	"sort"
 	"strings"
+	"time"
+	"unicode/utf8"
 
-	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -18,19 +23,9 @@ import (
 )
 
 const (
-	focusLeft  = 0
-	focusRight = 1
-	leftWidth  = 22
-
-	tabKeys     = 0
-	tabCommands = 1
-)
-
-type viewMode int
-
-const (
-	viewHotkeys viewMode = 0
-	viewMyTools viewMode = 1
+	focusTools = 0
+	focusBrief = 1
+	focusHelp  = 2
 )
 
 type VersionInfo struct {
@@ -39,42 +34,85 @@ type VersionInfo struct {
 }
 
 type versionMsg struct {
-	toolName  string
-	installed string
-	latest    string
+	toolName   string
+	installed  string
+	latest     string
+	repoStatus string
 }
 
+type checkVersionMsg struct {
+	toolName   string
+	latest     string
+	repoStatus string
+	err        error
+}
+
+type changelogMsg struct {
+	toolName    string
+	tag         string
+	body        string
+	htmlUrl     string
+	publishedAt string
+	err         error
+}
+
+type repoCardMsg struct {
+	toolName string
+	card     version.RepoCard
+	err      error
+}
+
+type helpOutputMsg struct {
+	toolName string
+	mode     int
+	output   string
+	err      error
+}
+
+const (
+	helpModeHelp = 0
+	helpModeMan  = 1
+)
+
 type Model struct {
-	// hotkeys view
-	tools           []loader.Tool
-	versions        map[string]VersionInfo
-	selected        int
-	focus           int
-	selectedBinding int
-	rightTab        int
-	selectedCommand int
-	showPopup       bool
-	popupCommand    loader.Command
-	viewport        viewport.Model
-	search          textinput.Model
-	searching       bool
-	statusMsg       string
-	width           int
-	height          int
-	ready           bool
+	tools               []loader.Tool
+	versions            map[string]VersionInfo
+	repoStatus          map[string]string
+	repoCards           map[string]version.RepoCard
+	changelogData       map[string]changelogMsg
+	changelogLoadingFor string
+	checkingVersionTool string
+	focus               int
+	toolsViewport       viewport.Model
+	briefViewport       viewport.Model
+	helpViewport        viewport.Model
+	search              textinput.Model
+	searching           bool
+	statusMsg           string
+	width               int
+	height              int
+	ready               bool
 
-	// top-level view
-	view viewMode
+	editingNote bool
+	editingTags bool
+	noteInput   textinput.Model
+	tagsInput   textinput.Model
 
-	// my tools view
 	meta         []loader.ToolMeta
 	metaFilter   loader.Status
 	metaSelected int
-	metaDetail   bool
-	editingNote  bool
-	editingTags  bool
-	noteInput    textinput.Model
-	tagsInput    textinput.Model
+
+	helpMode      int
+	helpLoadingFor string
+	helpCache     map[string][2]string
+	helpSearching bool
+	helpSearch    textinput.Model
+	helpMatches   []int
+	helpMatchIdx  int
+
+	toolsW int
+	briefW int
+	helpW  int
 }
 
 type Options struct {
@@ -82,33 +120,42 @@ type Options struct {
 	InitialSearch string
 }
 
-func New(tools []loader.Tool, meta []loader.ToolMeta, opts Options) Model {
+func New(meta []loader.ToolMeta, opts Options) Model {
 	ti := textinput.New()
 	ti.Placeholder = "search..."
 	ti.CharLimit = 64
 
-	noteInput := textinput.New()
-	noteInput.Placeholder = "note text..."
-	noteInput.CharLimit = 256
+	ni := textinput.New()
+	ni.Placeholder = "note..."
+	ni.CharLimit = 256
 
-	tagsInput := textinput.New()
-	tagsInput.Placeholder = "tag1, tag2..."
-	tagsInput.CharLimit = 128
+	tgi := textinput.New()
+	tgi.Placeholder = "tag1, tag2..."
+	tgi.CharLimit = 256
+
+	hsi := textinput.New()
+	hsi.Placeholder = "search help..."
+	hsi.CharLimit = 128
 
 	m := Model{
-		tools:     tools,
-		versions:  make(map[string]VersionInfo),
-		search:    ti,
-		meta:      meta,
-		noteInput: noteInput,
-		tagsInput: tagsInput,
+		tools:         loader.ToolsFromMeta(meta),
+		versions:      make(map[string]VersionInfo),
+		repoStatus:    make(map[string]string),
+		repoCards:     make(map[string]version.RepoCard),
+		changelogData: make(map[string]changelogMsg),
+		helpCache:     make(map[string][2]string),
+		search:        ti,
+		noteInput:     ni,
+		tagsInput:     tgi,
+		helpSearch:    hsi,
+		meta:          meta,
 	}
 
 	if opts.InitialTool != "" {
-		for i, t := range tools {
-			if strings.EqualFold(t.Name, opts.InitialTool) {
-				m.selected = i
-				m.focus = focusRight
+		for i, mt := range m.meta {
+			if strings.EqualFold(mt.Name, opts.InitialTool) {
+				m.metaSelected = i
+				m.focus = focusBrief
 				break
 			}
 		}
@@ -124,18 +171,35 @@ func New(tools []loader.Tool, meta []loader.ToolMeta, opts Options) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	cmds := make([]tea.Cmd, len(m.tools))
-	for i, t := range m.tools {
-		cmds[i] = func() tea.Msg {
+	cmds := make([]tea.Cmd, 0, len(m.tools)*2)
+	for _, t := range m.tools {
+		cmds = append(cmds, func() tea.Msg {
+			installed := version.InstalledVersion(t)
+			latest := version.GetLatest(t.GitHub)
+			repoStatus := version.GetCachedRepoStatus(t.GitHub)
 			return versionMsg{
-				toolName:  t.Name,
-				installed: version.InstalledVersion(t),
-				latest:    version.GetLatest(t.GitHub),
+				toolName:   t.Name,
+				installed:  installed,
+				latest:     latest,
+				repoStatus: repoStatus,
 			}
+		})
+		if t.GitHub != "" {
+			cmds = append(cmds, fetchRepoCardCmd(t))
 		}
 	}
 	if m.searching {
 		cmds = append(cmds, textinput.Blink)
+	}
+	// Auto-fetch --help and changelog for initial selected tool
+	if mt, ok := m.selectedMeta(); ok {
+		cached := m.helpCache[mt.Name]
+		if cached[helpModeHelp] == "" {
+			cmds = append(cmds, fetchHelpCmd(mt.Name, helpModeHelp))
+		}
+	}
+	if t, ok := m.selectedTool(); ok && t.GitHub != "" {
+		cmds = append(cmds, fetchChangelogCmd(t.GitHub, t.Name))
 	}
 	return tea.Batch(cmds...)
 }
@@ -145,54 +209,157 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
-		if m.view == viewHotkeys {
-			return m.handleMouse(msg)
-		}
-		return m, nil
+		return m.handleMouse(msg)
 
 	case versionMsg:
 		m.versions[msg.toolName] = VersionInfo{
 			Installed: msg.installed,
 			Latest:    msg.latest,
 		}
-		m.viewport.SetContent(m.renderContent())
+		if msg.repoStatus != "" {
+			m.repoStatus[msg.toolName] = msg.repoStatus
+		}
+		m.toolsViewport.SetContent(m.renderLeftContent())
+		m.briefViewport.SetContent(m.renderCard())
+		return m, nil
+
+	case checkVersionMsg:
+		if msg.toolName == m.checkingVersionTool {
+			m.checkingVersionTool = ""
+		}
+		if msg.err == nil {
+			vi := m.versions[msg.toolName]
+			vi.Latest = msg.latest
+			m.versions[msg.toolName] = vi
+			if msg.repoStatus != "" {
+				m.repoStatus[msg.toolName] = msg.repoStatus
+			}
+		} else {
+			m.statusMsg = "Version check failed: " + msg.err.Error()
+		}
+		m.toolsViewport.SetContent(m.renderLeftContent())
+		m.briefViewport.SetContent(m.renderCard())
+		return m, nil
+
+	case changelogMsg:
+		if msg.toolName == m.changelogLoadingFor {
+			m.changelogLoadingFor = ""
+		}
+		m.changelogData[msg.toolName] = msg
+		m.briefViewport.SetContent(m.renderCard())
+		return m, nil
+
+	case repoCardMsg:
+		if msg.err == nil {
+			m.repoCards[msg.toolName] = msg.card
+			m.briefViewport.SetContent(m.renderCard())
+		}
+		return m, nil
+
+	case helpOutputMsg:
+		m.helpLoadingFor = ""
+		cached := m.helpCache[msg.toolName]
+		if msg.err == nil && msg.output != "" {
+			cached[msg.mode] = msg.output
+		} else if msg.mode == helpModeHelp {
+			cached[msg.mode] = "--help not available"
+		} else {
+			cached[msg.mode] = "man page not available"
+		}
+		m.helpCache[msg.toolName] = cached
+		if mt, ok := m.selectedMeta(); ok && mt.Name == msg.toolName {
+			m.helpViewport.SetContent(m.renderHelpContent())
+		}
 		return m, nil
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		rightWidth := max(m.width-leftWidth-6, 1)
-		vpHeight := max(m.height-9, 1)
+		m.toolsW, m.briefW, m.helpW = m.calcPanelWidths()
+		vpH := m.calcVpHeight()
+		leftVpH := vpH
 		if !m.ready {
-			m.viewport = viewport.New(rightWidth, vpHeight)
+			// Viewports are 1 col narrower than their panel to leave a gutter
+			// for the scrollbar rendered by withScrollbar.
+			m.toolsViewport = viewport.New(m.toolsW-1, leftVpH)
+			m.briefViewport = viewport.New(m.briefW-1, vpH)
+			m.helpViewport = viewport.New(m.helpW-1, vpH)
+			m.helpViewport.SetContent(m.renderHelpContent())
 			m.ready = true
 		} else {
-			m.viewport.Width = rightWidth
-			m.viewport.Height = vpHeight
+			m.toolsViewport.Width = m.toolsW - 1
+			m.toolsViewport.Height = leftVpH
+			m.briefViewport.Width = m.briefW - 1
+			m.briefViewport.Height = vpH
+			m.helpViewport.Width = m.helpW - 1
+			m.helpViewport.Height = vpH
 		}
-		m.viewport.SetContent(m.renderContent())
+		m.toolsViewport.SetContent(m.renderLeftContent())
+		m.syncToolsViewport()
+		m.briefViewport.SetContent(m.renderCard())
 		return m, nil
 
 	case tea.KeyMsg:
 		m.statusMsg = ""
 
-		if m.view == viewMyTools {
-			return m.updateMyTools(msg)
+		if m.editingNote {
+			return m.updateNoteEdit(msg)
+		}
+		if m.editingTags {
+			return m.updateTagsEdit(msg)
 		}
 
-		// --- Hotkeys view ---
+		if m.helpSearching {
+			switch msg.String() {
+			case "esc":
+				m.helpSearching = false
+				m.helpSearch.SetValue("")
+				m.helpSearch.Blur()
+				m.helpMatches = nil
+				m.helpMatchIdx = 0
+				m.helpViewport.SetContent(m.renderHelpContent())
+				return m, nil
+			case "n":
+				if len(m.helpMatches) > 0 {
+					m.helpMatchIdx = (m.helpMatchIdx + 1) % len(m.helpMatches)
+					m.helpViewport.SetYOffset(m.helpMatches[m.helpMatchIdx])
+				}
+				return m, nil
+			case "N":
+				if len(m.helpMatches) > 0 {
+					m.helpMatchIdx = (m.helpMatchIdx - 1 + len(m.helpMatches)) % len(m.helpMatches)
+					m.helpViewport.SetYOffset(m.helpMatches[m.helpMatchIdx])
+				}
+				return m, nil
+			default:
+				m.helpSearch, cmd = m.helpSearch.Update(msg)
+				query := m.helpSearch.Value()
+				m.helpMatches = findMatches(m.rawHelpText(), query)
+				m.helpMatchIdx = 0
+				m.helpViewport.SetContent(m.renderHelpContent())
+				if len(m.helpMatches) > 0 {
+					m.helpViewport.SetYOffset(m.helpMatches[0])
+				}
+				return m, cmd
+			}
+		}
+
 		if m.searching {
 			switch msg.String() {
 			case "esc":
 				m.searching = false
 				m.search.SetValue("")
 				m.search.Blur()
-				m.viewport.SetContent(m.renderContent())
+				m.metaSelected = 0
+				m.setToolsContent()
+				m.briefViewport.SetContent(m.renderCard())
 				return m, nil
 			default:
 				m.search, cmd = m.search.Update(msg)
-				m.viewport.SetContent(m.renderContent())
-				m.viewport.GotoTop()
+				m.metaSelected = 0
+				m.setToolsContent()
+				m.briefViewport.SetContent(m.renderCard())
+				m.briefViewport.GotoTop()
 				return m, cmd
 			}
 		}
@@ -202,339 +369,357 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 
 		case "esc":
-			if m.showPopup {
-				m.showPopup = false
-				m.viewport.SetContent(m.renderContent())
-			} else if m.focus == focusRight {
-				m.focus = focusLeft
-				m.viewport.SetContent(m.renderContent())
+			if m.focus == focusHelp {
+				m.focus = focusBrief
+				m.briefViewport.SetContent(m.renderCard())
+			} else if m.focus == focusBrief {
+				m.focus = focusTools
+				m.setToolsContent()
+				m.briefViewport.SetContent(m.renderCard())
 			} else {
 				return m, tea.Quit
 			}
 
-		case "tab":
-			if m.focus == focusLeft && !m.searching {
-				// top-level switch: Hotkeys → My Tools
-				m.view = viewMyTools
-				m.metaSelected = 0
-				m.metaDetail = false
-				return m, nil
-			}
-			if m.focus == focusRight && !m.searching {
-				if len(m.tools) > 0 && len(m.tools[m.selected].CommandGroups) > 0 {
-					if m.rightTab == tabKeys {
-						m.rightTab = tabCommands
-					} else {
-						m.rightTab = tabKeys
-					}
-					m.selectedBinding = 0
-					m.selectedCommand = 0
-					m.viewport.GotoTop()
-					m.viewport.SetContent(m.renderContent())
-				}
-			}
-
-		case "enter":
-			if m.focus == focusRight && !m.searching && !m.showPopup && m.rightTab == tabCommands {
-				if c := m.commandAt(m.selectedCommand); c != nil {
-					m.popupCommand = *c
-					m.showPopup = true
-				}
-			}
-
 		case "right", "l":
-			if m.focus == focusLeft {
-				m.focus = focusRight
-				m.selectedBinding = 0
-				m.selectedCommand = 0
-				m.rightTab = tabKeys
-				m.viewport.SetContent(m.renderContent())
-				m.scrollToBinding()
+			if m.focus == focusTools {
+				m.focus = focusBrief
+				m.setToolsContent()
+				m.briefViewport.SetContent(m.renderCard())
+			} else if m.focus == focusBrief {
+				m.focus = focusHelp
+				m.helpViewport.SetContent(m.renderHelpContent())
 			}
 
-		case "left", "h":
-			if m.focus == focusRight && !m.showPopup {
-				m.focus = focusLeft
-				m.viewport.SetContent(m.renderContent())
+		case "left":
+			if m.focus == focusHelp {
+				m.focus = focusBrief
+				m.briefViewport.SetContent(m.renderCard())
+			} else if m.focus == focusBrief {
+				m.focus = focusTools
+				m.setToolsContent()
+				m.briefViewport.SetContent(m.renderCard())
 			}
 
 		case "j", "down":
-			if m.showPopup {
-				break
-			}
-			if m.focus == focusLeft {
-				if m.selected < len(m.tools)-1 {
-					m.selected++
-					m.selectedBinding = 0
-					m.selectedCommand = 0
-					m.rightTab = tabKeys
-					m.viewport.GotoTop()
-					m.viewport.SetContent(m.renderContent())
+			if m.focus == focusTools {
+				filtered := m.filteredMeta()
+				if m.metaSelected < len(filtered)-1 {
+					m.metaSelected++
+					m.setToolsContent()
+					m.briefViewport.Height = m.calcVpHeight()
+					m.briefViewport.GotoTop()
+					m.briefViewport.SetContent(m.renderCard())
+					return m, m.autoFetchCmdsForSelected()
 				}
-			} else if m.rightTab == tabKeys {
-				m.selectedBinding = min(m.selectedBinding+1, m.totalBindings()-1)
-				m.viewport.SetContent(m.renderContent())
-				m.scrollToBinding()
 			} else {
-				m.selectedCommand = min(m.selectedCommand+1, m.totalCommands()-1)
-				m.viewport.SetContent(m.renderContent())
-				m.scrollToCommand()
+				// Arrows scroll faster than line-by-line; j stays per-line.
+				step := 1
+				if msg.String() == "down" {
+					step = 3
+				}
+				if m.focus == focusBrief {
+					m.briefViewport.ScrollDown(step)
+				} else if m.focus == focusHelp {
+					m.helpViewport.ScrollDown(step)
+				}
+				return m, nil
 			}
 
 		case "k", "up":
-			if m.showPopup {
-				break
-			}
-			if m.focus == focusLeft {
-				if m.selected > 0 {
-					m.selected--
-					m.selectedBinding = 0
-					m.selectedCommand = 0
-					m.rightTab = tabKeys
-					m.viewport.GotoTop()
-					m.viewport.SetContent(m.renderContent())
+			if m.focus == focusTools {
+				if m.metaSelected > 0 {
+					m.metaSelected--
+					m.setToolsContent()
+					m.briefViewport.Height = m.calcVpHeight()
+					m.briefViewport.GotoTop()
+					m.briefViewport.SetContent(m.renderCard())
+					return m, m.autoFetchCmdsForSelected()
 				}
-			} else if m.rightTab == tabKeys {
-				m.selectedBinding = max(m.selectedBinding-1, 0)
-				m.viewport.SetContent(m.renderContent())
-				m.scrollToBinding()
 			} else {
-				m.selectedCommand = max(m.selectedCommand-1, 0)
-				m.viewport.SetContent(m.renderContent())
-				m.scrollToCommand()
+				step := 1
+				if msg.String() == "up" {
+					step = 3
+				}
+				if m.focus == focusBrief {
+					m.briefViewport.ScrollUp(step)
+				} else if m.focus == focusHelp {
+					m.helpViewport.ScrollUp(step)
+				}
+				return m, nil
+			}
+
+		case "pgup", "ctrl+b":
+			if m.focus == focusTools {
+				step := max(m.toolsViewport.Height, 1)
+				m.metaSelected = max(m.metaSelected-step, 0)
+				m.setToolsContent()
+				m.briefViewport.GotoTop()
+				m.briefViewport.SetContent(m.renderCard())
+				return m, m.autoFetchCmdsForSelected()
+			}
+
+		case "pgdown", "ctrl+f":
+			if m.focus == focusTools {
+				filtered := m.filteredMeta()
+				step := max(m.toolsViewport.Height, 1)
+				m.metaSelected = min(m.metaSelected+step, max(len(filtered)-1, 0))
+				m.setToolsContent()
+				m.briefViewport.GotoTop()
+				m.briefViewport.SetContent(m.renderCard())
+				return m, m.autoFetchCmdsForSelected()
 			}
 
 		case "g":
-			if m.focus == focusRight {
-				m.selectedBinding = 0
-				m.selectedCommand = 0
-				m.viewport.GotoTop()
-				m.viewport.SetContent(m.renderContent())
-			} else {
-				m.viewport.GotoTop()
+			if m.focus == focusBrief {
+				m.briefViewport.GotoTop()
+			} else if m.focus == focusHelp {
+				m.helpViewport.GotoTop()
 			}
 
 		case "G":
-			if m.focus == focusRight {
-				if m.rightTab == tabKeys {
-					m.selectedBinding = max(m.totalBindings()-1, 0)
-					m.viewport.SetContent(m.renderContent())
-					m.scrollToBinding()
-				} else {
-					m.selectedCommand = max(m.totalCommands()-1, 0)
-					m.viewport.SetContent(m.renderContent())
-					m.scrollToCommand()
-				}
-			} else {
-				m.viewport.GotoBottom()
+			if m.focus == focusBrief {
+				m.briefViewport.GotoBottom()
+			} else if m.focus == focusHelp {
+				m.helpViewport.GotoBottom()
 			}
 
 		case "/":
+			if m.focus == focusBrief || m.focus == focusHelp {
+				m.helpSearching = true
+				m.helpSearch.Focus()
+				return m, textinput.Blink
+			}
 			m.searching = true
 			m.search.Focus()
 			return m, textinput.Blink
 
-		case "y":
-			if m.focus == focusRight && !m.searching {
-				if m.showPopup || m.rightTab == tabCommands {
-					c := &m.popupCommand
-					if !m.showPopup {
-						c = m.commandAt(m.selectedCommand)
+		case "h":
+			if m.focus == focusBrief || m.focus == focusHelp {
+				m.focus = focusHelp
+				m.helpMode = helpModeHelp
+				if mt, ok := m.selectedMeta(); ok {
+					cached := m.helpCache[mt.Name]
+					if cached[helpModeHelp] == "" {
+						m.helpLoadingFor = mt.Name
+						m.helpViewport.SetContent(m.renderHelpContent())
+						return m, fetchHelpCmd(mt.Name, helpModeHelp)
 					}
-					if c != nil {
-						if err := clipboard.WriteAll(c.Cmd); err == nil {
-							m.statusMsg = "Copied: " + c.Cmd
-							m.showPopup = false
-						}
+					m.helpViewport.SetContent(m.renderHelpContent())
+					m.helpViewport.GotoTop()
+				}
+			}
+
+		case "m":
+			if m.focus == focusBrief || m.focus == focusHelp {
+				m.focus = focusHelp
+				m.helpMode = helpModeMan
+				if mt, ok := m.selectedMeta(); ok {
+					cached := m.helpCache[mt.Name]
+					if cached[helpModeMan] == "" {
+						m.helpLoadingFor = mt.Name
+						m.helpViewport.SetContent(m.renderHelpContent())
+						return m, fetchHelpCmd(mt.Name, helpModeMan)
 					}
-				} else {
-					if b := m.bindingAt(m.selectedBinding); b != nil {
-						if err := clipboard.WriteAll(b.Key); err == nil {
-							m.statusMsg = "Copied: " + b.Key
-						}
-					}
+					m.helpViewport.SetContent(m.renderHelpContent())
+					m.helpViewport.GotoTop()
+				}
+			}
+
+		case "f":
+			if m.focus == focusTools {
+				switch m.metaFilter {
+				case "":
+					m.metaFilter = loader.StatusActive
+				case loader.StatusActive:
+					m.metaFilter = loader.StatusTrying
+				case loader.StatusTrying:
+					m.metaFilter = loader.StatusForgotten
+				case loader.StatusForgotten:
+					m.metaFilter = loader.StatusArchived
+				default:
+					m.metaFilter = ""
+				}
+				m.metaSelected = 0
+				m.setToolsContent()
+				m.briefViewport.SetContent(m.renderCard())
+			}
+
+		case "1":
+			m.metaFilter = loader.StatusActive
+			m.metaSelected = 0
+			m.setToolsContent()
+			m.briefViewport.SetContent(m.renderCard())
+		case "2":
+			m.metaFilter = loader.StatusTrying
+			m.metaSelected = 0
+			m.setToolsContent()
+			m.briefViewport.SetContent(m.renderCard())
+		case "3":
+			m.metaFilter = loader.StatusForgotten
+			m.metaSelected = 0
+			m.setToolsContent()
+			m.briefViewport.SetContent(m.renderCard())
+		case "4":
+			m.metaFilter = loader.StatusArchived
+			m.metaSelected = 0
+			m.setToolsContent()
+			m.briefViewport.SetContent(m.renderCard())
+		case "a":
+			m.metaFilter = ""
+			m.metaSelected = 0
+			m.setToolsContent()
+			m.briefViewport.SetContent(m.renderCard())
+
+		case "v":
+			if m.focus == focusTools && m.checkingVersionTool == "" {
+				if t, ok := m.selectedTool(); ok && t.GitHub != "" {
+					m.checkingVersionTool = t.Name
+					return m, fetchVersionCmd(t)
 				}
 			}
 
 		case "o":
-			if len(m.tools) > 0 {
-				t := m.tools[m.selected]
-				if t.GitHub != "" {
-					openBrowser("https://" + t.GitHub)
+			if t, ok := m.selectedTool(); ok && t.GitHub != "" {
+				openBrowser("https://" + t.GitHub)
+			}
+
+		case "e":
+			if m.focus == focusBrief {
+				if mt, ok := m.selectedMeta(); ok {
+					m.editingNote = true
+					m.noteInput.SetValue(mt.Note)
+					m.noteInput.Focus()
+					m.briefViewport.SetContent(m.renderCard())
+					return m, textinput.Blink
+				}
+			}
+
+		case "t":
+			if m.focus == focusBrief {
+				if mt, ok := m.selectedMeta(); ok {
+					m.editingTags = true
+					m.tagsInput.SetValue(strings.Join(mt.Tags, ", "))
+					m.tagsInput.Focus()
+					m.briefViewport.SetContent(m.renderCard())
+					return m, textinput.Blink
 				}
 			}
 		}
 
-		if m.focus == focusRight {
-			m.viewport, cmd = m.viewport.Update(msg)
+		if m.focus == focusBrief {
+			m.briefViewport, cmd = m.briefViewport.Update(msg)
+		} else if m.focus == focusHelp {
+			m.helpViewport, cmd = m.helpViewport.Update(msg)
 		}
 	}
 
 	return m, cmd
 }
 
-// updateMyTools handles all key events in the My Tools view.
-func (m Model) updateMyTools(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	filtered := m.filteredMeta()
-
-	// inline note editing
-	if m.editingNote {
-		switch msg.String() {
-		case "enter", "esc":
-			if msg.String() == "enter" && len(filtered) > 0 {
-				entry := filtered[m.metaSelected]
-				entry.Note = m.noteInput.Value()
-				m.meta = loader.UpsertMeta(m.meta, entry)
-				loader.SaveMeta(m.meta) //nolint:errcheck
-			}
-			m.editingNote = false
-			m.noteInput.Blur()
-			return m, nil
-		default:
-			var cmd tea.Cmd
-			m.noteInput, cmd = m.noteInput.Update(msg)
-			return m, cmd
-		}
-	}
-
-	// inline tags editing
-	if m.editingTags {
-		switch msg.String() {
-		case "enter", "esc":
-			if msg.String() == "enter" && len(filtered) > 0 {
-				entry := filtered[m.metaSelected]
-				entry.Tags = splitTagsStr(m.tagsInput.Value())
-				m.meta = loader.UpsertMeta(m.meta, entry)
-				loader.SaveMeta(m.meta) //nolint:errcheck
-			}
-			m.editingTags = false
-			m.tagsInput.Blur()
-			return m, nil
-		default:
-			var cmd tea.Cmd
-			m.tagsInput, cmd = m.tagsInput.Update(msg)
-			return m, cmd
-		}
-	}
-
+func (m Model) updateNoteEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "q", "ctrl+c":
-		return m, tea.Quit
-
-	case "tab":
-		// return to Hotkeys view
-		m.view = viewHotkeys
-		m.metaDetail = false
-		return m, nil
-
-	case "esc":
-		if m.metaDetail {
-			m.metaDetail = false
-		} else {
-			m.view = viewHotkeys
-		}
-
 	case "enter":
-		if !m.metaDetail && len(filtered) > 0 {
-			m.metaDetail = true
-		}
-
-	case "j", "down":
-		if !m.metaDetail {
-			if m.metaSelected < len(filtered)-1 {
-				m.metaSelected++
-			}
-		}
-
-	case "k", "up":
-		if !m.metaDetail {
-			if m.metaSelected > 0 {
-				m.metaSelected--
-			}
-		}
-
-	case "s":
-		if len(filtered) > 0 {
-			entry := filtered[m.metaSelected]
-			entry.Status = loader.NextStatus(entry.Status)
-			m.meta = loader.UpsertMeta(m.meta, entry)
+		m.editingNote = false
+		m.noteInput.Blur()
+		if mt, ok := m.selectedMeta(); ok {
+			mt.Note = strings.TrimSpace(m.noteInput.Value())
+			m.meta = loader.UpsertMeta(m.meta, mt)
 			loader.SaveMeta(m.meta) //nolint:errcheck
-			// re-apply filter and keep selection in bounds
-			newFiltered := m.filteredMeta()
-			if m.metaSelected >= len(newFiltered) && len(newFiltered) > 0 {
-				m.metaSelected = len(newFiltered) - 1
+		}
+		m.briefViewport.SetContent(m.renderCard())
+		return m, nil
+	case "esc":
+		m.editingNote = false
+		m.noteInput.Blur()
+		m.briefViewport.SetContent(m.renderCard())
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.noteInput, cmd = m.noteInput.Update(msg)
+		m.briefViewport.SetContent(m.renderCard())
+		return m, cmd
+	}
+}
+
+func (m Model) updateTagsEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		m.editingTags = false
+		m.tagsInput.Blur()
+		if mt, ok := m.selectedMeta(); ok {
+			raw := strings.TrimSpace(m.tagsInput.Value())
+			var tags []string
+			for _, t := range strings.Split(raw, ",") {
+				t = strings.TrimSpace(t)
+				if t != "" {
+					tags = append(tags, t)
+				}
 			}
+			mt.Tags = tags
+			m.meta = loader.UpsertMeta(m.meta, mt)
+			loader.SaveMeta(m.meta) //nolint:errcheck
 		}
+		m.briefViewport.SetContent(m.renderCard())
+		return m, nil
+	case "esc":
+		m.editingTags = false
+		m.tagsInput.Blur()
+		m.briefViewport.SetContent(m.renderCard())
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.tagsInput, cmd = m.tagsInput.Update(msg)
+		m.briefViewport.SetContent(m.renderCard())
+		return m, cmd
+	}
+}
 
-	case "e":
-		if m.metaDetail && len(filtered) > 0 {
-			entry := filtered[m.metaSelected]
-			m.noteInput.SetValue(entry.Note)
-			m.noteInput.Focus()
-			m.editingNote = true
-			return m, textinput.Blink
-		}
+func (m Model) selectedMeta() (loader.ToolMeta, bool) {
+	filtered := m.filteredMeta()
+	if m.metaSelected < 0 || m.metaSelected >= len(filtered) {
+		return loader.ToolMeta{}, false
+	}
+	return filtered[m.metaSelected], true
+}
 
-	case "t":
-		if m.metaDetail && len(filtered) > 0 {
-			entry := filtered[m.metaSelected]
-			m.tagsInput.SetValue(strings.Join(entry.Tags, ", "))
-			m.tagsInput.Focus()
-			m.editingTags = true
-			return m, textinput.Blink
-		}
-
-	case "f":
-		if !m.metaDetail {
-			// cycle filter: "" → active → trying → forgotten → archived → ""
-			switch m.metaFilter {
-			case "":
-				m.metaFilter = loader.StatusActive
-			case loader.StatusActive:
-				m.metaFilter = loader.StatusTrying
-			case loader.StatusTrying:
-				m.metaFilter = loader.StatusForgotten
-			case loader.StatusForgotten:
-				m.metaFilter = loader.StatusArchived
-			default:
-				m.metaFilter = ""
-			}
-			m.metaSelected = 0
-		}
-
-	case "1":
-		m.metaFilter = loader.StatusActive
-		m.metaSelected = 0
-	case "2":
-		m.metaFilter = loader.StatusTrying
-		m.metaSelected = 0
-	case "3":
-		m.metaFilter = loader.StatusForgotten
-		m.metaSelected = 0
-	case "4":
-		m.metaFilter = loader.StatusArchived
-		m.metaSelected = 0
-	case "a":
-		if !m.metaDetail {
-			m.metaFilter = ""
-			m.metaSelected = 0
+func (m Model) selectedTool() (loader.Tool, bool) {
+	mt, ok := m.selectedMeta()
+	if !ok {
+		return loader.Tool{}, false
+	}
+	for _, t := range m.tools {
+		if t.Name == mt.Name {
+			return t, true
 		}
 	}
-
-	return m, nil
+	return loader.Tool{}, false
 }
 
 func (m Model) filteredMeta() []loader.ToolMeta {
-	if m.metaFilter == "" {
-		return m.meta
+	source := m.meta
+	if m.metaFilter != "" {
+		var filtered []loader.ToolMeta
+		for _, mt := range m.meta {
+			if mt.Status == m.metaFilter {
+				filtered = append(filtered, mt)
+			}
+		}
+		source = filtered
 	}
-	var out []loader.ToolMeta
-	for _, mt := range m.meta {
-		if mt.Status == m.metaFilter {
-			out = append(out, mt)
+
+	if m.searching {
+		query := strings.ToLower(strings.TrimSpace(m.search.Value()))
+		if query != "" {
+			var out []loader.ToolMeta
+			for _, mt := range source {
+				if strings.Contains(strings.ToLower(mt.Name), query) {
+					out = append(out, mt)
+				}
+			}
+			return out
 		}
 	}
-	return out
+	return source
 }
 
 func (m Model) View() string {
@@ -542,198 +727,35 @@ func (m Model) View() string {
 		return "Loading..."
 	}
 
-	if m.view == viewMyTools {
-		return m.renderMyToolsView()
-	}
-
-	left := m.renderLeft()
-	right := m.renderRight()
-	body := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
-	layout := lipgloss.JoinVertical(lipgloss.Left, body, m.renderHelp())
-	base := lipgloss.NewStyle().Margin(1).Render(layout)
-
-	if m.showPopup {
-		popup := m.renderPopup()
-		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, popup,
-			lipgloss.WithWhitespaceChars(" "),
-			lipgloss.WithWhitespaceForeground(lipgloss.Color("#0A0A0A")),
-		)
-	}
-	return base
+	left := m.renderTools()
+	middle := m.renderBrief()
+	right := m.renderHelp()
+	body := lipgloss.JoinHorizontal(lipgloss.Top, left, middle, right)
+	layout := lipgloss.JoinVertical(lipgloss.Left, body, m.renderStatusBar())
+	// Vertical margin only; no horizontal margin so panels/status bar reach the
+	// terminal edges.
+	return lipgloss.NewStyle().Margin(1, 0).Render(layout)
 }
 
-// --- My Tools rendering ---
-
-func (m Model) renderMyToolsView() string {
-	if m.metaDetail {
-		return m.renderMyToolsDetail()
-	}
-	return m.renderMyToolsList()
-}
-
-func (m Model) renderMyToolsList() string {
-	filtered := m.filteredMeta()
-
-	filterLabel := "all"
-	if m.metaFilter != "" {
-		filterLabel = string(m.metaFilter)
-	}
-
-	var sb strings.Builder
-	sb.WriteString(ui.TitleStyle.Render("My Tools") + "  ")
-
-	// top tabs hint
-	hotkeysTab := ui.TopTabInactiveStyle.Render("Hotkeys")
-	myToolsTab := ui.TopTabActiveStyle.Render("[My Tools]")
-	sb.WriteString(hotkeysTab + "  " + myToolsTab + "\n\n")
-
-	filterStr := ui.MetaNoteStyle.Render("Filter: " + filterLabel)
-	sb.WriteString("  " + filterStr + "\n\n")
-
-	if len(filtered) == 0 {
-		sb.WriteString(ui.DescStyle.Render("  No tools. Add one: keys track <tool>") + "\n")
-	} else {
-		for i, mt := range filtered {
-			sym := loader.StatusSymbol[mt.Status]
-			symStyled := ui.StatusStyle(mt.Status).Render(sym)
-			statusStr := ui.StatusStyle(mt.Status).Width(9).Render(string(mt.Status))
-			tags := ui.MetaTagStyle.Render(strings.Join(mt.Tags, ", "))
-			name := mt.Name
-
-			line := fmt.Sprintf("  %s %s  %-16s  %s", symStyled, statusStr, name, tags)
-			if i == m.metaSelected {
-				line = ui.SelectionBarStyle.Render("●") + line[1:]
-			}
-			sb.WriteString(line + "\n")
+func (m Model) renderStatusBar() string {
+	style := ui.HelpStyle.Width(m.width - 2)
+	if m.helpSearching {
+		matchInfo := ""
+		if len(m.helpMatches) > 0 {
+			matchInfo = fmt.Sprintf("  %d/%d matches", m.helpMatchIdx+1, len(m.helpMatches))
+		} else if m.helpSearch.Value() != "" {
+			matchInfo = "  no matches"
 		}
+		return style.Render(fmt.Sprintf(
+			"%s %s  %s next  %s prev  %s exit%s",
+			ui.SearchPromptStyle.Render("/"),
+			m.helpSearch.View(),
+			keyHint("n"),
+			keyHint("N"),
+			keyHint("esc"),
+			matchInfo,
+		))
 	}
-
-	// stats footer
-	sb.WriteString("\n")
-	active, trying, forgotten, archived := countStatuses(m.meta)
-	total := len(m.meta)
-	stats := fmt.Sprintf("  %d tools  ·  %d active  ·  %d trying  ·  %d forgotten  ·  %d archived",
-		total, active, trying, forgotten, archived)
-	sb.WriteString(ui.MetaNoteStyle.Render(stats) + "\n")
-
-	content := sb.String()
-
-	panelStyle := ui.PanelBorderFocused.
-		Width(m.width - 4).
-		Height(max(m.height-7, 1))
-
-	help := m.renderMyToolsHelp(false)
-	body := lipgloss.JoinVertical(lipgloss.Left, panelStyle.Render(content), help)
-	return lipgloss.NewStyle().Margin(1).Render(body)
-}
-
-func (m Model) renderMyToolsDetail() string {
-	filtered := m.filteredMeta()
-	if len(filtered) == 0 {
-		return ""
-	}
-	mt := filtered[m.metaSelected]
-
-	sym := loader.StatusSymbol[mt.Status]
-	symStyled := ui.StatusStyle(mt.Status).Render(sym + "  " + string(mt.Status))
-
-	title := ui.TitleStyle.Render(mt.Name) + "  " + symStyled
-
-	var sb strings.Builder
-	sb.WriteString(title + "\n\n")
-
-	added := mt.Added
-	if added == "" {
-		added = "unknown"
-	}
-	sb.WriteString(ui.MetaDetailLabelStyle.Render("Added:") + "  " + ui.MetaDetailValueStyle.Render(added) + "\n")
-
-	tags := strings.Join(mt.Tags, ", ")
-	if tags == "" {
-		tags = "—"
-	}
-	if m.editingTags {
-		sb.WriteString(ui.MetaDetailLabelStyle.Render("Tags:") + "  " + m.tagsInput.View() + "\n")
-	} else {
-		sb.WriteString(ui.MetaDetailLabelStyle.Render("Tags:") + "  " + ui.MetaTagStyle.Render(tags) + "\n")
-	}
-
-	note := mt.Note
-	if note == "" {
-		note = "—"
-	}
-	if m.editingNote {
-		sb.WriteString(ui.MetaDetailLabelStyle.Render("Note:") + "  " + m.noteInput.View() + "\n")
-	} else {
-		sb.WriteString(ui.MetaDetailLabelStyle.Render("Note:") + "  " + ui.MetaNoteStyle.Render(note) + "\n")
-	}
-
-	popupWidth := min(70, m.width-10)
-	panel := ui.PopupStyle.Width(popupWidth).Render(sb.String())
-
-	help := m.renderMyToolsHelp(true)
-	body := lipgloss.JoinVertical(lipgloss.Left, panel, "\n", help)
-
-	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, body,
-		lipgloss.WithWhitespaceChars(" "),
-		lipgloss.WithWhitespaceForeground(lipgloss.Color("#0A0A0A")),
-	)
-}
-
-func (m Model) renderMyToolsHelp(detail bool) string {
-	style := ui.HelpStyle.Width(m.width - 4)
-	if detail {
-		return style.Render(
-			keyHint("s") + " status  " +
-				keyHint("e") + " edit note  " +
-				keyHint("t") + " edit tags  " +
-				keyHint("esc") + " back  " +
-				keyHint("q") + " quit",
-		)
-	}
-	return style.Render(
-		keyHint("j/k") + " navigate  " +
-			keyHint("enter") + " details  " +
-			keyHint("s") + " status  " +
-			keyHint("f") + " filter  " +
-			keyHint("[1-4]") + " filter by status  " +
-			keyHint("tab") + " hotkeys  " +
-			keyHint("q") + " quit",
-	)
-}
-
-func countStatuses(meta []loader.ToolMeta) (active, trying, forgotten, archived int) {
-	for _, m := range meta {
-		switch m.Status {
-		case loader.StatusActive:
-			active++
-		case loader.StatusTrying:
-			trying++
-		case loader.StatusForgotten:
-			forgotten++
-		case loader.StatusArchived:
-			archived++
-		}
-	}
-	return
-}
-
-func splitTagsStr(s string) []string {
-	parts := strings.Split(s, ",")
-	var out []string
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p != "" {
-			out = append(out, p)
-		}
-	}
-	return out
-}
-
-// --- Hotkeys view rendering ---
-
-func (m Model) renderHelp() string {
-	style := ui.HelpStyle.Width(m.width - 4)
 	if m.searching {
 		return style.Render(fmt.Sprintf(
 			"%s %s  %s exit search",
@@ -742,325 +764,372 @@ func (m Model) renderHelp() string {
 			keyHint("esc"),
 		))
 	}
+	if m.editingNote {
+		return style.Render(keyHint("enter") + " save  " + keyHint("esc") + " cancel")
+	}
+	if m.editingTags {
+		return style.Render(keyHint("enter") + " save  " + keyHint("esc") + " cancel  " + ui.MetaNoteStyle.Render("comma-separated"))
+	}
 	if m.statusMsg != "" {
 		return style.Render(ui.SearchPromptStyle.Render(m.statusMsg))
 	}
-	if m.showPopup {
-		return style.Render(
-			keyHint("y") + " copy  " +
-				keyHint("esc") + " close",
-		)
+	if m.focus == focusBrief {
+		hints := keyHint("↑↓") + " scroll  " + keyHint("→") + " help  " + keyHint("←") + " back  " + keyHint("e") + " edit note  " + keyHint("t") + " edit tags  " + keyHint("q") + " quit"
+		return style.Render(hints)
 	}
-	if m.focus == focusRight {
-		if m.rightTab == tabCommands {
-			return style.Render(
-				keyHint("j/k") + " scroll  " +
-					keyHint("enter") + " details  " +
-					keyHint("y") + " copy cmd  " +
-					keyHint("tab") + " keys tab  " +
-					keyHint("←/esc") + " back  " +
-					keyHint("q") + " quit",
-			)
-		}
-		return style.Render(
-			keyHint("j/k") + " scroll  " +
-				keyHint("y") + " copy hotkey  " +
-				keyHint("tab") + " cmds tab  " +
-				keyHint("o") + " github  " +
-				keyHint("←/esc") + " back  " +
-				keyHint("q") + " quit",
-		)
+	if m.focus == focusHelp {
+		hints := keyHint("↑↓") + " scroll  " + keyHint("h") + " --help  " + keyHint("m") + " man  " + keyHint("/") + " search  " + keyHint("←") + " back  " + keyHint("q") + " quit"
+		return style.Render(hints)
+	}
+	filterHint := ""
+	if m.metaFilter != "" {
+		filterHint = keyHint("a") + " all  "
+	}
+	versionHint := ""
+	if t, ok := m.selectedTool(); ok && t.GitHub != "" {
+		versionHint = keyHint("v") + " check  "
 	}
 	return style.Render(
 		keyHint("j/k") + " navigate  " +
-			keyHint("→") + " scroll panel  " +
-			keyHint("tab") + " my tools  " +
+			keyHint("→") + " details  " +
+			keyHint("f") + " filter  " +
+			filterHint +
 			keyHint("/") + " search  " +
+			versionHint +
 			keyHint("o") + " github  " +
 			keyHint("q") + " quit",
 	)
 }
 
 func keyHint(k string) string {
-	return ui.SearchPromptStyle.Render("["+k+"]")
+	return ui.SearchPromptStyle.Render("[" + k + "]")
 }
 
-func (m Model) renderLeft() string {
-	var sb strings.Builder
+func (m Model) calcVpHeight() int {
+	// Match the panel's inner content height. lipgloss adds borders outside the
+	// configured Height, so Height(m.height-7) gives exactly m.height-7 content
+	// rows; the viewport must fill them so the scrollbar reaches the bottom.
+	return max(m.height-7, 1)
+}
 
-	// top tabs
-	hotkeysTab := ui.TopTabActiveStyle.Render("[Hotkeys]")
-	myToolsTab := ui.TopTabInactiveStyle.Render("My Tools")
-	sb.WriteString(hotkeysTab + "  " + myToolsTab + "\n\n")
-
-	maxCount := 0
-	for _, t := range m.tools {
-		if c := totalBindingsForTool(t); c > maxCount {
-			maxCount = c
+func (m Model) calcPanelWidths() (toolsW, briefW, helpW int) {
+	// 20%-40%-40% layout. lipgloss adds borders OUTSIDE the configured Width,
+	// so Width(panelW) renders as panelW+2 on screen, and panel content fills
+	// the full panelW (dividers/viewports use panelW, not panelW-2).
+	// Horizontal overhead reserved here = 6: 2 border cols x 3 panels. There is
+	// no outer horizontal margin and panels sit flush against each other.
+	available := max(m.width-6, 1)
+	toolsW = max((available * 20) / 100, 15)
+	briefW = max((available * 40) / 100, 30)
+	helpW = available - toolsW - briefW
+	if helpW < 30 {
+		helpW = 30
+		briefW = available - toolsW - helpW
+		if briefW < 30 {
+			briefW = 30
+			toolsW = available - briefW - helpW
+			// Ensure toolsW doesn't go negative on very small terminals
+			if toolsW < 1 {
+				toolsW = 1
+				// Reduce other panels proportionally
+				briefW = max((available - toolsW - 5) / 2, 1)
+				helpW = available - toolsW - briefW
+			}
 		}
 	}
-	countW := len(fmt.Sprintf("%d", maxCount))
-	maxName := leftWidth - 2 - 3 - 1 - countW - 1
+	return
+}
 
-	for i, t := range m.tools {
-		count := totalBindingsForTool(t)
-		cmdCount := totalCommandsForTool(t)
-		hasUpdate := m.hasUpdate(t.Name)
+func (m Model) renderLeftContent() string {
+	var sb strings.Builder
+	filtered := m.filteredMeta()
+	maxName := m.toolsW - 5
 
-		name := t.Name
-		if len(name) > maxName {
-			name = name[:maxName]
-		}
-		padding := strings.Repeat(" ", maxName-len(name))
+	for i, mt := range filtered {
+		name := wrapText(mt.Name, maxName)
+		name = strings.TrimRight(name, "\n")
 
-		countStr := fmt.Sprintf("%*d", countW, count)
-		countRendered := ""
+		hasUpdate := m.hasUpdate(mt.Name)
+		updateMark := ""
 		if hasUpdate {
-			countRendered = ui.UpdateAvailableStyle.Render("↑") + ui.BindingCountStyle.Render(countStr)
-		} else {
-			countRendered = ui.BindingCountStyle.Render(countStr)
-		}
-		if cmdCount > 0 {
-			countRendered += ui.CommandCountStyle.Render(fmt.Sprintf("%dc", cmdCount))
+			updateMark = " " + ui.UpdateAvailableStyle.Render("↑")
 		}
 
-		if i == m.selected && !m.searching {
+		isSelected := i == m.metaSelected && m.focus == focusTools && !m.searching
+		if isSelected {
 			circle := ui.SelectionBarStyle.Render("●")
-			sb.WriteString(circle + "  " + name + padding + " " + countRendered + "\n")
+			sb.WriteString(circle + " " + name + updateMark + "\n")
 		} else {
-			sb.WriteString(ui.ToolNormalStyle.Render("   "+name+padding+" ") + countRendered + "\n")
+			sb.WriteString("  " + name + updateMark + "\n")
 		}
 	}
 
-	panelStyle := ui.PanelBorder
-	if m.focus == focusLeft && !m.searching {
-		panelStyle = ui.PanelBorderFocused
-	}
-
-	return panelStyle.
-		Width(leftWidth).
-		Height(max(m.height-7, 1)).
-		Render(sb.String())
-}
-
-func (m Model) renderRight() string {
-	rightWidth := m.width - leftWidth - 6
-
-	title := ""
-	if len(m.tools) > 0 && !m.searching {
-		title = m.renderHeader(m.tools[m.selected])
-	} else if m.searching {
-		query := m.search.Value()
-		title = ui.TitleStyle.Render("Search: ") + ui.SearchMatchStyle.Render(query)
-	}
-
-	panelStyle := ui.PanelBorder
-	if m.focus == focusRight {
-		panelStyle = ui.PanelBorderFocused
-	}
-
-	inner := lipgloss.JoinVertical(lipgloss.Left, title, "", m.viewport.View())
-	return panelStyle.
-		Width(rightWidth).
-		Height(max(m.height-7, 1)).
-		Render(inner)
-}
-
-func (m Model) renderHeader(t loader.Tool) string {
-	line := ui.TitleStyle.Render(t.Name)
-
-	if vi, ok := m.versions[t.Name]; ok {
-		if vi.Installed != "" {
-			line += " " + ui.VersionInstalledStyle.Render(vi.Installed)
-		}
-		if version.IsNewer(vi.Installed, vi.Latest) {
-			line += "  " + ui.UpdateAvailableStyle.Render("↑ Update available: "+vi.Latest)
-		} else if vi.Installed != "" && vi.Latest != "" {
-			line += " " + ui.VersionOkStyle.Render("✓")
-		}
-	}
-
-	line += "  " + ui.HeaderDescStyle.Render(t.Description)
-	if t.GitHub != "" {
-		line += "  " + ui.GithubStyle.Render("↗ "+t.GitHub)
-	}
-
-	if len(t.CommandGroups) > 0 {
-		var keysTab, cmdsTab string
-		if m.rightTab == tabKeys {
-			keysTab = ui.TabActiveStyle.Render("[Keys]")
-			cmdsTab = ui.TabInactiveStyle.Render("Commands")
+	if len(filtered) == 0 {
+		if m.searching {
+			sb.WriteString(ui.DescStyle.Render("  No matches.") + "\n")
+		} else if len(m.meta) == 0 {
+			sb.WriteString(ui.DescStyle.Render("  No tools tracked.\n  Add one:\n  keys track <tool>\n  --github ...") + "\n")
 		} else {
-			keysTab = ui.TabInactiveStyle.Render("Keys")
-			cmdsTab = ui.TabActiveStyle.Render("[Commands]")
-		}
-		line += "\n" + ui.TitleStyle.PaddingLeft(1).Render("") + keysTab + "  " + cmdsTab
-	}
-
-	return line
-}
-
-func (m Model) renderContent() string {
-	if len(m.tools) == 0 {
-		return ui.DescStyle.Render("No tools loaded.")
-	}
-
-	query := strings.ToLower(strings.TrimSpace(m.search.Value()))
-	if m.searching && query != "" {
-		return m.renderSearchResults(query)
-	}
-
-	if m.rightTab == tabCommands {
-		return m.renderCommandsTab(m.tools[m.selected])
-	}
-	return m.renderTool(m.tools[m.selected])
-}
-
-func (m Model) renderTool(t loader.Tool) string {
-	var sb strings.Builder
-	bindingIdx := 0
-	for i, cat := range t.Categories {
-		if i > 0 {
-			sb.WriteString("\n")
-		}
-		sb.WriteString(ui.CategoryStyle.Render(cat.Name) + "\n")
-		for _, b := range cat.Bindings {
-			isSelected := m.focus == focusRight && !m.searching && bindingIdx == m.selectedBinding
-
-			keyStr := b.Key
-			descStr := b.Desc
-
-			if isSelected {
-				circle := ui.SelectionBarStyle.Render("●")
-				line := lipgloss.JoinHorizontal(lipgloss.Top,
-					ui.KeyStyle.Render(keyStr),
-					ui.DescStyle.Render(descStr),
-				)
-				sb.WriteString(circle + " " + line + "\n")
-			} else {
-				line := lipgloss.JoinHorizontal(lipgloss.Top,
-					ui.KeyStyle.Render(keyStr),
-					ui.DescStyle.Render(descStr),
-				)
-				sb.WriteString("  " + line + "\n")
-			}
-			bindingIdx++
+			sb.WriteString(ui.DescStyle.Render("  No tools match\n  current filter.") + "\n")
 		}
 	}
+
 	return sb.String()
 }
 
-func (m Model) renderSearchResults(query string) string {
-	var sb strings.Builder
-	found := 0
+// syncToolsViewport adjusts YOffset so that metaSelected is visible.
+func (m *Model) syncToolsViewport() {
+	vpH := m.toolsViewport.Height
+	if vpH <= 0 {
+		return
+	}
+	if m.metaSelected < m.toolsViewport.YOffset {
+		m.toolsViewport.SetYOffset(m.metaSelected)
+	} else if m.metaSelected >= m.toolsViewport.YOffset+vpH {
+		m.toolsViewport.SetYOffset(m.metaSelected - vpH + 1)
+	}
+}
 
-	for _, t := range m.tools {
-		var matches strings.Builder
-		for _, cat := range t.Categories {
-			for _, b := range cat.Bindings {
-				if strings.Contains(strings.ToLower(b.Key), query) ||
-					strings.Contains(strings.ToLower(b.Desc), query) {
-					line := lipgloss.JoinHorizontal(lipgloss.Top,
-						ui.KeyStyle.Render(highlightMatch(b.Key, query)),
-						ui.DescStyle.Render(highlightMatch(b.Desc, query)),
-					)
-					matches.WriteString("  " + line + "\n")
-					found++
+// setToolsContent refreshes viewport content and syncs scroll position.
+func (m *Model) setToolsContent() {
+	m.toolsViewport.SetContent(m.renderLeftContent())
+	m.syncToolsViewport()
+}
+
+func (m Model) renderTools() string {
+	panelStyle := ui.PanelBorder
+	if m.focus == focusTools {
+		panelStyle = ui.PanelBorderFocused
+	}
+
+	return panelStyle.
+		Width(m.toolsW).
+		Height(max(m.height-7, 1)).
+		Render(withScrollbar(m.toolsViewport, m.toolsW, m.focus == focusTools))
+}
+
+func (m Model) renderBrief() string {
+	panelStyle := ui.PanelBorder
+	if m.focus == focusBrief {
+		panelStyle = ui.PanelBorderFocused
+	}
+
+	return panelStyle.
+		Width(m.briefW).
+		Height(max(m.height-7, 1)).
+		Render(withScrollbar(m.briefViewport, m.briefW, m.focus == focusBrief))
+}
+
+func (m Model) renderHelp() string {
+	panelStyle := ui.PanelBorder
+	if m.focus == focusHelp {
+		panelStyle = ui.PanelBorderFocused
+	}
+
+	return panelStyle.
+		Width(m.helpW).
+		Height(max(m.height-7, 1)).
+		Render(withScrollbar(m.helpViewport, m.helpW, m.focus == focusHelp))
+}
+
+// withScrollbar renders a viewport with a 1-col scrollbar gutter on its right
+// edge. The gutter stays blank unless the content is taller than the viewport,
+// in which case a thumb (no track) is drawn proportional to the scroll position.
+// The thumb is peach when the panel is focused, dim otherwise.
+func withScrollbar(vp viewport.Model, panelWidth int, focused bool) string {
+	left := lipgloss.NewStyle().Width(max(panelWidth-1, 1)).Render(vp.View())
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, scrollColumn(vp, focused))
+}
+
+func scrollColumn(vp viewport.Model, focused bool) string {
+	height := vp.Height
+	if height <= 0 {
+		return ""
+	}
+	rows := make([]string, height)
+	for i := range rows {
+		rows[i] = " "
+	}
+	total := vp.TotalLineCount()
+	if total > height {
+		thumbStyle := ui.ScrollThumbDimStyle
+		if focused {
+			thumbStyle = ui.ScrollThumbStyle
+		}
+		thumb := max(height*height/total, 1)
+		pos := 0
+		if maxOff := total - height; maxOff > 0 {
+			pos = vp.YOffset * (height - thumb) / maxOff
+		}
+		for i := pos; i < pos+thumb && i < height; i++ {
+			// Right half block: a half-width thumb hugging the panel border.
+			rows[i] = thumbStyle.Render("▐")
+		}
+	}
+	return strings.Join(rows, "\n")
+}
+
+func (m Model) renderCard() string {
+	if len(m.meta) == 0 {
+		return ui.DescStyle.Render("no tools tracked.\nadd one: keys track <tool> --github <repo>")
+	}
+
+	t, ok := m.selectedTool()
+	if !ok {
+		return ui.DescStyle.Render("select a tool from the left panel.")
+	}
+
+	inner := max(m.briefW-2, 1)
+
+	var sb strings.Builder
+
+	card, hasCard := m.repoCards[t.Name]
+
+	// Title line: tool name (bold orange) + about (gray italic). Name is always
+	// shown; about is appended when available.
+	name := t.Name
+	maxNameLen := 30
+	if utf8.RuneCountInString(name) > maxNameLen {
+		name = name[:maxNameLen-3] + "..."
+	}
+	nameRendered := lipgloss.NewStyle().Bold(true).Foreground(ui.ColorOrange).Render(name)
+	if hasCard && card.About != "" {
+		aboutWidth := max(inner-utf8.RuneCountInString(name)-3, 20)
+		aboutWrapped := wrapText(card.About, aboutWidth)
+		sb.WriteString(nameRendered + " — " + ui.MetaNoteStyle.Render(aboutWrapped) + "\n")
+	} else {
+		sb.WriteString(nameRendered + "\n")
+	}
+
+	// [info] section: repo / stars / latest / languages / repo status.
+	hasInfo := t.GitHub != "" ||
+		(hasCard && (card.Stars > 0 || card.Latest != "" || len(card.Languages) > 0 || card.RepoStatus != ""))
+	if hasInfo {
+		sb.WriteString(m.sectionDivider("info"))
+		if t.GitHub != "" {
+			sb.WriteString(ui.GithubStyle.Render("repo: "+t.GitHub) + "\n")
+		}
+		if hasCard {
+			if card.Stars > 0 {
+				sb.WriteString(ui.InfoStyle.Render(fmt.Sprintf("stars: %s", formatStars(card.Stars))) + "\n")
+			}
+			if card.Latest != "" {
+				line := "latest: " + card.Latest
+				if card.PublishedAt != "" {
+					date := card.PublishedAt
+					if len(date) > 10 {
+						date = date[:10]
+					}
+					line += " (" + date + ")"
 				}
+				sb.WriteString(ui.InfoStyle.Render(line) + "\n")
 			}
-		}
-		if matches.Len() > 0 {
-			sb.WriteString(ui.CategoryStyle.Render(t.Name) + "\n")
-			sb.WriteString(matches.String())
-			sb.WriteString("\n")
+			if len(card.Languages) > 0 {
+				label := "languages: "
+				bar := renderLangBar(card.Languages, inner, utf8.RuneCountInString(label))
+				sb.WriteString(ui.InfoStyle.Render(label) + bar + "\n")
+			}
+			if card.RepoStatus != "" {
+				sb.WriteString(ui.InfoStyle.Render("maintenance:") + " " + renderRepoStatus(card.RepoStatus) + "\n")
+			}
 		}
 	}
 
-	if found == 0 {
-		sb.WriteString(ui.DescStyle.Render("No matches found."))
+	// [notes] section: status / note / tags (with inline editing via e/t).
+	if mt, ok := m.selectedMeta(); ok {
+		sb.WriteString(m.sectionDivider("notes"))
+		sym := loader.StatusSymbol[mt.Status]
+		symStyled := ui.StatusStyle(mt.Status).Render(sym + " " + string(mt.Status))
+		sb.WriteString(ui.MetaDetailLabelStyle.Render("status:") + " " + symStyled + "\n")
+
+		if m.editingNote {
+			sb.WriteString(ui.MetaDetailLabelStyle.Render("note:") + " " + m.noteInput.View() + "\n")
+		} else {
+			noteText := mt.Note
+			if noteText == "" {
+				noteText = "— (press e to edit)"
+			}
+			wrapped := wrapText(noteText, inner)
+			sb.WriteString(ui.MetaDetailLabelStyle.Render("note:") + " " + ui.MetaNoteStyle.Render(wrapped) + "\n")
+		}
+
+		if m.editingTags {
+			sb.WriteString(ui.MetaDetailLabelStyle.Render("tags:") + " " + m.tagsInput.View() + "\n")
+		} else {
+			tagsText := strings.Join(mt.Tags, ", ")
+			if tagsText == "" {
+				tagsText = "— (press t to edit)"
+			}
+			wrapped := wrapText(tagsText, inner)
+			sb.WriteString(ui.MetaDetailLabelStyle.Render("tags:") + " " + ui.MetaTagStyle.Render(wrapped) + "\n")
+		}
 	}
+
+	// [changelog] section (only when there is content to show).
+	var changelogContent string
+	if m.changelogLoadingFor == t.Name {
+		changelogContent = ui.DescStyle.Render("loading changelog...") + "\n"
+	} else if data, ok := m.changelogData[t.Name]; ok {
+		changelogContent = m.renderChangelogBlock(data)
+	} else if t.GitHub != "" {
+		changelogContent = ui.DescStyle.Render("loading changelog...") + "\n"
+	}
+	if changelogContent != "" {
+		sb.WriteString(m.sectionDivider("changelog"))
+		sb.WriteString(changelogContent)
+	}
+
 	return sb.String()
 }
 
-func highlightMatch(s, query string) string {
-	lower := strings.ToLower(s)
-	idx := strings.Index(lower, query)
-	if idx < 0 {
-		return s
+// renderRepoStatus highlights the maintenance state of the upstream repo: a
+// green dot for an active repo, a yellow warning sign for an archived one.
+func renderRepoStatus(status string) string {
+	switch status {
+	case "active":
+		return lipgloss.NewStyle().Foreground(ui.StatusColorActive).Render("● active")
+	case "archived":
+		return lipgloss.NewStyle().Foreground(ui.StatusColorTrying).Render("⚠ archived")
+	default:
+		return ui.RepoStatusStyle.Render(status)
 	}
-	return s[:idx] +
-		ui.SearchMatchStyle.Render(s[idx:idx+len(query)]) +
-		s[idx+len(query):]
 }
 
-// --- helpers ---
-
-func (m Model) totalBindings() int {
-	if len(m.tools) == 0 {
-		return 0
-	}
-	return totalBindingsForTool(m.tools[m.selected])
+// sectionDivider renders a labeled section header that spans the panel's content
+// width, e.g. "[info] ───────────". The label is rendered only by callers when
+// the section actually has content, so no empty dividers are produced.
+func (m Model) sectionDivider(label string) string {
+	tag := "[" + label + "] "
+	// briefW-1 to leave room for the scrollbar gutter; leading blank line adds
+	// breathing room between sections.
+	dashes := max(m.briefW-1-utf8.RuneCountInString(tag), 0)
+	// Blank line above and below the header for breathing room.
+	return "\n" + ui.SectionLabelStyle.Render(tag) +
+		lipgloss.NewStyle().Foreground(ui.ColorBorder).Render(strings.Repeat("─", dashes)) + "\n\n"
 }
 
-func totalBindingsForTool(t loader.Tool) int {
-	n := 0
-	for _, cat := range t.Categories {
-		n += len(cat.Bindings)
+func (m Model) renderChangelogBlock(msg changelogMsg) string {
+	if msg.err != nil {
+		return ui.InfoStyle.Render("changelog unavailable: "+msg.err.Error()) + "\n"
 	}
-	return n
-}
-
-func (m Model) bindingAt(idx int) *loader.Binding {
-	if len(m.tools) == 0 {
-		return nil
+	var sb strings.Builder
+	// Only the link to the tag + the changelog text; version/date are already
+	// shown in [info]. Unified muted style (InfoStyle), same as the [info] text.
+	if msg.htmlUrl != "" {
+		sb.WriteString(ui.InfoStyle.Render(msg.htmlUrl) + "\n\n")
 	}
-	t := m.tools[m.selected]
-	i := 0
-	for _, cat := range t.Categories {
-		for bi := range cat.Bindings {
-			if i == idx {
-				return &cat.Bindings[bi]
-			}
-			i++
-		}
+	body := wrapText(stripMarkdown(msg.body), max(m.briefW-2, 10))
+	if body == "" {
+		sb.WriteString(ui.InfoStyle.Render("no release notes available.") + "\n")
+	} else {
+		sb.WriteString(ui.InfoStyle.Render(body) + "\n")
 	}
-	return nil
+	return sb.String()
 }
 
 func (m Model) hasUpdate(toolName string) bool {
 	vi, ok := m.versions[toolName]
 	return ok && version.IsNewer(vi.Installed, vi.Latest)
-}
-
-func bindingLine(t loader.Tool, bindingIdx int) int {
-	line := 0
-	bidx := 0
-	for i, cat := range t.Categories {
-		if i > 0 {
-			line++
-		}
-		line++
-		for range cat.Bindings {
-			if bidx == bindingIdx {
-				return line
-			}
-			line++
-			bidx++
-		}
-	}
-	return 0
-}
-
-func (m *Model) scrollToBinding() {
-	if len(m.tools) == 0 {
-		return
-	}
-	lineNum := bindingLine(m.tools[m.selected], m.selectedBinding)
-	if lineNum < m.viewport.YOffset {
-		m.viewport.SetYOffset(lineNum)
-	} else if lineNum >= m.viewport.YOffset+m.viewport.Height {
-		m.viewport.SetYOffset(lineNum - m.viewport.Height + 1)
-	}
 }
 
 func openBrowser(url string) {
@@ -1076,162 +1145,450 @@ func openBrowser(url string) {
 	exec.Command(cmd, url).Start() //nolint:errcheck
 }
 
-func (m Model) renderCommandsTab(t loader.Tool) string {
-	if len(t.CommandGroups) == 0 {
-		return ui.DescStyle.Render("No commands available. Run: keys fetch " + t.Name)
-	}
-
-	rightWidth := m.width - leftWidth - 6
-	cmdIdx := 0
-	var sb strings.Builder
-
-	for i, cg := range t.CommandGroups {
-		if i > 0 {
-			sb.WriteString("\n")
-		}
-		sb.WriteString(ui.CategoryStyle.Render(cg.Name) + "\n")
-		for _, c := range cg.Commands {
-			isSelected := m.focus == focusRight && cmdIdx == m.selectedCommand
-
-			cmdStr := c.Cmd
-			maxDesc := rightWidth - len(cmdStr) - 6
-			if maxDesc < 10 {
-				maxDesc = 10
-			}
-			descStr := c.Desc
-			if len(descStr) > maxDesc {
-				descStr = descStr[:maxDesc] + "…"
-			}
-
-			rendered := lipgloss.JoinHorizontal(lipgloss.Top,
-				ui.CommandCmdStyle.Width(30).Render(cmdStr),
-				ui.CommandDescStyle.Render(descStr),
-			)
-
-			if isSelected {
-				circle := ui.SelectionBarStyle.Render("●")
-				sb.WriteString(circle + " " + rendered + "\n")
-			} else {
-				sb.WriteString("  " + rendered + "\n")
-			}
-			cmdIdx++
-		}
-	}
-	return sb.String()
-}
-
-func (m Model) renderPopup() string {
-	popupWidth := min(80, m.width-10)
-
-	cmd := ui.CommandCmdStyle.Render(m.popupCommand.Cmd)
-	desc := ui.CommandDescStyle.Width(popupWidth - 4).Render(m.popupCommand.Desc)
-	hint := ui.TabInactiveStyle.Render("[y] copy  [esc] close")
-
-	content := lipgloss.JoinVertical(lipgloss.Left,
-		cmd,
-		"",
-		desc,
-		"",
-		hint,
-	)
-
-	return ui.PopupStyle.Width(popupWidth).Render(content)
-}
-
-func (m Model) totalCommands() int {
-	if len(m.tools) == 0 {
-		return 0
-	}
-	return totalCommandsForTool(m.tools[m.selected])
-}
-
-func totalCommandsForTool(t loader.Tool) int {
-	n := 0
-	for _, cg := range t.CommandGroups {
-		n += len(cg.Commands)
-	}
-	return n
-}
-
-func (m Model) commandAt(idx int) *loader.Command {
-	if len(m.tools) == 0 {
-		return nil
-	}
-	t := m.tools[m.selected]
-	i := 0
-	for _, cg := range t.CommandGroups {
-		for ci := range cg.Commands {
-			if i == idx {
-				return &cg.Commands[ci]
-			}
-			i++
-		}
-	}
-	return nil
-}
-
-func commandLine(t loader.Tool, cmdIdx int) int {
-	line := 0
-	cidx := 0
-	for i, cg := range t.CommandGroups {
-		if i > 0 {
-			line++
-		}
-		line++
-		for range cg.Commands {
-			if cidx == cmdIdx {
-				return line
-			}
-			line++
-			cidx++
-		}
-	}
-	return 0
-}
-
-func (m *Model) scrollToCommand() {
-	if len(m.tools) == 0 {
-		return
-	}
-	lineNum := commandLine(m.tools[m.selected], m.selectedCommand)
-	if lineNum < m.viewport.YOffset {
-		m.viewport.SetYOffset(lineNum)
-	} else if lineNum >= m.viewport.YOffset+m.viewport.Height {
-		m.viewport.SetYOffset(lineNum - m.viewport.Height + 1)
-	}
-}
-
-const leftPanelEdge = leftWidth + 3
-
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	if msg.X >= leftPanelEdge {
+	// Panels sit flush (each is panelW+2 wide incl. borders) with no outer
+	// horizontal margin, so screen X maps directly to panel spans.
+	toolsPanelEnd := m.toolsW + 2
+	briefPanelEnd := toolsPanelEnd + m.briefW + 2
+
+	// Detect which panel the click is in
+	var cmd tea.Cmd
+	if msg.X < toolsPanelEnd {
+		// Left panel (Tools)
+		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
+			// Row 0 = top margin, row 1 = panel border, row 2 = first list row.
+			toolIdx := msg.Y - 2 + m.toolsViewport.YOffset
+			filtered := m.filteredMeta()
+			if toolIdx >= 0 && toolIdx < len(filtered) {
+				if m.metaSelected != toolIdx {
+					m.metaSelected = toolIdx
+					m.setToolsContent()
+					m.briefViewport.Height = m.calcVpHeight()
+					m.briefViewport.GotoTop()
+					m.briefViewport.SetContent(m.renderCard())
+				}
+				m.focus = focusTools
+			}
+		} else if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
+			m.toolsViewport, cmd = m.toolsViewport.Update(msg)
+		}
+	} else if msg.X < briefPanelEnd {
+		// Middle panel (Brief)
 		switch msg.Button {
 		case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
-			var cmd tea.Cmd
-			m.viewport, cmd = m.viewport.Update(msg)
-			return m, cmd
+			m.briefViewport, cmd = m.briefViewport.Update(msg)
 		case tea.MouseButtonLeft:
-			if msg.Action == tea.MouseActionPress && m.focus != focusRight {
-				m.focus = focusRight
-				m.viewport.SetContent(m.renderContent())
+			if msg.Action == tea.MouseActionPress && m.focus != focusBrief {
+				m.focus = focusBrief
+				m.briefViewport.SetContent(m.renderCard())
 			}
 		}
-		return m, nil
+	} else {
+		// Right panel (Help)
+		switch msg.Button {
+		case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
+			m.helpViewport, cmd = m.helpViewport.Update(msg)
+		case tea.MouseButtonLeft:
+			if msg.Action == tea.MouseActionPress && m.focus != focusHelp {
+				m.focus = focusHelp
+				m.helpViewport.SetContent(m.renderHelpContent())
+			}
+		}
+	}
+	return m, cmd
+}
+
+// formatStars formats a star count with K suffix for thousands.
+func formatStars(n int) string {
+	if n >= 1000 {
+		return fmt.Sprintf("%.1fk", float64(n)/1000)
+	}
+	return fmt.Sprintf("%d", n)
+}
+
+// languagePercent holds a language name and its percentage share.
+type languagePercent struct {
+	Name string
+	Pct  float64
+}
+
+// languagePercents converts raw byte counts to sorted percentage slice (top 5).
+func languagePercents(langs map[string]int) []languagePercent {
+	if len(langs) == 0 {
+		return nil
+	}
+	total := 0
+	for _, v := range langs {
+		total += v
+	}
+	if total == 0 {
+		return nil
+	}
+	out := make([]languagePercent, 0, len(langs))
+	for name, bytes := range langs {
+		out = append(out, languagePercent{Name: name, Pct: float64(bytes) / float64(total) * 100})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Pct > out[j].Pct })
+	if len(out) > 5 {
+		out = out[:5]
+	}
+	return out
+}
+
+// renderLangBar renders a horizontal language bar with percentages, wrapping by
+// words at width. firstLineUsed is the column budget already consumed on the
+// first line (e.g. by an inline "languages: " label) so wrapping lines up.
+func renderLangBar(langs map[string]int, width, firstLineUsed int) string {
+	percents := languagePercents(langs)
+	if len(percents) == 0 {
+		return ""
+	}
+	// Language names lowercase in the normal note color; percentages dimmed.
+	pctStyle := lipgloss.NewStyle().Foreground(ui.ColorDim)
+
+	var lines []string
+	var cur strings.Builder
+	curW := firstLineUsed
+	for _, lp := range percents {
+		name := strings.ToLower(lp.Name)
+		pct := fmt.Sprintf("%.0f%%", lp.Pct)
+		tokenW := utf8.RuneCountInString(name) + 1 + utf8.RuneCountInString(pct)
+
+		sep := 0
+		if cur.Len() > 0 {
+			sep = 2
+		}
+		// Wrap to a new line only when the token would overflow the width.
+		if curW+sep+tokenW > width && cur.Len() > 0 {
+			lines = append(lines, cur.String())
+			cur.Reset()
+			curW = 0
+			sep = 0
+		}
+		if sep > 0 {
+			cur.WriteString("  ")
+		}
+		cur.WriteString(ui.InfoStyle.Render(name) + " " + pctStyle.Render(pct))
+		curW += sep + tokenW
+	}
+	if cur.Len() > 0 {
+		lines = append(lines, cur.String())
+	}
+	return strings.Join(lines, "\n")
+}
+
+func fetchVersionCmd(t loader.Tool) tea.Cmd {
+	return func() tea.Msg {
+		latest, err := version.FetchAndCache(t.GitHub)
+		repoStatus := version.GetCachedRepoStatus(t.GitHub)
+		return checkVersionMsg{
+			toolName:   t.Name,
+			latest:     latest,
+			repoStatus: repoStatus,
+			err:        err,
+		}
+	}
+}
+
+func fetchRepoCardCmd(t loader.Tool) tea.Cmd {
+	return func() tea.Msg {
+		card := version.GetRepoCard(t.GitHub)
+		return repoCardMsg{toolName: t.Name, card: card}
+	}
+}
+
+func fetchChangelogCmd(githubField, toolName string) tea.Cmd {
+	return func() tea.Msg {
+		info, err := version.GetChangelog(githubField)
+		return changelogMsg{
+			toolName:    toolName,
+			tag:         info.Tag,
+			body:        info.Body,
+			htmlUrl:     info.HtmlUrl,
+			publishedAt: info.PublishedAt,
+			err:         err,
+		}
+	}
+}
+
+// autoFetchCmdsForSelected returns a batched Cmd that auto-fetches changelog
+// and --help for the currently selected tool if not yet cached.
+// Uses a pointer receiver so it can update loading state fields on m.
+func (m *Model) autoFetchCmdsForSelected() tea.Cmd {
+	var cmds []tea.Cmd
+	if t, ok := m.selectedTool(); ok && t.GitHub != "" {
+		if _, already := m.changelogData[t.Name]; !already && m.changelogLoadingFor != t.Name {
+			m.changelogLoadingFor = t.Name
+			m.briefViewport.SetContent(m.renderCard())
+			cmds = append(cmds, fetchChangelogCmd(t.GitHub, t.Name))
+		}
+	}
+	if mt, ok := m.selectedMeta(); ok {
+		cached := m.helpCache[mt.Name]
+		if cached[m.helpMode] == "" {
+			m.helpLoadingFor = mt.Name
+			m.helpViewport.SetContent(m.renderHelpContent())
+			cmds = append(cmds, fetchHelpCmd(mt.Name, m.helpMode))
+		} else {
+			m.helpViewport.SetContent(m.renderHelpContent())
+			m.helpViewport.GotoTop()
+		}
+	}
+	return tea.Batch(cmds...)
+}
+
+func wrapText(s string, width int) string {
+	if width <= 0 {
+		return s
+	}
+	var result strings.Builder
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if i > 0 {
+			result.WriteByte('\n')
+		}
+		if utf8.RuneCountInString(line) <= width {
+			result.WriteString(line)
+			continue
+		}
+		words := strings.Fields(line)
+		col := 0
+		for j, word := range words {
+			wl := utf8.RuneCountInString(word)
+			if j == 0 {
+				result.WriteString(word)
+				col = wl
+			} else if col+1+wl > width {
+				result.WriteByte('\n')
+				result.WriteString(word)
+				col = wl
+			} else {
+				result.WriteByte(' ')
+				result.WriteString(word)
+				col += 1 + wl
+			}
+		}
+	}
+	return result.String()
+}
+
+func stripMarkdown(s string) string {
+	var sb strings.Builder
+	lines := strings.Split(s, "\n")
+	blankCount := 0
+
+	for _, line := range lines {
+		line = strings.TrimLeft(line, "#")
+		line = strings.TrimSpace(line)
+
+		for _, marker := range []string{"**", "__"} {
+			line = strings.ReplaceAll(line, marker, "")
+		}
+		line = strings.Trim(line, "*_")
+		line = strings.ReplaceAll(line, "`", "")
+
+		for strings.Contains(line, "<") && strings.Contains(line, ">") {
+			start := strings.Index(line, "<")
+			end := strings.Index(line[start:], ">")
+			if end < 0 {
+				break
+			}
+			line = line[:start] + line[start+end+1:]
+		}
+
+		line = strings.TrimSpace(line)
+
+		if line == "" {
+			blankCount++
+			if blankCount <= 1 {
+				sb.WriteString("\n")
+			}
+		} else {
+			blankCount = 0
+			sb.WriteString(line + "\n")
+		}
+	}
+	return strings.TrimSpace(sb.String())
+}
+
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+func stripANSI(s string) string {
+	return ansiRe.ReplaceAllString(s, "")
+}
+
+// cleanTerminalOutput strips ANSI escapes, carriage returns, and backspace
+// overstrike (man pages render bold/underline as "x\bx"/"_\bx"). Leaving the
+// backspaces in makes lipgloss miscount widths and overflow the panel.
+func cleanTerminalOutput(s string) string {
+	s = stripANSI(s)
+	out := make([]rune, 0, len(s))
+	for _, r := range s {
+		switch r {
+		case '\r':
+			// drop
+		case '\b':
+			if len(out) > 0 {
+				out = out[:len(out)-1]
+			}
+		default:
+			out = append(out, r)
+		}
+	}
+	return string(out)
+}
+
+var (
+	helpFlagRe    = regexp.MustCompile(`(--?[a-zA-Z][a-zA-Z0-9\-_]*)`)
+	helpMetaAngle = regexp.MustCompile(`<[^>]+>`)
+	helpMetaBrack = regexp.MustCompile(`\[[^\]]+\]`)
+)
+
+// stylePrefix returns the raw ANSI prefix a lipgloss style emits, so base text
+// color can be re-asserted after nested styled tokens reset it.
+func stylePrefix(s lipgloss.Style) string {
+	r := s.Render("\x00")
+	if pre, _, ok := strings.Cut(r, "\x00"); ok {
+		return pre
+	}
+	return ""
+}
+
+func colorizeHelp(s string) string {
+	base := stylePrefix(ui.InfoStyle)
+	const reset = "\x1b[0m"
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimRight(line, " ")
+		if trimmed != "" && trimmed[0] != ' ' && trimmed[0] != '\t' && strings.HasSuffix(trimmed, ":") {
+			lines[i] = ui.HelpSectionStyle.Render(line)
+			continue
+		}
+		// Re-assert the base color after each styled token so the whole line
+		// stays the unified content color (matching the changelog body).
+		line = helpFlagRe.ReplaceAllStringFunc(line, func(m string) string {
+			return ui.HelpFlagStyle.Render(m) + base
+		})
+		line = helpMetaAngle.ReplaceAllStringFunc(line, func(m string) string {
+			return ui.HelpMetaStyle.Render(m) + base
+		})
+		line = helpMetaBrack.ReplaceAllStringFunc(line, func(m string) string {
+			return ui.HelpMetaStyle.Render(m) + base
+		})
+		if line != "" {
+			line = base + line + reset
+		}
+		lines[i] = line
+	}
+	return strings.Join(lines, "\n")
+}
+
+func fetchHelpCmd(name string, mode int) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		var output []byte
+		var err error
+
+		// In man mode, try the man page first.
+		if mode == helpModeMan {
+			cmd := exec.CommandContext(ctx, "man", name)
+			cmd.Env = append(os.Environ(), "MANPAGER=cat", "MANWIDTH=80", "TERM=dumb")
+			output, err = cmd.Output()
+		}
+
+		// Fall back through the tool's own help flags. This is the only source
+		// for --help mode, and the fallback when `man` has no page.
+		if len(output) == 0 {
+			for _, args := range [][]string{{"--help"}, {"-h"}, {"help"}} {
+				if ctx.Err() != nil {
+					break
+				}
+				out, e := exec.CommandContext(ctx, name, args...).CombinedOutput()
+				err = e
+				if len(out) > 0 {
+					output = out
+					break
+				}
+			}
+		}
+
+		if len(output) == 0 {
+			return helpOutputMsg{toolName: name, mode: mode, err: err}
+		}
+		return helpOutputMsg{toolName: name, mode: mode, output: cleanTerminalOutput(string(output))}
+	}
+}
+
+func findMatches(text, query string) []int {
+	if query == "" {
+		return nil
+	}
+	lq := strings.ToLower(query)
+	var matches []int
+	for i, line := range strings.Split(strings.ToLower(text), "\n") {
+		if strings.Contains(line, lq) {
+			matches = append(matches, i)
+		}
+	}
+	return matches
+}
+
+func highlightMatch(line, query string) string {
+	if query == "" {
+		return line
+	}
+	ll := strings.ToLower(line)
+	lq := strings.ToLower(query)
+	idx := strings.Index(ll, lq)
+	if idx < 0 {
+		return line
+	}
+	return line[:idx] + ui.SearchMatchStyle.Render(line[idx:idx+len(query)]) + line[idx+len(query):]
+}
+
+func (m Model) rawHelpText() string {
+	mt, ok := m.selectedMeta()
+	if !ok {
+		return ""
+	}
+	cached, has := m.helpCache[mt.Name]
+	if !has {
+		return ""
+	}
+	return cached[m.helpMode]
+}
+
+func (m Model) renderHelpContent() string {
+	mt, ok := m.selectedMeta()
+	if !ok {
+		return ui.MetaNoteStyle.Render("No tool selected")
 	}
 
-	if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
-		toolIdx := msg.Y - 4
-		if toolIdx >= 0 && toolIdx < len(m.tools) {
-			if m.selected != toolIdx {
-				m.selected = toolIdx
-				m.selectedBinding = 0
-				m.selectedCommand = 0
-				m.rightTab = tabKeys
-				m.viewport.GotoTop()
-				m.viewport.SetContent(m.renderContent())
-			}
-			m.focus = focusLeft
-		}
+	if m.helpLoadingFor != "" {
+		return ui.MetaNoteStyle.Render("Loading...")
 	}
-	return m, nil
+
+	cached, has := m.helpCache[mt.Name]
+	if !has || cached[m.helpMode] == "" {
+		if m.helpMode == helpModeHelp {
+			return ui.MetaNoteStyle.Render("Press [h] for --help\nPress [m] for man page")
+		}
+		return ui.MetaNoteStyle.Render("Press [m] for man page\nPress [h] for --help")
+	}
+	text := cached[m.helpMode]
+	if innerW := max(m.helpW-2, 20); innerW > 0 {
+		text = wrapText(text, innerW)
+	}
+	if !m.helpSearching || m.helpSearch.Value() == "" {
+		return colorizeHelp(text)
+	}
+	query := m.helpSearch.Value()
+	lines := strings.Split(text, "\n")
+	result := make([]string, len(lines))
+	for i, line := range lines {
+		result[i] = highlightMatch(line, query)
+	}
+	return strings.Join(result, "\n")
 }

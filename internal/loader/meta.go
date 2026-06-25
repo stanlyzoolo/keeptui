@@ -37,6 +37,7 @@ type ToolMeta struct {
 	Added  string   `yaml:"added"`
 	Tags   []string `yaml:"tags,omitempty"`
 	Note   string   `yaml:"note,omitempty"`
+	GitHub string   `yaml:"github,omitempty"`
 }
 
 func MetaPath() string {

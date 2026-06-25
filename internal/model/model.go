@@ -23,10 +23,9 @@ import (
 )
 
 const (
-	focusTools  = 0
-	focusBrief  = 1
-	focusHeader = 2
-	focusHelp   = 3
+	focusTools = 0
+	focusBrief = 1
+	focusHelp  = 2
 )
 
 type VersionInfo struct {
@@ -278,19 +277,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.toolsW, m.briefW, m.helpW = m.calcPanelWidths()
 		vpH := m.calcVpHeight()
-		leftVpH := max(max(m.height-7, 1)-2, 1)
+		leftVpH := vpH
 		if !m.ready {
-			m.toolsViewport = viewport.New(m.toolsW-2, leftVpH)
-			m.briefViewport = viewport.New(m.briefW, vpH)
-			m.helpViewport = viewport.New(m.helpW, vpH)
+			// Viewports are 1 col narrower than their panel to leave a gutter
+			// for the scrollbar rendered by withScrollbar.
+			m.toolsViewport = viewport.New(m.toolsW-1, leftVpH)
+			m.briefViewport = viewport.New(m.briefW-1, vpH)
+			m.helpViewport = viewport.New(m.helpW-1, vpH)
 			m.helpViewport.SetContent(m.renderHelpContent())
 			m.ready = true
 		} else {
-			m.toolsViewport.Width = m.toolsW - 2
+			m.toolsViewport.Width = m.toolsW - 1
 			m.toolsViewport.Height = leftVpH
-			m.briefViewport.Width = m.briefW
+			m.briefViewport.Width = m.briefW - 1
 			m.briefViewport.Height = vpH
-			m.helpViewport.Width = m.helpW
+			m.helpViewport.Width = m.helpW - 1
 			m.helpViewport.Height = vpH
 		}
 		m.toolsViewport.SetContent(m.renderLeftContent())
@@ -300,10 +301,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyMsg:
 		m.statusMsg = ""
-
-		if m.focus == focusHeader {
-			return m.updateHeaderFocus(msg)
-		}
 
 		if m.editingNote {
 			return m.updateNoteEdit(msg)
@@ -414,6 +411,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.briefViewport.SetContent(m.renderCard())
 					return m, m.autoFetchCmdsForSelected()
 				}
+			} else {
+				// Arrows scroll faster than line-by-line; j stays per-line.
+				step := 1
+				if msg.String() == "down" {
+					step = 3
+				}
+				if m.focus == focusBrief {
+					m.briefViewport.ScrollDown(step)
+				} else if m.focus == focusHelp {
+					m.helpViewport.ScrollDown(step)
+				}
+				return m, nil
 			}
 
 		case "k", "up":
@@ -426,6 +435,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.briefViewport.SetContent(m.renderCard())
 					return m, m.autoFetchCmdsForSelected()
 				}
+			} else {
+				step := 1
+				if msg.String() == "up" {
+					step = 3
+				}
+				if m.focus == focusBrief {
+					m.briefViewport.ScrollUp(step)
+				} else if m.focus == focusHelp {
+					m.helpViewport.ScrollUp(step)
+				}
+				return m, nil
 			}
 
 		case "pgup", "ctrl+b":
@@ -712,11 +732,13 @@ func (m Model) View() string {
 	right := m.renderHelp()
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, middle, right)
 	layout := lipgloss.JoinVertical(lipgloss.Left, body, m.renderStatusBar())
-	return lipgloss.NewStyle().Margin(1).Render(layout)
+	// Vertical margin only; no horizontal margin so panels/status bar reach the
+	// terminal edges.
+	return lipgloss.NewStyle().Margin(1, 0).Render(layout)
 }
 
 func (m Model) renderStatusBar() string {
-	style := ui.HelpStyle.Width(m.width - 4)
+	style := ui.HelpStyle.Width(m.width - 2)
 	if m.helpSearching {
 		matchInfo := ""
 		if len(m.helpMatches) > 0 {
@@ -751,13 +773,6 @@ func (m Model) renderStatusBar() string {
 	if m.statusMsg != "" {
 		return style.Render(ui.SearchPromptStyle.Render(m.statusMsg))
 	}
-	if m.focus == focusHeader {
-		hints := keyHint("↓/j") + " select  " + keyHint("←/esc") + " back  " + keyHint("q") + " quit"
-		if t, ok := m.selectedTool(); ok && t.GitHub != "" {
-			hints = keyHint("v") + " check version  " + hints
-		}
-		return style.Render(hints)
-	}
 	if m.focus == focusBrief {
 		hints := keyHint("↑↓") + " scroll  " + keyHint("→") + " help  " + keyHint("←") + " back  " + keyHint("e") + " edit note  " + keyHint("t") + " edit tags  " + keyHint("q") + " quit"
 		return style.Render(hints)
@@ -791,13 +806,18 @@ func keyHint(k string) string {
 }
 
 func (m Model) calcVpHeight() int {
-	return max(m.height-10, 1)
+	// Match the panel's inner content height. lipgloss adds borders outside the
+	// configured Height, so Height(m.height-7) gives exactly m.height-7 content
+	// rows; the viewport must fill them so the scrollbar reaches the bottom.
+	return max(m.height-7, 1)
 }
 
 func (m Model) calcPanelWidths() (toolsW, briefW, helpW int) {
-	// 20%-40%-40% layout with 6 chars overhead (2 border chars per panel: left border + right border per panel)
-	// Returns panel widths that include borders. Content width = panelW - 2.
-	// Dividers and text wrapping use panelW - 2 to account for left/right borders.
+	// 20%-40%-40% layout. lipgloss adds borders OUTSIDE the configured Width,
+	// so Width(panelW) renders as panelW+2 on screen, and panel content fills
+	// the full panelW (dividers/viewports use panelW, not panelW-2).
+	// Horizontal overhead reserved here = 6: 2 border cols x 3 panels. There is
+	// no outer horizontal margin and panels sit flush against each other.
 	available := max(m.width-6, 1)
 	toolsW = max((available * 20) / 100, 15)
 	briefW = max((available * 40) / 100, 30)
@@ -885,24 +905,19 @@ func (m Model) renderTools() string {
 	return panelStyle.
 		Width(m.toolsW).
 		Height(max(m.height-7, 1)).
-		Render(m.toolsViewport.View())
+		Render(withScrollbar(m.toolsViewport, m.toolsW, m.focus == focusTools))
 }
 
 func (m Model) renderBrief() string {
-	header := m.renderRightHeader()
-	dividerWidth := max(m.briefW-2, 0)
-	divider := lipgloss.NewStyle().Foreground(ui.ColorBorder).Render(strings.Repeat("─", dividerWidth))
-
 	panelStyle := ui.PanelBorder
-	if m.focus == focusBrief || m.focus == focusHeader {
+	if m.focus == focusBrief {
 		panelStyle = ui.PanelBorderFocused
 	}
 
-	inner := lipgloss.JoinVertical(lipgloss.Left, header, divider, m.briefViewport.View())
 	return panelStyle.
 		Width(m.briefW).
 		Height(max(m.height-7, 1)).
-		Render(inner)
+		Render(withScrollbar(m.briefViewport, m.briefW, m.focus == focusBrief))
 }
 
 func (m Model) renderHelp() string {
@@ -911,172 +926,203 @@ func (m Model) renderHelp() string {
 		panelStyle = ui.PanelBorderFocused
 	}
 
-	panelStyle = panelStyle.BorderRight(true)
-
 	return panelStyle.
 		Width(m.helpW).
 		Height(max(m.height-7, 1)).
-		Render(m.helpViewport.View())
+		Render(withScrollbar(m.helpViewport, m.helpW, m.focus == focusHelp))
 }
 
-func (m Model) renderRightHeader() string {
-	prefix := ""
-	if m.focus == focusHeader {
-		prefix = ui.SelectionBarStyle.Render("●") + " "
-	}
+// withScrollbar renders a viewport with a 1-col scrollbar gutter on its right
+// edge. The gutter stays blank unless the content is taller than the viewport,
+// in which case a thumb (no track) is drawn proportional to the scroll position.
+// The thumb is peach when the panel is focused, dim otherwise.
+func withScrollbar(vp viewport.Model, panelWidth int, focused bool) string {
+	left := lipgloss.NewStyle().Width(max(panelWidth-1, 1)).Render(vp.View())
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, scrollColumn(vp, focused))
+}
 
-	if m.searching {
-		query := m.search.Value()
-		return ui.TitleStyle.Render("Search: ") + ui.SearchMatchStyle.Render(query)
+func scrollColumn(vp viewport.Model, focused bool) string {
+	height := vp.Height
+	if height <= 0 {
+		return ""
 	}
-
-	mt, ok := m.selectedMeta()
-	if !ok {
-		return ui.TitleStyle.Render("No tool selected")
+	rows := make([]string, height)
+	for i := range rows {
+		rows[i] = " "
 	}
-
-	sym := loader.StatusSymbol[mt.Status]
-	symStyled := ui.StatusStyle(mt.Status).Render(sym)
-	return prefix + symStyled + " " + ui.TitleStyle.Render(mt.Name)
+	total := vp.TotalLineCount()
+	if total > height {
+		thumbStyle := ui.ScrollThumbDimStyle
+		if focused {
+			thumbStyle = ui.ScrollThumbStyle
+		}
+		thumb := max(height*height/total, 1)
+		pos := 0
+		if maxOff := total - height; maxOff > 0 {
+			pos = vp.YOffset * (height - thumb) / maxOff
+		}
+		for i := pos; i < pos+thumb && i < height; i++ {
+			// Right half block: a half-width thumb hugging the panel border.
+			rows[i] = thumbStyle.Render("▐")
+		}
+	}
+	return strings.Join(rows, "\n")
 }
 
 func (m Model) renderCard() string {
 	if len(m.meta) == 0 {
-		return ui.DescStyle.Render("No tools tracked.\nAdd one: keys track <tool> --github <repo>")
+		return ui.DescStyle.Render("no tools tracked.\nadd one: keys track <tool> --github <repo>")
 	}
 
 	t, ok := m.selectedTool()
 	if !ok {
-		return ui.DescStyle.Render("Select a tool from the left panel.")
+		return ui.DescStyle.Render("select a tool from the left panel.")
 	}
 
 	inner := max(m.briefW-2, 1)
-	divW := max(m.briefW-2, 1)
-	divider := "\n" + lipgloss.NewStyle().Foreground(ui.ColorBorder).Render(strings.Repeat("─", divW)) + "\n"
 
 	var sb strings.Builder
 
-	// About block - format as: name (orange bold) about_text (gray italic)
-	if card, ok := m.repoCards[t.Name]; ok && card.About != "" {
-		// Tool name in bold orange, truncate if very long to prevent overflow
-		name := t.Name
-		maxNameLen := 30
-		if utf8.RuneCountInString(name) > maxNameLen {
-			name = name[:maxNameLen-3] + "..."
-		}
-		nameStyle := lipgloss.NewStyle().Bold(true).Foreground(ui.ColorOrange)
-		nameRendered := nameStyle.Render(name)
+	card, hasCard := m.repoCards[t.Name]
 
-		// About text in gray italic, wrapped to fit within panel
-		aboutWidth := max(inner-utf8.RuneCountInString(name)-1, 20)
+	// Title line: tool name (bold orange) + about (gray italic). Name is always
+	// shown; about is appended when available.
+	name := t.Name
+	maxNameLen := 30
+	if utf8.RuneCountInString(name) > maxNameLen {
+		name = name[:maxNameLen-3] + "..."
+	}
+	nameRendered := lipgloss.NewStyle().Bold(true).Foreground(ui.ColorOrange).Render(name)
+	if hasCard && card.About != "" {
+		aboutWidth := max(inner-utf8.RuneCountInString(name)-3, 20)
 		aboutWrapped := wrapText(card.About, aboutWidth)
-		aboutRendered := ui.MetaNoteStyle.Render(aboutWrapped)
-
-		sb.WriteString(nameRendered + " " + aboutRendered + "\n")
+		sb.WriteString(nameRendered + " — " + ui.MetaNoteStyle.Render(aboutWrapped) + "\n")
+	} else {
+		sb.WriteString(nameRendered + "\n")
 	}
 
-	sb.WriteString(divider)
-
-	// Repo link
-	if t.GitHub != "" {
-		sb.WriteString(ui.GithubStyle.Render("repo: "+t.GitHub) + "\n")
-	}
-
-	// Stars + Release + Languages block
-	if card, ok := m.repoCards[t.Name]; ok {
-		if card.Stars > 0 {
-			sb.WriteString(ui.MetaNoteStyle.Render(fmt.Sprintf("Stars: %s", formatStars(card.Stars))) + "\n")
+	// [info] section: repo / stars / latest / languages / repo status.
+	hasInfo := t.GitHub != "" ||
+		(hasCard && (card.Stars > 0 || card.Latest != "" || len(card.Languages) > 0 || card.RepoStatus != ""))
+	if hasInfo {
+		sb.WriteString(m.sectionDivider("info"))
+		if t.GitHub != "" {
+			sb.WriteString(ui.GithubStyle.Render("repo: "+t.GitHub) + "\n")
 		}
-		if card.Latest != "" {
-			line := "Latest: " + card.Latest
-			if card.PublishedAt != "" {
-				date := card.PublishedAt
-				if len(date) > 10 {
-					date = date[:10]
-				}
-				line += " (" + date + ")"
+		if hasCard {
+			if card.Stars > 0 {
+				sb.WriteString(ui.InfoStyle.Render(fmt.Sprintf("stars: %s", formatStars(card.Stars))) + "\n")
 			}
-			sb.WriteString(ui.MetaNoteStyle.Render(line) + "\n")
-		}
-		if len(card.Languages) > 0 {
-			sb.WriteString(renderLangBar(card.Languages, inner) + "\n")
-		}
-		if card.RepoStatus != "" {
-			sb.WriteString(ui.RepoStatusStyle.Render(card.RepoStatus) + "\n")
+			if card.Latest != "" {
+				line := "latest: " + card.Latest
+				if card.PublishedAt != "" {
+					date := card.PublishedAt
+					if len(date) > 10 {
+						date = date[:10]
+					}
+					line += " (" + date + ")"
+				}
+				sb.WriteString(ui.InfoStyle.Render(line) + "\n")
+			}
+			if len(card.Languages) > 0 {
+				label := "languages: "
+				bar := renderLangBar(card.Languages, inner, utf8.RuneCountInString(label))
+				sb.WriteString(ui.InfoStyle.Render(label) + bar + "\n")
+			}
+			if card.RepoStatus != "" {
+				sb.WriteString(ui.InfoStyle.Render("maintenance:") + " " + renderRepoStatus(card.RepoStatus) + "\n")
+			}
 		}
 	}
 
-	sb.WriteString(divider)
-
-	// Status + Note + Tags block (with inline editing)
+	// [notes] section: status / note / tags (with inline editing via e/t).
 	if mt, ok := m.selectedMeta(); ok {
-		// Status field
+		sb.WriteString(m.sectionDivider("notes"))
 		sym := loader.StatusSymbol[mt.Status]
 		symStyled := ui.StatusStyle(mt.Status).Render(sym + " " + string(mt.Status))
-		sb.WriteString(ui.MetaDetailLabelStyle.Render("Status:") + " " + symStyled + "\n")
+		sb.WriteString(ui.MetaDetailLabelStyle.Render("status:") + " " + symStyled + "\n")
 
 		if m.editingNote {
-			sb.WriteString(ui.MetaDetailLabelStyle.Render("Note:") + " " + m.noteInput.View() + "\n")
+			sb.WriteString(ui.MetaDetailLabelStyle.Render("note:") + " " + m.noteInput.View() + "\n")
 		} else {
 			noteText := mt.Note
 			if noteText == "" {
 				noteText = "— (press e to edit)"
 			}
 			wrapped := wrapText(noteText, inner)
-			sb.WriteString(ui.MetaDetailLabelStyle.Render("Note:") + " " + ui.MetaNoteStyle.Render(wrapped) + "\n")
+			sb.WriteString(ui.MetaDetailLabelStyle.Render("note:") + " " + ui.MetaNoteStyle.Render(wrapped) + "\n")
 		}
 
 		if m.editingTags {
-			sb.WriteString(ui.MetaDetailLabelStyle.Render("Tags:") + " " + m.tagsInput.View() + "\n")
+			sb.WriteString(ui.MetaDetailLabelStyle.Render("tags:") + " " + m.tagsInput.View() + "\n")
 		} else {
 			tagsText := strings.Join(mt.Tags, ", ")
 			if tagsText == "" {
 				tagsText = "— (press t to edit)"
 			}
 			wrapped := wrapText(tagsText, inner)
-			sb.WriteString(ui.MetaDetailLabelStyle.Render("Tags:") + " " + ui.MetaTagStyle.Render(wrapped) + "\n")
+			sb.WriteString(ui.MetaDetailLabelStyle.Render("tags:") + " " + ui.MetaTagStyle.Render(wrapped) + "\n")
 		}
 	}
 
-	// Changelog block (divider only shown when there's content)
+	// [changelog] section (only when there is content to show).
 	var changelogContent string
 	if m.changelogLoadingFor == t.Name {
-		changelogContent = ui.DescStyle.Render("Loading changelog...") + "\n"
+		changelogContent = ui.DescStyle.Render("loading changelog...") + "\n"
 	} else if data, ok := m.changelogData[t.Name]; ok {
 		changelogContent = m.renderChangelogBlock(data)
 	} else if t.GitHub != "" {
-		changelogContent = ui.DescStyle.Render("Loading changelog...") + "\n"
+		changelogContent = ui.DescStyle.Render("loading changelog...") + "\n"
 	}
 	if changelogContent != "" {
-		sb.WriteString(divider)
+		sb.WriteString(m.sectionDivider("changelog"))
 		sb.WriteString(changelogContent)
 	}
 
 	return sb.String()
 }
 
+// renderRepoStatus highlights the maintenance state of the upstream repo: a
+// green dot for an active repo, a yellow warning sign for an archived one.
+func renderRepoStatus(status string) string {
+	switch status {
+	case "active":
+		return lipgloss.NewStyle().Foreground(ui.StatusColorActive).Render("● active")
+	case "archived":
+		return lipgloss.NewStyle().Foreground(ui.StatusColorTrying).Render("⚠ archived")
+	default:
+		return ui.RepoStatusStyle.Render(status)
+	}
+}
+
+// sectionDivider renders a labeled section header that spans the panel's content
+// width, e.g. "[info] ───────────". The label is rendered only by callers when
+// the section actually has content, so no empty dividers are produced.
+func (m Model) sectionDivider(label string) string {
+	tag := "[" + label + "] "
+	// briefW-1 to leave room for the scrollbar gutter; leading blank line adds
+	// breathing room between sections.
+	dashes := max(m.briefW-1-utf8.RuneCountInString(tag), 0)
+	// Blank line above and below the header for breathing room.
+	return "\n" + ui.SectionLabelStyle.Render(tag) +
+		lipgloss.NewStyle().Foreground(ui.ColorBorder).Render(strings.Repeat("─", dashes)) + "\n\n"
+}
+
 func (m Model) renderChangelogBlock(msg changelogMsg) string {
 	if msg.err != nil {
-		return ui.DescStyle.Render("Changelog unavailable: " + msg.err.Error()) + "\n"
+		return ui.InfoStyle.Render("changelog unavailable: "+msg.err.Error()) + "\n"
 	}
 	var sb strings.Builder
-	sb.WriteString(ui.TitleStyle.Render(msg.tag) + "\n")
-	if msg.publishedAt != "" {
-		date := msg.publishedAt
-		if len(date) > 10 {
-			date = date[:10]
-		}
-		sb.WriteString(ui.MetaNoteStyle.Render("Released: "+date) + "\n")
-	}
+	// Only the link to the tag + the changelog text; version/date are already
+	// shown in [info]. Unified muted style (InfoStyle), same as the [info] text.
 	if msg.htmlUrl != "" {
-		sb.WriteString(ui.GithubStyle.Render(msg.htmlUrl) + "\n")
+		sb.WriteString(ui.InfoStyle.Render(msg.htmlUrl) + "\n\n")
 	}
-	sb.WriteString("\n")
 	body := wrapText(stripMarkdown(msg.body), max(m.briefW-2, 10))
 	if body == "" {
-		sb.WriteString(ui.DescStyle.Render("No release notes available.") + "\n")
+		sb.WriteString(ui.InfoStyle.Render("no release notes available.") + "\n")
 	} else {
-		sb.WriteString(ui.DescStyle.Render(body) + "\n")
+		sb.WriteString(ui.InfoStyle.Render(body) + "\n")
 	}
 	return sb.String()
 }
@@ -1100,15 +1146,18 @@ func openBrowser(url string) {
 }
 
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
-	toolsPanelEnd := m.toolsW + 1
-	briefPanelEnd := toolsPanelEnd + m.briefW + 1
+	// Panels sit flush (each is panelW+2 wide incl. borders) with no outer
+	// horizontal margin, so screen X maps directly to panel spans.
+	toolsPanelEnd := m.toolsW + 2
+	briefPanelEnd := toolsPanelEnd + m.briefW + 2
 
 	// Detect which panel the click is in
 	var cmd tea.Cmd
 	if msg.X < toolsPanelEnd {
 		// Left panel (Tools)
 		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
-			toolIdx := msg.Y - 3
+			// Row 0 = top margin, row 1 = panel border, row 2 = first list row.
+			toolIdx := msg.Y - 2 + m.toolsViewport.YOffset
 			filtered := m.filteredMeta()
 			if toolIdx >= 0 && toolIdx < len(filtered) {
 				if m.metaSelected != toolIdx {
@@ -1186,54 +1235,46 @@ func languagePercents(langs map[string]int) []languagePercent {
 	return out
 }
 
-// renderLangBar renders a horizontal language bar with percentages.
-func renderLangBar(langs map[string]int, width int) string {
+// renderLangBar renders a horizontal language bar with percentages, wrapping by
+// words at width. firstLineUsed is the column budget already consumed on the
+// first line (e.g. by an inline "languages: " label) so wrapping lines up.
+func renderLangBar(langs map[string]int, width, firstLineUsed int) string {
 	percents := languagePercents(langs)
 	if len(percents) == 0 {
 		return ""
 	}
-	var parts []string
+	// Language names lowercase in the normal note color; percentages dimmed.
+	pctStyle := lipgloss.NewStyle().Foreground(ui.ColorDim)
+
+	var lines []string
+	var cur strings.Builder
+	curW := firstLineUsed
 	for _, lp := range percents {
-		parts = append(parts, fmt.Sprintf("%s %.0f%%", lp.Name, lp.Pct))
-	}
-	line := strings.Join(parts, "  ")
-	if len(line) > width && width > 3 {
-		line = line[:width-3] + "..."
-	}
-	return ui.MetaNoteStyle.Render(line)
-}
+		name := strings.ToLower(lp.Name)
+		pct := fmt.Sprintf("%.0f%%", lp.Pct)
+		tokenW := utf8.RuneCountInString(name) + 1 + utf8.RuneCountInString(pct)
 
-func (m Model) updateHeaderFocus(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "q", "ctrl+c":
-		return m, tea.Quit
-
-	case "j", "down":
-		m.focus = focusBrief
-		m.setToolsContent()
-		m.briefViewport.GotoTop()
-		m.briefViewport.SetContent(m.renderCard())
-
-	case "left", "esc":
-		m.focus = focusTools
-		m.setToolsContent()
-		m.briefViewport.SetContent(m.renderCard())
-
-	case "v":
-		if m.checkingVersionTool == "" {
-			if t, ok := m.selectedTool(); ok && t.GitHub != "" {
-				m.checkingVersionTool = t.Name
-				return m, fetchVersionCmd(t)
-			}
+		sep := 0
+		if cur.Len() > 0 {
+			sep = 2
 		}
-
-	case "o":
-		if t, ok := m.selectedTool(); ok && t.GitHub != "" {
-			openBrowser("https://" + t.GitHub)
+		// Wrap to a new line only when the token would overflow the width.
+		if curW+sep+tokenW > width && cur.Len() > 0 {
+			lines = append(lines, cur.String())
+			cur.Reset()
+			curW = 0
+			sep = 0
 		}
-
+		if sep > 0 {
+			cur.WriteString("  ")
+		}
+		cur.WriteString(ui.InfoStyle.Render(name) + " " + pctStyle.Render(pct))
+		curW += sep + tokenW
 	}
-	return m, nil
+	if cur.Len() > 0 {
+		lines = append(lines, cur.String())
+	}
+	return strings.Join(lines, "\n")
 }
 
 func fetchVersionCmd(t loader.Tool) tea.Cmd {
@@ -1376,13 +1417,46 @@ func stripANSI(s string) string {
 	return ansiRe.ReplaceAllString(s, "")
 }
 
+// cleanTerminalOutput strips ANSI escapes, carriage returns, and backspace
+// overstrike (man pages render bold/underline as "x\bx"/"_\bx"). Leaving the
+// backspaces in makes lipgloss miscount widths and overflow the panel.
+func cleanTerminalOutput(s string) string {
+	s = stripANSI(s)
+	out := make([]rune, 0, len(s))
+	for _, r := range s {
+		switch r {
+		case '\r':
+			// drop
+		case '\b':
+			if len(out) > 0 {
+				out = out[:len(out)-1]
+			}
+		default:
+			out = append(out, r)
+		}
+	}
+	return string(out)
+}
+
 var (
 	helpFlagRe    = regexp.MustCompile(`(--?[a-zA-Z][a-zA-Z0-9\-_]*)`)
 	helpMetaAngle = regexp.MustCompile(`<[^>]+>`)
 	helpMetaBrack = regexp.MustCompile(`\[[^\]]+\]`)
 )
 
+// stylePrefix returns the raw ANSI prefix a lipgloss style emits, so base text
+// color can be re-asserted after nested styled tokens reset it.
+func stylePrefix(s lipgloss.Style) string {
+	r := s.Render("\x00")
+	if pre, _, ok := strings.Cut(r, "\x00"); ok {
+		return pre
+	}
+	return ""
+}
+
 func colorizeHelp(s string) string {
+	base := stylePrefix(ui.InfoStyle)
+	const reset = "\x1b[0m"
 	lines := strings.Split(s, "\n")
 	for i, line := range lines {
 		trimmed := strings.TrimRight(line, " ")
@@ -1390,15 +1464,20 @@ func colorizeHelp(s string) string {
 			lines[i] = ui.HelpSectionStyle.Render(line)
 			continue
 		}
+		// Re-assert the base color after each styled token so the whole line
+		// stays the unified content color (matching the changelog body).
 		line = helpFlagRe.ReplaceAllStringFunc(line, func(m string) string {
-			return ui.HelpFlagStyle.Render(m)
+			return ui.HelpFlagStyle.Render(m) + base
 		})
 		line = helpMetaAngle.ReplaceAllStringFunc(line, func(m string) string {
-			return ui.HelpMetaStyle.Render(m)
+			return ui.HelpMetaStyle.Render(m) + base
 		})
 		line = helpMetaBrack.ReplaceAllStringFunc(line, func(m string) string {
-			return ui.HelpMetaStyle.Render(m)
+			return ui.HelpMetaStyle.Render(m) + base
 		})
+		if line != "" {
+			line = base + line + reset
+		}
 		lines[i] = line
 	}
 	return strings.Join(lines, "\n")
@@ -1412,26 +1491,33 @@ func fetchHelpCmd(name string, mode int) tea.Cmd {
 		var output []byte
 		var err error
 
-		if mode == helpModeHelp {
-			cmd := exec.CommandContext(ctx, name, "--help")
-			output, err = cmd.CombinedOutput()
-			if (err != nil || len(output) == 0) && ctx.Err() == nil {
-				cmd2 := exec.CommandContext(ctx, name, "-h")
-				out2, err2 := cmd2.CombinedOutput()
-				if len(out2) > 0 {
-					output, err = out2, err2
-				}
-			}
-		} else {
+		// In man mode, try the man page first.
+		if mode == helpModeMan {
 			cmd := exec.CommandContext(ctx, "man", name)
 			cmd.Env = append(os.Environ(), "MANPAGER=cat", "MANWIDTH=80", "TERM=dumb")
 			output, err = cmd.Output()
 		}
 
+		// Fall back through the tool's own help flags. This is the only source
+		// for --help mode, and the fallback when `man` has no page.
+		if len(output) == 0 {
+			for _, args := range [][]string{{"--help"}, {"-h"}, {"help"}} {
+				if ctx.Err() != nil {
+					break
+				}
+				out, e := exec.CommandContext(ctx, name, args...).CombinedOutput()
+				err = e
+				if len(out) > 0 {
+					output = out
+					break
+				}
+			}
+		}
+
 		if len(output) == 0 {
 			return helpOutputMsg{toolName: name, mode: mode, err: err}
 		}
-		return helpOutputMsg{toolName: name, mode: mode, output: stripANSI(string(output))}
+		return helpOutputMsg{toolName: name, mode: mode, output: cleanTerminalOutput(string(output))}
 	}
 }
 

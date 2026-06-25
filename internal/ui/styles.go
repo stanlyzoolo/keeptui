@@ -6,6 +6,7 @@ var (
 	ColorPrimary  = lipgloss.Color("#DA7756")
 	ColorOrange   = lipgloss.Color("#E5A040")
 	ColorMuted    = lipgloss.Color("#AAAAAA")
+	ColorDim      = lipgloss.Color("#888888")
 	ColorBorder   = lipgloss.Color("#555555")
 	ColorText     = lipgloss.Color("#E8E8E8")
 	ColorCategory = lipgloss.Color("#E8A87C")
@@ -33,7 +34,6 @@ var (
 
 	HelpStyle = lipgloss.NewStyle().
 			Foreground(ColorMuted).
-			PaddingLeft(1).
 			BorderTop(true).
 			BorderBottom(true).
 			BorderLeft(true).
@@ -109,4 +109,21 @@ var (
 	RepoStatusStyle = lipgloss.NewStyle().
 				Foreground(ColorMuted).
 				Italic(true)
+
+	// SectionLabelStyle renders the bracketed section headers in the brief
+	// panel, e.g. "[info]". Bold + category color to stand out from the line.
+	SectionLabelStyle = lipgloss.NewStyle().
+				Bold(true).
+				Foreground(ColorCategory)
+
+	// InfoStyle is the non-italic muted style for the [info] section lines.
+	InfoStyle = lipgloss.NewStyle().
+			Foreground(ColorMuted)
+
+	// Scrollbar thumb: peach when the panel is focused, dim otherwise.
+	ScrollThumbStyle = lipgloss.NewStyle().
+				Foreground(ColorPrimary)
+
+	ScrollThumbDimStyle = lipgloss.NewStyle().
+				Foreground(ColorDim)
 )

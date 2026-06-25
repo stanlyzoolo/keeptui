@@ -3,8 +3,12 @@ package ui
 import "github.com/charmbracelet/lipgloss"
 
 var (
+	// Palette — every color used in the UI is named here; styles below build
+	// only from these (no inline hex literals).
 	ColorPrimary  = lipgloss.Color("#DA7756")
 	ColorOrange   = lipgloss.Color("#E5A040")
+	ColorGreen    = lipgloss.Color("#6AAF6A")
+	ColorMeta     = lipgloss.Color("#5588AA")
 	ColorMuted    = lipgloss.Color("#AAAAAA")
 	ColorDim      = lipgloss.Color("#888888")
 	ColorBorder   = lipgloss.Color("#555555")
@@ -24,21 +28,12 @@ var (
 	SelectionBarStyle = lipgloss.NewStyle().
 				Foreground(ColorPrimary)
 
-	TitleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(ColorPrimary).
-			PaddingLeft(1)
-
 	DescStyle = lipgloss.NewStyle().
 			Foreground(ColorText)
 
 	HelpStyle = lipgloss.NewStyle().
 			Foreground(ColorMuted).
-			BorderTop(true).
-			BorderBottom(true).
-			BorderLeft(true).
-			BorderRight(true).
-			BorderStyle(lipgloss.RoundedBorder()).
+			Border(lipgloss.RoundedBorder()).
 			BorderForeground(ColorBorder)
 
 	SearchPromptStyle = lipgloss.NewStyle().
@@ -52,21 +47,15 @@ var (
 	GithubStyle = lipgloss.NewStyle().
 			Foreground(ColorMuted)
 
-	VersionInstalledStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#888888"))
-
-	VersionOkStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#6AAF6A"))
-
 	UpdateAvailableStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#E5A040")).
+				Foreground(ColorOrange).
 				Bold(true)
 
 	// My Tools status colors
-	StatusColorActive    = lipgloss.Color("#6AAF6A")
-	StatusColorTrying    = lipgloss.Color("#E5A040")
-	StatusColorForgotten = lipgloss.Color("#AAAAAA")
-	StatusColorArchived  = lipgloss.Color("#555555")
+	StatusColorActive    = ColorGreen
+	StatusColorTrying    = ColorOrange
+	StatusColorForgotten = ColorMuted
+	StatusColorArchived  = ColorBorder
 
 	StatusStyleActive = lipgloss.NewStyle().
 				Foreground(StatusColorActive).
@@ -90,10 +79,10 @@ var (
 				Foreground(ColorCategory)
 
 	HelpMetaStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#5588AA"))
+			Foreground(ColorMeta)
 
 	MetaTagStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#5588AA"))
+			Foreground(ColorMeta)
 
 	MetaNoteStyle = lipgloss.NewStyle().
 			Foreground(ColorMuted).
@@ -103,12 +92,9 @@ var (
 				Foreground(ColorMuted).
 				Width(8)
 
-	MetaDetailValueStyle = lipgloss.NewStyle().
-				Foreground(ColorText)
-
 	RepoStatusStyle = lipgloss.NewStyle().
-				Foreground(ColorMuted).
-				Italic(true)
+			Foreground(ColorMuted).
+			Italic(true)
 
 	// SectionLabelStyle renders the bracketed section headers in the brief
 	// panel, e.g. "[info]". Bold + category color to stand out from the line.

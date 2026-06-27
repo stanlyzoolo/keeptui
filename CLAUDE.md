@@ -26,7 +26,7 @@ Release is triggered by pushing a `v*` tag; GitHub Actions builds for darwin/lin
 
 | Package | Purpose |
 |---|---|
-| `internal/loader` | Load tool configs (embedded + user); validate YAML; manage tracker metadata |
+| `internal/loader` | Load tool configs (embedded + user); validate YAML; manage tracker metadata; parse GitHub refs (`NormalizeRepo`, `ParseToolRef` in `github.go`) |
 | `internal/model` | Entire Bubble Tea model — all TUI state, key handling, and rendering |
 | `internal/ui` | Lip Gloss styles and `PlaceOverlay` helper |
 | `internal/version` | Detect installed version (`version_cmd`), fetch latest from GitHub API with 24h cache |
@@ -63,4 +63,4 @@ Add `internal/loader/data/tools/<toolname>/config.yaml`. Required fields: `name`
 
 ### GitHub API
 
-`GITHUB_TOKEN` env var increases rate limits when fetching latest versions. The `version` package caches responses in `cache.json`; `FetchAndCache` bypasses the TTL for forced refresh.
+`GITHUB_TOKEN` env var increases rate limits when fetching latest versions. The `version` package caches responses in `cache.json`; `FetchAndCache` bypasses the TTL for forced refresh. URL→`owner/repo` normalization lives in `loader.NormalizeRepo`; `version.extractRepo` delegates to it (the `loader` package owns GitHub-ref parsing to avoid an import cycle).

@@ -131,9 +131,9 @@
 - [x] run `go vet ./...` and `go build ./...`
 
 ### Task 5: Update documentation
-- [ ] update `CLAUDE.md` only if a new convention is worth recording (note: `loader` now owns
+- [x] update `CLAUDE.md` only if a new convention is worth recording (note: `loader` now owns
       GitHub-ref parsing)
-- [ ] move this plan to `docs/plans/completed/`
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 *Items requiring manual intervention — informational only*

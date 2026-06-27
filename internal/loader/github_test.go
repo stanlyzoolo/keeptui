@@ -87,6 +87,13 @@ func TestParseToolRef(t *testing.T) {
 			wantGitHub: "github.com/owner/repo",
 			wantIsGH:   true,
 		},
+		{
+			name:       "spoofed host containing github.com falls back to plain",
+			arg:        "https://github.com.evil.com/owner/repo",
+			wantName:   "https://github.com.evil.com/owner/repo",
+			wantGitHub: "",
+			wantIsGH:   false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -120,6 +127,8 @@ func TestNormalizeRepo(t *testing.T) {
 		{"github.com/sharkdp/bat.git", "sharkdp/bat"},
 		{"git@github.com:owner/repo.git", "owner/repo"},
 		{"github.com/owner/.git", ""},
+		{"https://github.com.evil.com/owner/repo", ""},
+		{"mygithub.com/owner/repo", ""},
 	}
 
 	for _, tt := range tests {

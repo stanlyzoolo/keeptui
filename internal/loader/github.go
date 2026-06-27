@@ -21,6 +21,12 @@ func NormalizeRepo(s string) string {
 	if owner == "" || repo == "" {
 		return ""
 	}
+	// A GitHub owner segment is never a hostname. If it still contains a dot,
+	// an unsupported or spoofed host (e.g. "github.com.evil.com") survived the
+	// prefix stripping; reject rather than emit a malformed "owner/repo".
+	if strings.Contains(owner, ".") {
+		return ""
+	}
 	return owner + "/" + repo
 }
 

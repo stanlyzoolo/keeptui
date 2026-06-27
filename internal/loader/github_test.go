@@ -59,6 +59,34 @@ func TestParseToolRef(t *testing.T) {
 			wantGitHub: "",
 			wantIsGH:   false,
 		},
+		{
+			name:       "non-github url falls back to plain",
+			arg:        "https://gitlab.com/owner/repo",
+			wantName:   "https://gitlab.com/owner/repo",
+			wantGitHub: "",
+			wantIsGH:   false,
+		},
+		{
+			name:       "ssh scp-style ref",
+			arg:        "git@github.com:owner/repo.git",
+			wantName:   "repo",
+			wantGitHub: "github.com/owner/repo",
+			wantIsGH:   true,
+		},
+		{
+			name:       "empty repo segment after .git strip falls back to plain",
+			arg:        "github.com/owner/.git",
+			wantName:   "github.com/owner/.git",
+			wantGitHub: "",
+			wantIsGH:   false,
+		},
+		{
+			name:       "trailing slash",
+			arg:        "https://github.com/owner/repo/",
+			wantName:   "repo",
+			wantGitHub: "github.com/owner/repo",
+			wantIsGH:   true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -89,6 +117,9 @@ func TestNormalizeRepo(t *testing.T) {
 		{"onlyowner", ""},
 		{"", ""},
 		{"github.com/onlyowner", ""},
+		{"github.com/sharkdp/bat.git", "sharkdp/bat"},
+		{"git@github.com:owner/repo.git", "owner/repo"},
+		{"github.com/owner/.git", ""},
 	}
 
 	for _, tt := range tests {

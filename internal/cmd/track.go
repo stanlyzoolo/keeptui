@@ -48,34 +48,23 @@ func RunTrack(args []string) error {
 	if existing != nil {
 		entry = *existing
 		entry.Status = status
-		if *tagsFlag != "" {
-			entry.Tags = splitTags(*tagsFlag)
-		}
-		if *noteFlag != "" {
-			entry.Note = *noteFlag
-		}
-		if *githubFlag != "" {
-			entry.GitHub = *githubFlag
-		} else if isGitHub {
-			entry.GitHub = ghFromArg
-		}
 	} else {
 		entry = loader.ToolMeta{
 			Name:   name,
 			Status: status,
 			Added:  loader.TodayDate(),
 		}
-		if *tagsFlag != "" {
-			entry.Tags = splitTags(*tagsFlag)
-		}
-		if *noteFlag != "" {
-			entry.Note = *noteFlag
-		}
-		if *githubFlag != "" {
-			entry.GitHub = *githubFlag
-		} else if isGitHub {
-			entry.GitHub = ghFromArg
-		}
+	}
+	if *tagsFlag != "" {
+		entry.Tags = splitTags(*tagsFlag)
+	}
+	if *noteFlag != "" {
+		entry.Note = *noteFlag
+	}
+	if *githubFlag != "" {
+		entry.GitHub = *githubFlag
+	} else if isGitHub {
+		entry.GitHub = ghFromArg
 	}
 
 	meta = loader.UpsertMeta(meta, entry)

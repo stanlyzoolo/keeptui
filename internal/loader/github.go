@@ -3,29 +3,33 @@ package loader
 import "strings"
 
 // NormalizeRepo turns a GitHub URL or path into a bare "owner/repo" string.
-// It strips an optional scheme and "github.com/" prefix, then keeps the first
-// two path segments. It returns "" when the input cannot yield owner and repo.
+// It strips an optional scheme, SCP-style SSH prefix and "github.com/" prefix,
+// keeps the first two path segments and drops a trailing ".git" on the repo
+// segment. It returns "" when the input cannot yield owner and repo.
 func NormalizeRepo(s string) string {
 	s = strings.TrimPrefix(s, "https://")
 	s = strings.TrimPrefix(s, "http://")
+	s = strings.TrimPrefix(s, "git@github.com:")
 	s = strings.TrimPrefix(s, "github.com/")
 	s = strings.Trim(s, "/")
 	parts := strings.Split(s, "/")
-	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+	if len(parts) < 2 {
 		return ""
 	}
-	return parts[0] + "/" + parts[1]
+	owner := parts[0]
+	repo := strings.TrimSuffix(parts[1], ".git")
+	if owner == "" || repo == "" {
+		return ""
+	}
+	return owner + "/" + repo
 }
 
 // ParseToolRef classifies a `keys track` argument. When arg refers to a GitHub
-// repository it returns a short tool name (the repo segment, without a trailing
-// ".git") and a normalized "github.com/owner/repo" string. Otherwise it returns
-// the argument unchanged as a plain name with isGitHub=false.
+// repository it returns a short tool name (the repo segment) and a normalized
+// "github.com/owner/repo" string. Otherwise it returns the argument unchanged as
+// a plain name with isGitHub=false.
 func ParseToolRef(arg string) (name, github string, isGitHub bool) {
-	looksGitHub := strings.Contains(arg, "github.com") ||
-		strings.HasPrefix(arg, "http://") ||
-		strings.HasPrefix(arg, "https://")
-	if !looksGitHub {
+	if !strings.Contains(arg, "github.com") {
 		return arg, "", false
 	}
 
@@ -36,6 +40,5 @@ func ParseToolRef(arg string) (name, github string, isGitHub bool) {
 	}
 
 	parts := strings.SplitN(repo, "/", 2)
-	owner, name := parts[0], strings.TrimSuffix(parts[1], ".git")
-	return name, "github.com/" + owner + "/" + name, true
+	return parts[1], "github.com/" + repo, true
 }

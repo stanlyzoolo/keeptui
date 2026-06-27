@@ -7,9 +7,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
+
+	"github.com/lepeshko/keys/internal/loader"
 )
 
 const cacheTTL = 24 * time.Hour
@@ -379,14 +380,7 @@ func GetRepoCard(githubField string) RepoCard {
 }
 
 func extractRepo(githubField string) string {
-	s := strings.TrimPrefix(githubField, "https://")
-	s = strings.TrimPrefix(s, "http://")
-	s = strings.TrimPrefix(s, "github.com/")
-	parts := strings.Split(s, "/")
-	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
-		return ""
-	}
-	return parts[0] + "/" + parts[1]
+	return loader.NormalizeRepo(githubField)
 }
 
 func cacheFilePath() (string, error) {

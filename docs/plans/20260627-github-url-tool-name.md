@@ -118,11 +118,11 @@
 **Files:**
 - Modify: `internal/version/github.go`
 
-- [ ] change `extractRepo` (line ~381) to call `loader.NormalizeRepo` (keep the name/signature
+- [x] change `extractRepo` (line ~381) to call `loader.NormalizeRepo` (keep the name/signature
       so the five existing call sites are untouched)
-- [ ] confirm `internal/version/github_test.go` still covers the normalization behaviour;
+- [x] confirm `internal/version/github_test.go` still covers the normalization behaviour;
       add/keep a case if coverage moved
-- [ ] run `go test ./internal/version/...` — must pass before next task
+- [x] run `go test ./internal/version/...` — must pass before next task
 
 ### Task 4: Verify acceptance criteria
 - [ ] tracking a GitHub URL stores a short `Name` and a `github.com/owner/repo` github field

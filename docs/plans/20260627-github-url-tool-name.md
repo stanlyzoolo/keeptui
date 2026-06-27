@@ -125,10 +125,10 @@
 - [x] run `go test ./internal/version/...` — must pass before next task
 
 ### Task 4: Verify acceptance criteria
-- [ ] tracking a GitHub URL stores a short `Name` and a `github.com/owner/repo` github field
-- [ ] tracking a plain name (`git`) is unchanged
-- [ ] run full test suite: `go test ./...`
-- [ ] run `go vet ./...` and `go build ./...`
+- [x] tracking a GitHub URL stores a short `Name` and a `github.com/owner/repo` github field
+- [x] tracking a plain name (`git`) is unchanged
+- [x] run full test suite: `go test ./...`
+- [x] run `go vet ./...` and `go build ./...`
 
 ### Task 5: Update documentation
 - [ ] update `CLAUDE.md` only if a new convention is worth recording (note: `loader` now owns

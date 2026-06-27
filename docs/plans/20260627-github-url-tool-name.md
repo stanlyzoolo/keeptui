@@ -90,16 +90,16 @@
 - Create: `internal/loader/github.go`
 - Create: `internal/loader/github_test.go`
 
-- [ ] add `NormalizeRepo(s string) string` to `internal/loader/github.go` (URL/path → `owner/repo`)
-- [ ] add `ParseToolRef(arg string) (name, github string, isGitHub bool)` reusing `NormalizeRepo`
-- [ ] write table-driven tests for `ParseToolRef`: `https://github.com/neovim/neovim` → (`neovim`,
+- [x] add `NormalizeRepo(s string) string` to `internal/loader/github.go` (URL/path → `owner/repo`)
+- [x] add `ParseToolRef(arg string) (name, github string, isGitHub bool)` reusing `NormalizeRepo`
+- [x] write table-driven tests for `ParseToolRef`: `https://github.com/neovim/neovim` → (`neovim`,
       `github.com/neovim/neovim`, true); `github.com/junegunn/fzf` → (`fzf`, ..., true);
       `https://github.com/sharkdp/bat.git` → (`bat`, `github.com/sharkdp/bat`, true);
       `https://github.com/owner/repo/tree/main` → (`repo`, `github.com/owner/repo`, true)
-- [ ] write tests for plain/edge inputs: `git` → (`git`, "", false); `tmux` → (`tmux`, "", false);
+- [x] write tests for plain/edge inputs: `git` → (`git`, "", false); `tmux` → (`tmux`, "", false);
       malformed github-ish input → returns the original arg, "", false
-- [ ] add a short test for `NormalizeRepo` (valid + invalid cases)
-- [ ] run `go test ./internal/loader/...` — must pass before next task
+- [x] add a short test for `NormalizeRepo` (valid + invalid cases)
+- [x] run `go test ./internal/loader/...` — must pass before next task
 
 ### Task 2: Use ParseToolRef in `keys track`
 

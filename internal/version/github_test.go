@@ -69,3 +69,22 @@ func TestConcurrentFetch(t *testing.T) {
 		}
 	}
 }
+
+// TestExtractRepo guards the delegation to loader.NormalizeRepo so a stored
+// github field is normalized to "owner/repo" before it reaches the GitHub API.
+func TestExtractRepo(t *testing.T) {
+	tests := []struct {
+		field string
+		want  string
+	}{
+		{"github.com/owner/repo", "owner/repo"},
+		{"https://github.com/owner/repo/tree/main", "owner/repo"},
+		{"github.com/owner/repo.git", "owner/repo"},
+		{"onlyowner", ""},
+	}
+	for _, tt := range tests {
+		if got := extractRepo(tt.field); got != tt.want {
+			t.Errorf("extractRepo(%q) = %q, want %q", tt.field, got, tt.want)
+		}
+	}
+}

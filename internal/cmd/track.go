@@ -13,7 +13,7 @@ func RunTrack(args []string) error {
 		return fmt.Errorf("usage: keys track <tool> [--status trying] [--tags a,b] [--note \"...\"]")
 	}
 
-	name := args[0]
+	name, ghFromArg, isGitHub := loader.ParseToolRef(args[0])
 	rest := args[1:]
 
 	fs := flag.NewFlagSet("track", flag.ContinueOnError)
@@ -48,30 +48,23 @@ func RunTrack(args []string) error {
 	if existing != nil {
 		entry = *existing
 		entry.Status = status
-		if *tagsFlag != "" {
-			entry.Tags = splitTags(*tagsFlag)
-		}
-		if *noteFlag != "" {
-			entry.Note = *noteFlag
-		}
-		if *githubFlag != "" {
-			entry.GitHub = *githubFlag
-		}
 	} else {
 		entry = loader.ToolMeta{
 			Name:   name,
 			Status: status,
 			Added:  loader.TodayDate(),
 		}
-		if *tagsFlag != "" {
-			entry.Tags = splitTags(*tagsFlag)
-		}
-		if *noteFlag != "" {
-			entry.Note = *noteFlag
-		}
-		if *githubFlag != "" {
-			entry.GitHub = *githubFlag
-		}
+	}
+	if *tagsFlag != "" {
+		entry.Tags = splitTags(*tagsFlag)
+	}
+	if *noteFlag != "" {
+		entry.Note = *noteFlag
+	}
+	if *githubFlag != "" {
+		entry.GitHub = *githubFlag
+	} else if isGitHub {
+		entry.GitHub = ghFromArg
 	}
 
 	meta = loader.UpsertMeta(meta, entry)

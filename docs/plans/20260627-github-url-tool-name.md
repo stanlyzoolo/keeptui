@@ -106,12 +106,12 @@
 **Files:**
 - Modify: `internal/cmd/track.go`
 
-- [ ] replace `name := args[0]` with `name, ghFromArg, isGitHub := loader.ParseToolRef(args[0])`
-- [ ] ensure `FindMeta`, `entry.Name`, and the success `fmt.Printf` all use the derived `name`
-- [ ] set GitHub field with precedence: `--github` flag wins, else `ghFromArg` when `isGitHub`
+- [x] replace `name := args[0]` with `name, ghFromArg, isGitHub := loader.ParseToolRef(args[0])`
+- [x] ensure `FindMeta`, `entry.Name`, and the success `fmt.Printf` all use the derived `name`
+- [x] set GitHub field with precedence: `--github` flag wins, else `ghFromArg` when `isGitHub`
       (apply in both existing-entry and new-entry branches)
-- [ ] verify `usage`/`-` guard still rejects a bare flag as first arg (unchanged behaviour)
-- [ ] run `go build ./...` and `go vet ./...` — must pass before next task
+- [x] verify `usage`/`-` guard still rejects a bare flag as first arg (unchanged behaviour)
+- [x] run `go build ./...` and `go vet ./...` — must pass before next task
 
 ### Task 3: Remove duplication — delegate `extractRepo` to `loader.NormalizeRepo`
 

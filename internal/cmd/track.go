@@ -13,7 +13,7 @@ func RunTrack(args []string) error {
 		return fmt.Errorf("usage: keys track <tool> [--status trying] [--tags a,b] [--note \"...\"]")
 	}
 
-	name := args[0]
+	name, ghFromArg, isGitHub := loader.ParseToolRef(args[0])
 	rest := args[1:]
 
 	fs := flag.NewFlagSet("track", flag.ContinueOnError)
@@ -56,6 +56,8 @@ func RunTrack(args []string) error {
 		}
 		if *githubFlag != "" {
 			entry.GitHub = *githubFlag
+		} else if isGitHub {
+			entry.GitHub = ghFromArg
 		}
 	} else {
 		entry = loader.ToolMeta{
@@ -71,6 +73,8 @@ func RunTrack(args []string) error {
 		}
 		if *githubFlag != "" {
 			entry.GitHub = *githubFlag
+		} else if isGitHub {
+			entry.GitHub = ghFromArg
 		}
 	}
 

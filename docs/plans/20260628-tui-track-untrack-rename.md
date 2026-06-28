@@ -150,11 +150,11 @@
 - Delete: `internal/cmd/untrack.go`
 - Modify: `main.go`
 
-- [ ] delete `internal/cmd/track.go` (incl. now-dead `splitTags`) and `internal/cmd/untrack.go`
-- [ ] remove the `track` and `untrack` dispatch cases in `main.go` (lines ~73-74, ~82-83)
-- [ ] remove the `track`/`untrack` lines from the usage/help text in `main.go` (~17, ~20)
-- [ ] `go build ./...` + `go vet ./...` — confirm no dangling references (e.g. `cmd.RunTrack`)
-- [ ] run `go test ./...` — must pass before next task
+- [x] delete `internal/cmd/track.go` (incl. now-dead `splitTags`) and `internal/cmd/untrack.go`
+- [x] remove the `track` and `untrack` dispatch cases in `main.go` (lines ~73-74, ~82-83)
+- [x] remove the `track`/`untrack` lines from the usage/help text in `main.go` (~17, ~20)
+- [x] `go build ./...` + `go vet ./...` — confirm no dangling references (e.g. `cmd.RunTrack`)
+- [x] run `go test ./...` — must pass before next task
 
 ### Task 2: Remove f/v/o actions and metaFilter from the tools panel
 

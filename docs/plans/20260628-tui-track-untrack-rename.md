@@ -184,23 +184,23 @@
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] add `tracking bool` and `trackInput textinput.Model` to the model; init in `New()`
-- [ ] extend the EXISTING `case "t"` (model.go:597) with a focus branch so `focusTools` enters
+- [x] add `tracking bool` and `trackInput textinput.Model` to the model; init in `New()`
+- [x] extend the EXISTING `case "t"` (model.go:597) with a focus branch so `focusTools` enters
       `tracking` (focus `trackInput`, no live filter) while `focusBrief` keeps editing tags —
       do not add a second `case "t"`
-- [ ] extract `trackTool(meta, input) ([]loader.ToolMeta, statusMsg)` pure helper using
+- [x] extract `trackTool(meta, input) ([]loader.ToolMeta, statusMsg)` pure helper using
       `ParseToolRef` + `UpsertMeta` (status `trying`, `Added: TodayDate()`; duplicate →
       "already tracked")
-- [ ] add an early `Update()` branch for `tracking`: enter calls `trackTool`, then `SaveMeta`,
+- [x] add an early `Update()` branch for `tracking`: enter calls `trackTool`, then `SaveMeta`,
       `m.tools = loader.ToolsFromMeta(m.meta)`, refresh viewport, select the new tool, and
       return `m.autoFetchCmdsForSelected()`; esc/empty cancels
-- [ ] add a `renderStatusBar` branch for `tracking` (prompt `track (github url or tool name): `)
+- [x] add a `renderStatusBar` branch for `tracking` (prompt `track (github url or tool name): `)
       and add `[t] track` to the `focusTools` help bar
-- [ ] write table tests for `trackTool` (URL → derived name + github; plain name → name only;
+- [x] write table tests for `trackTool` (URL → derived name + github; plain name → name only;
       empty → no-op; duplicate → updates, not duplicated)
-- [ ] write a save-path test with `t.Setenv("HOME", t.TempDir())` so `SaveMeta` does not touch
+- [x] write a save-path test with `t.Setenv("HOME", t.TempDir())` so `SaveMeta` does not touch
       the real `meta.yaml`
-- [ ] run `go build ./... && go vet ./... && go test ./...` — must pass before next task
+- [x] run `go build ./... && go vet ./... && go test ./...` — must pass before next task
 
 ### Task 4: Add untrack confirmation mode (`u`)
 

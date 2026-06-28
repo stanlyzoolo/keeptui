@@ -89,6 +89,9 @@ type Model struct {
 	noteInput   textinput.Model
 	tagsInput   textinput.Model
 
+	tracking   bool
+	trackInput textinput.Model
+
 	meta         []loader.ToolMeta
 	metaSelected int
 
@@ -127,6 +130,10 @@ func New(meta []loader.ToolMeta, opts Options) Model {
 	hsi.Placeholder = "search help..."
 	hsi.CharLimit = 128
 
+	tri := textinput.New()
+	tri.Placeholder = "github url or tool name..."
+	tri.CharLimit = 256
+
 	m := Model{
 		tools:         loader.ToolsFromMeta(meta),
 		versions:      make(map[string]VersionInfo),
@@ -138,6 +145,7 @@ func New(meta []loader.ToolMeta, opts Options) Model {
 		noteInput:     ni,
 		tagsInput:     tgi,
 		helpSearch:    hsi,
+		trackInput:    tri,
 		meta:          meta,
 	}
 
@@ -279,6 +287,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.editingTags {
 			return m.updateTagsEdit(msg)
+		}
+		if m.tracking {
+			return m.updateTrackInput(msg)
 		}
 
 		if m.helpSearching {
@@ -517,6 +528,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.briefViewport.SetContent(m.renderCard())
 					return m, textinput.Blink
 				}
+			} else if m.focus == focusTools {
+				m.tracking = true
+				m.trackInput.SetValue("")
+				m.trackInput.Focus()
+				return m, textinput.Blink
 			}
 		}
 
@@ -584,6 +600,64 @@ func (m Model) updateTagsEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.tagsInput, cmd = m.tagsInput.Update(msg)
 		m.briefViewport.SetContent(m.renderCard())
+		return m, cmd
+	}
+}
+
+// trackTool adds (or updates) a tracked tool from a GitHub URL or plain name.
+// It returns the updated meta slice and a status message ("" on a fresh add,
+// "already tracked" when the name was already present). Empty input is a no-op.
+func trackTool(meta []loader.ToolMeta, input string) ([]loader.ToolMeta, string) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return meta, ""
+	}
+	name, github, _ := loader.ParseToolRef(input)
+	status := ""
+	if loader.FindMeta(meta, name) != nil {
+		status = "already tracked"
+	}
+	entry := loader.ToolMeta{
+		Name:   name,
+		GitHub: github,
+		Status: loader.StatusTrying,
+		Added:  loader.TodayDate(),
+	}
+	return loader.UpsertMeta(meta, entry), status
+}
+
+func (m Model) updateTrackInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		m.tracking = false
+		m.trackInput.Blur()
+		input := strings.TrimSpace(m.trackInput.Value())
+		if input == "" {
+			return m, nil
+		}
+		name, _, _ := loader.ParseToolRef(input)
+		var status string
+		m.meta, status = trackTool(m.meta, input)
+		loader.SaveMeta(m.meta) //nolint:errcheck
+		m.tools = loader.ToolsFromMeta(m.meta)
+		for i, mt := range m.meta {
+			if mt.Name == name {
+				m.metaSelected = i
+				break
+			}
+		}
+		m.setToolsContent()
+		m.briefViewport.GotoTop()
+		m.briefViewport.SetContent(m.renderCard())
+		m.statusMsg = status
+		return m, m.autoFetchCmdsForSelected()
+	case "esc":
+		m.tracking = false
+		m.trackInput.Blur()
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.trackInput, cmd = m.trackInput.Update(msg)
 		return m, cmd
 	}
 }
@@ -675,6 +749,14 @@ func (m Model) renderStatusBar() string {
 	if m.editingTags {
 		return style.Render(keyHint("enter") + " save  " + keyHint("esc") + " cancel  " + ui.MetaNoteStyle.Render("comma-separated"))
 	}
+	if m.tracking {
+		return style.Render(fmt.Sprintf(
+			"%s %s  %s cancel",
+			ui.SearchPromptStyle.Render("track (github url or tool name):"),
+			m.trackInput.View(),
+			keyHint("esc"),
+		))
+	}
 	if m.statusMsg != "" {
 		return style.Render(ui.SearchPromptStyle.Render(m.statusMsg))
 	}
@@ -688,6 +770,7 @@ func (m Model) renderStatusBar() string {
 	}
 	return style.Render(
 		keyHint("/") + " search  " +
+			keyHint("t") + " track  " +
 			keyHint("q") + " quit",
 	)
 }

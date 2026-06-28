@@ -4,7 +4,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
+
+	"github.com/lepeshko/keys/internal/loader"
 )
 
 func TestWrapText(t *testing.T) {
@@ -178,7 +181,7 @@ func TestRenderStatusBarFocusTools(t *testing.T) {
 	m := Model{width: 80, focus: focusTools}
 	got := m.renderStatusBar()
 
-	for _, want := range []string{"search", "quit"} {
+	for _, want := range []string{"search", "track", "quit"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("focusTools status bar = %q, missing %q", got, want)
 		}
@@ -187,6 +190,95 @@ func TestRenderStatusBarFocusTools(t *testing.T) {
 		if strings.Contains(got, absent) {
 			t.Errorf("focusTools status bar = %q, should not contain %q", got, absent)
 		}
+	}
+}
+
+func TestRenderStatusBarTracking(t *testing.T) {
+	m := Model{width: 80, tracking: true, trackInput: textinput.New()}
+	got := m.renderStatusBar()
+	if !strings.Contains(got, "track") {
+		t.Errorf("tracking status bar = %q, missing prompt", got)
+	}
+}
+
+func TestTrackTool(t *testing.T) {
+	tests := []struct {
+		name       string
+		meta       []loader.ToolMeta
+		input      string
+		wantName   string
+		wantGitHub string
+		wantLen    int
+		wantStatus string
+	}{
+		{
+			name:       "github url derives name and github",
+			input:      "https://github.com/anthropics/claude-code",
+			wantName:   "claude-code",
+			wantGitHub: "github.com/anthropics/claude-code",
+			wantLen:    1,
+		},
+		{
+			name:     "plain name has no github",
+			input:    "git",
+			wantName: "git",
+			wantLen:  1,
+		},
+		{
+			name:    "empty input is a no-op",
+			input:   "   ",
+			wantLen: 0,
+		},
+		{
+			name:       "duplicate updates not duplicates",
+			meta:       []loader.ToolMeta{{Name: "git", Status: loader.StatusActive}},
+			input:      "git",
+			wantName:   "git",
+			wantLen:    1,
+			wantStatus: "already tracked",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, status := trackTool(tt.meta, tt.input)
+			if len(got) != tt.wantLen {
+				t.Fatalf("len = %d, want %d", len(got), tt.wantLen)
+			}
+			if status != tt.wantStatus {
+				t.Errorf("status = %q, want %q", status, tt.wantStatus)
+			}
+			if tt.wantName == "" {
+				return
+			}
+			e := loader.FindMeta(got, tt.wantName)
+			if e == nil {
+				t.Fatalf("expected entry %q in result", tt.wantName)
+			}
+			if e.GitHub != tt.wantGitHub {
+				t.Errorf("github = %q, want %q", e.GitHub, tt.wantGitHub)
+			}
+			if e.Status != loader.StatusTrying {
+				t.Errorf("status field = %q, want %q", e.Status, loader.StatusTrying)
+			}
+			if e.Added == "" {
+				t.Errorf("Added should be set")
+			}
+		})
+	}
+}
+
+func TestTrackToolSavePath(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	meta, _ := trackTool(nil, "git")
+	if err := loader.SaveMeta(meta); err != nil {
+		t.Fatalf("SaveMeta: %v", err)
+	}
+	loaded, err := loader.LoadMeta()
+	if err != nil {
+		t.Fatalf("LoadMeta: %v", err)
+	}
+	if loader.FindMeta(loaded, "git") == nil {
+		t.Errorf("expected git in saved meta")
 	}
 }
 

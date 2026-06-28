@@ -208,18 +208,18 @@
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] add `confirmingUntrack bool` and `untrackTarget string` to the model
-- [ ] add `case "u"` gated by `if m.focus == focusTools` to enter confirmation for the
+- [x] add `confirmingUntrack bool` and `untrackTarget string` to the model
+- [x] add `case "u"` gated by `if m.focus == focusTools` to enter confirmation for the
       selected tool
-- [ ] add an early `Update()` branch: enter → `RemoveMeta` + `SaveMeta` +
+- [x] add an early `Update()` branch: enter → `RemoveMeta` + `SaveMeta` +
       `m.tools = loader.ToolsFromMeta(m.meta)` + refresh viewport, keep `metaSelected` at same
       index clamped to `len-1`; esc/any other key cancels
-- [ ] add a `renderStatusBar` branch (`Untrack <name>?  [enter] yes  [esc] no`) and `[u] untrack`
+- [x] add a `renderStatusBar` branch (`Untrack <name>?  [enter] yes  [esc] no`) and `[u] untrack`
       to the help bar
-- [ ] write tests (table-driven over `RemoveMeta` + clamp): removing lands selection on the
+- [x] write tests (table-driven over `RemoveMeta` + clamp): removing lands selection on the
       next item (clamped at the end); cancel leaves the list unchanged; isolate any save with
       `t.Setenv("HOME", t.TempDir())`
-- [ ] run `go build ./... && go vet ./... && go test ./...` — must pass before next task
+- [x] run `go build ./... && go vet ./... && go test ./...` — must pass before next task
 
 ### Task 5: Add rename mode (`r`)
 

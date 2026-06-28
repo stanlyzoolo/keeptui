@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/lepeshko/keys/internal/loader"
 )
@@ -280,6 +281,96 @@ func TestTrackToolSavePath(t *testing.T) {
 	if loader.FindMeta(loaded, "git") == nil {
 		t.Errorf("expected git in saved meta")
 	}
+}
+
+func TestRenderStatusBarConfirmUntrack(t *testing.T) {
+	m := Model{width: 80, confirmingUntrack: true, untrackTarget: "git"}
+	got := m.renderStatusBar()
+	for _, want := range []string{"Untrack", "git", "yes", "no"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("confirm untrack status bar = %q, missing %q", got, want)
+		}
+	}
+}
+
+func TestRenderStatusBarFocusToolsUntrackHint(t *testing.T) {
+	m := Model{width: 80, focus: focusTools}
+	if !strings.Contains(m.renderStatusBar(), "untrack") {
+		t.Errorf("focusTools status bar missing untrack hint: %q", m.renderStatusBar())
+	}
+}
+
+func TestUpdateUntrackConfirm(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	enter := tea.KeyMsg{Type: tea.KeyEnter}
+	esc := tea.KeyMsg{Type: tea.KeyEsc}
+
+	t.Run("enter removes and clamps selection to next item", func(t *testing.T) {
+		m := Model{
+			meta: []loader.ToolMeta{
+				{Name: "a"}, {Name: "b"}, {Name: "c"},
+			},
+			metaSelected:      1,
+			confirmingUntrack: true,
+			untrackTarget:     "b",
+		}
+		m.tools = loader.ToolsFromMeta(m.meta)
+
+		updated, _ := m.updateUntrackConfirm(enter)
+		nm := updated.(Model)
+
+		if nm.confirmingUntrack {
+			t.Errorf("confirmingUntrack should be false after enter")
+		}
+		if loader.FindMeta(nm.meta, "b") != nil {
+			t.Errorf("b should be removed")
+		}
+		if len(nm.meta) != 2 {
+			t.Fatalf("len = %d, want 2", len(nm.meta))
+		}
+		// selection stays at index 1, now pointing at "c".
+		if nm.metaSelected != 1 {
+			t.Errorf("metaSelected = %d, want 1", nm.metaSelected)
+		}
+	})
+
+	t.Run("enter on last item clamps to new last index", func(t *testing.T) {
+		m := Model{
+			meta:              []loader.ToolMeta{{Name: "a"}, {Name: "b"}},
+			metaSelected:      1,
+			confirmingUntrack: true,
+			untrackTarget:     "b",
+		}
+		m.tools = loader.ToolsFromMeta(m.meta)
+
+		updated, _ := m.updateUntrackConfirm(enter)
+		nm := updated.(Model)
+
+		if nm.metaSelected != 0 {
+			t.Errorf("metaSelected = %d, want 0", nm.metaSelected)
+		}
+	})
+
+	t.Run("esc cancels and leaves list unchanged", func(t *testing.T) {
+		m := Model{
+			meta:              []loader.ToolMeta{{Name: "a"}, {Name: "b"}},
+			metaSelected:      0,
+			confirmingUntrack: true,
+			untrackTarget:     "a",
+		}
+		m.tools = loader.ToolsFromMeta(m.meta)
+
+		updated, _ := m.updateUntrackConfirm(esc)
+		nm := updated.(Model)
+
+		if nm.confirmingUntrack {
+			t.Errorf("confirmingUntrack should be false after esc")
+		}
+		if len(nm.meta) != 2 || loader.FindMeta(nm.meta, "a") == nil {
+			t.Errorf("list should be unchanged after esc, got %v", nm.meta)
+		}
+	})
 }
 
 func TestScrollColumn(t *testing.T) {

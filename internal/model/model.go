@@ -92,6 +92,9 @@ type Model struct {
 	tracking   bool
 	trackInput textinput.Model
 
+	confirmingUntrack bool
+	untrackTarget     string
+
 	meta         []loader.ToolMeta
 	metaSelected int
 
@@ -290,6 +293,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.tracking {
 			return m.updateTrackInput(msg)
+		}
+		if m.confirmingUntrack {
+			return m.updateUntrackConfirm(msg)
 		}
 
 		if m.helpSearching {
@@ -534,6 +540,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.trackInput.Focus()
 				return m, textinput.Blink
 			}
+
+		case "u":
+			if m.focus == focusTools {
+				if mt, ok := m.selectedMeta(); ok {
+					m.confirmingUntrack = true
+					m.untrackTarget = mt.Name
+					return m, nil
+				}
+			}
 		}
 
 		if m.focus == focusBrief {
@@ -662,6 +677,31 @@ func (m Model) updateTrackInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
+func (m Model) updateUntrackConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		m.confirmingUntrack = false
+		m.meta = loader.RemoveMeta(m.meta, m.untrackTarget)
+		loader.SaveMeta(m.meta) //nolint:errcheck
+		m.tools = loader.ToolsFromMeta(m.meta)
+		m.untrackTarget = ""
+		// Keep metaSelected at the same index so selection lands on the next
+		// item; clamp to the new last index (or 0 when the list is empty).
+		if m.metaSelected > len(m.meta)-1 {
+			m.metaSelected = max(len(m.meta)-1, 0)
+		}
+		m.setToolsContent()
+		m.briefViewport.GotoTop()
+		m.briefViewport.SetContent(m.renderCard())
+		return m, m.autoFetchCmdsForSelected()
+	default:
+		// esc or any other key cancels.
+		m.confirmingUntrack = false
+		m.untrackTarget = ""
+		return m, nil
+	}
+}
+
 func (m Model) selectedMeta() (loader.ToolMeta, bool) {
 	filtered := m.filteredMeta()
 	if m.metaSelected < 0 || m.metaSelected >= len(filtered) {
@@ -757,6 +797,14 @@ func (m Model) renderStatusBar() string {
 			keyHint("esc"),
 		))
 	}
+	if m.confirmingUntrack {
+		return style.Render(fmt.Sprintf(
+			"%s  %s yes  %s no",
+			ui.SearchPromptStyle.Render("Untrack "+m.untrackTarget+"?"),
+			keyHint("enter"),
+			keyHint("esc"),
+		))
+	}
 	if m.statusMsg != "" {
 		return style.Render(ui.SearchPromptStyle.Render(m.statusMsg))
 	}
@@ -771,6 +819,7 @@ func (m Model) renderStatusBar() string {
 	return style.Render(
 		keyHint("/") + " search  " +
 			keyHint("t") + " track  " +
+			keyHint("u") + " untrack  " +
 			keyHint("q") + " quit",
 	)
 }

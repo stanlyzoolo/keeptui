@@ -251,12 +251,12 @@
 - [x] run full suite: `go test ./...`; plus `go vet ./...` and `go build ./...`
 
 ### Task 7: Update documentation
-- [ ] update `CLAUDE.md`: cmd subcommand list (drop `track`/`untrack`), TUI state-machine
+- [x] update `CLAUDE.md`: cmd subcommand list (drop `track`/`untrack`), TUI state-machine
       section (new track/untrack/rename modes; removed filter)
-- [ ] update `README.md` if it documents the CLI `track`/`untrack` usage
-- [ ] update `internal/ui/docs/glossary.md` (~215) which references the removed
+- [x] update `README.md` if it documents the CLI `track`/`untrack` usage
+- [x] update `internal/ui/docs/glossary.md` (~215) which references the removed
       `metaFilter`/`filterLabel`
-- [ ] move this plan to `docs/plans/completed/`
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 *Items requiring manual intervention — informational only*

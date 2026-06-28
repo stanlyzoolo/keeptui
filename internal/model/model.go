@@ -95,6 +95,9 @@ type Model struct {
 	confirmingUntrack bool
 	untrackTarget     string
 
+	renaming  bool
+	nameInput textinput.Model
+
 	meta         []loader.ToolMeta
 	metaSelected int
 
@@ -137,6 +140,10 @@ func New(meta []loader.ToolMeta, opts Options) Model {
 	tri.Placeholder = "github url or tool name..."
 	tri.CharLimit = 256
 
+	nmi := textinput.New()
+	nmi.Placeholder = "new name..."
+	nmi.CharLimit = 256
+
 	m := Model{
 		tools:         loader.ToolsFromMeta(meta),
 		versions:      make(map[string]VersionInfo),
@@ -149,6 +156,7 @@ func New(meta []loader.ToolMeta, opts Options) Model {
 		tagsInput:     tgi,
 		helpSearch:    hsi,
 		trackInput:    tri,
+		nameInput:     nmi,
 		meta:          meta,
 	}
 
@@ -296,6 +304,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.confirmingUntrack {
 			return m.updateUntrackConfirm(msg)
+		}
+		if m.renaming {
+			return m.updateRenameInput(msg)
 		}
 
 		if m.helpSearching {
@@ -549,6 +560,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 			}
+
+		case "r":
+			if m.focus == focusTools {
+				if mt, ok := m.selectedMeta(); ok {
+					m.renaming = true
+					m.nameInput.SetValue(mt.Name)
+					m.nameInput.Focus()
+					return m, textinput.Blink
+				}
+			}
 		}
 
 		if m.focus == focusBrief {
@@ -702,6 +723,75 @@ func (m Model) updateUntrackConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
+// renameTool changes a tracked tool's Name from old to newName, preserving its
+// GitHub/Status/Tags/Note/Added fields. An empty newName (after trimming) or a
+// newName equal to old is a no-op. A collision with another tracked tool's name
+// is rejected with an error and leaves meta unchanged.
+func renameTool(meta []loader.ToolMeta, old, newName string) ([]loader.ToolMeta, error) {
+	newName = strings.TrimSpace(newName)
+	if newName == "" || newName == old {
+		return meta, nil
+	}
+	if loader.FindMeta(meta, newName) != nil {
+		return meta, fmt.Errorf("name already exists")
+	}
+	for i := range meta {
+		if meta[i].Name == old {
+			meta[i].Name = newName
+			return meta, nil
+		}
+	}
+	return meta, nil
+}
+
+func (m Model) updateRenameInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		mt, ok := m.selectedMeta()
+		if !ok {
+			m.renaming = false
+			m.nameInput.Blur()
+			return m, nil
+		}
+		old := mt.Name
+		newName := strings.TrimSpace(m.nameInput.Value())
+		updated, err := renameTool(m.meta, old, newName)
+		if err != nil {
+			m.renaming = false
+			m.nameInput.Blur()
+			m.statusMsg = err.Error()
+			return m, nil
+		}
+		m.renaming = false
+		m.nameInput.Blur()
+		if newName == "" || newName == old {
+			return m, nil
+		}
+		m.meta = updated
+		loader.SaveMeta(m.meta) //nolint:errcheck
+		m.tools = loader.ToolsFromMeta(m.meta)
+		delete(m.helpCache, old)
+		for i, e := range m.meta {
+			if e.Name == newName {
+				m.metaSelected = i
+				break
+			}
+		}
+		m.setToolsContent()
+		m.briefViewport.GotoTop()
+		m.briefViewport.SetContent(m.renderCard())
+		return m, m.autoFetchCmdsForSelected()
+	case "esc":
+		m.renaming = false
+		m.nameInput.Blur()
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.nameInput, cmd = m.nameInput.Update(msg)
+		return m, cmd
+	}
+}
+
 func (m Model) selectedMeta() (loader.ToolMeta, bool) {
 	filtered := m.filteredMeta()
 	if m.metaSelected < 0 || m.metaSelected >= len(filtered) {
@@ -805,6 +895,14 @@ func (m Model) renderStatusBar() string {
 			keyHint("esc"),
 		))
 	}
+	if m.renaming {
+		return style.Render(fmt.Sprintf(
+			"%s %s  %s cancel",
+			ui.SearchPromptStyle.Render("rename to:"),
+			m.nameInput.View(),
+			keyHint("esc"),
+		))
+	}
 	if m.statusMsg != "" {
 		return style.Render(ui.SearchPromptStyle.Render(m.statusMsg))
 	}
@@ -820,6 +918,7 @@ func (m Model) renderStatusBar() string {
 		keyHint("/") + " search  " +
 			keyHint("t") + " track  " +
 			keyHint("u") + " untrack  " +
+			keyHint("r") + " rename  " +
 			keyHint("q") + " quit",
 	)
 }

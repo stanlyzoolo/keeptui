@@ -227,21 +227,21 @@
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] add `renaming bool` and `nameInput textinput.Model`; init in `New()`
-- [ ] add `case "r"` gated by `if m.focus == focusTools` to enter `renaming` with `nameInput`
+- [x] add `renaming bool` and `nameInput textinput.Model`; init in `New()`
+- [x] add `case "r"` gated by `if m.focus == focusTools` to enter `renaming` with `nameInput`
       prefilled with the current `Name`
-- [ ] extract `renameTool(meta, old, new) ([]loader.ToolMeta, error)` pure helper that updates
+- [x] extract `renameTool(meta, old, new) ([]loader.ToolMeta, error)` pure helper that updates
       the entry's `Name` (preserving `GitHub`/`Status`/`Tags`/`Note`/`Added`) and rejects a
       collision with another tracked name
-- [ ] add an early `Update()` branch: enter calls `renameTool`; on success `SaveMeta`,
+- [x] add an early `Update()` branch: enter calls `renameTool`; on success `SaveMeta`,
       `m.tools = loader.ToolsFromMeta(m.meta)`, clear `helpCache` for the old name, refresh,
       and return `m.autoFetchCmdsForSelected()`; empty cancels; collision → `statusMsg`
       `name already exists`
-- [ ] add a `renderStatusBar` branch (prompt `rename to: `) and `[r] rename` to the help bar
-- [ ] write table tests for `renameTool`: changes `Name` and preserves `GitHub`/`Status`;
+- [x] add a `renderStatusBar` branch (prompt `rename to: `) and `[r] rename` to the help bar
+- [x] write table tests for `renameTool`: changes `Name` and preserves `GitHub`/`Status`;
       empty is a no-op; collision is rejected and leaves the entry unchanged; isolate any save
       with `t.Setenv("HOME", t.TempDir())`
-- [ ] run `go build ./... && go vet ./... && go test ./...` — must pass before next task
+- [x] run `go build ./... && go vet ./... && go test ./...` — must pass before next task
 
 ### Task 6: Verify acceptance criteria
 - [ ] CLI no longer accepts `track`/`untrack` (subcommands gone, usage text updated)

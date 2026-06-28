@@ -373,6 +373,94 @@ func TestUpdateUntrackConfirm(t *testing.T) {
 	})
 }
 
+func TestRenderStatusBarRenaming(t *testing.T) {
+	m := Model{width: 80, renaming: true, nameInput: textinput.New()}
+	got := m.renderStatusBar()
+	if !strings.Contains(got, "rename to") {
+		t.Errorf("renaming status bar = %q, missing prompt", got)
+	}
+}
+
+func TestRenderStatusBarFocusToolsRenameHint(t *testing.T) {
+	m := Model{width: 80, focus: focusTools}
+	if !strings.Contains(m.renderStatusBar(), "rename") {
+		t.Errorf("focusTools status bar missing rename hint: %q", m.renderStatusBar())
+	}
+}
+
+func TestRenameTool(t *testing.T) {
+	t.Run("changes name and preserves other fields", func(t *testing.T) {
+		meta := []loader.ToolMeta{
+			{Name: "claude-code", GitHub: "github.com/anthropics/claude-code", Status: loader.StatusActive, Tags: []string{"ai"}, Note: "n", Added: "2026-01-01"},
+		}
+		got, err := renameTool(meta, "claude-code", "claude")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		e := loader.FindMeta(got, "claude")
+		if e == nil {
+			t.Fatalf("expected entry 'claude'")
+		}
+		if e.GitHub != "github.com/anthropics/claude-code" {
+			t.Errorf("github = %q, want preserved", e.GitHub)
+		}
+		if e.Status != loader.StatusActive {
+			t.Errorf("status = %q, want preserved", e.Status)
+		}
+		if len(e.Tags) != 1 || e.Tags[0] != "ai" || e.Note != "n" || e.Added != "2026-01-01" {
+			t.Errorf("fields not preserved: %+v", e)
+		}
+		if loader.FindMeta(got, "claude-code") != nil {
+			t.Errorf("old name should be gone")
+		}
+	})
+
+	t.Run("empty is a no-op", func(t *testing.T) {
+		meta := []loader.ToolMeta{{Name: "git"}}
+		got, err := renameTool(meta, "git", "   ")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if loader.FindMeta(got, "git") == nil {
+			t.Errorf("git should be unchanged")
+		}
+	})
+
+	t.Run("collision is rejected and leaves entry unchanged", func(t *testing.T) {
+		meta := []loader.ToolMeta{{Name: "a", GitHub: "x"}, {Name: "b"}}
+		got, err := renameTool(meta, "a", "b")
+		if err == nil {
+			t.Fatalf("expected collision error")
+		}
+		e := loader.FindMeta(got, "a")
+		if e == nil || e.GitHub != "x" {
+			t.Errorf("entry 'a' should be unchanged, got %+v", e)
+		}
+	})
+}
+
+func TestRenameToolSavePath(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	meta := []loader.ToolMeta{{Name: "git", Status: loader.StatusActive}}
+	got, err := renameTool(meta, "git", "g")
+	if err != nil {
+		t.Fatalf("renameTool: %v", err)
+	}
+	if err := loader.SaveMeta(got); err != nil {
+		t.Fatalf("SaveMeta: %v", err)
+	}
+	loaded, err := loader.LoadMeta()
+	if err != nil {
+		t.Fatalf("LoadMeta: %v", err)
+	}
+	if loader.FindMeta(loaded, "g") == nil {
+		t.Errorf("expected renamed 'g' in saved meta")
+	}
+	if loader.FindMeta(loaded, "git") != nil {
+		t.Errorf("old 'git' should not be in saved meta")
+	}
+}
+
 func TestScrollColumn(t *testing.T) {
 	const thumb = "▐"
 

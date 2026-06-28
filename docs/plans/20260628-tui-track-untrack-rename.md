@@ -244,11 +244,11 @@
 - [x] run `go build ./... && go vet ./... && go test ./...` — must pass before next task
 
 ### Task 6: Verify acceptance criteria
-- [ ] CLI no longer accepts `track`/`untrack` (subcommands gone, usage text updated)
-- [ ] in the TUI tools panel: `t` adds (URL or name), `u` removes after `enter` confirm, `r`
+- [x] CLI no longer accepts `track`/`untrack` (subcommands gone, usage text updated)
+- [x] in the TUI tools panel: `t` adds (URL or name), `u` removes after `enter` confirm, `r`
       renames; `f`/`v`/`o` no longer do anything and are absent from the help bar
-- [ ] help bar reads `[/] search · [t] track · [u] untrack · [r] rename · [q] quit`
-- [ ] run full suite: `go test ./...`; plus `go vet ./...` and `go build ./...`
+- [x] help bar reads `[/] search · [t] track · [u] untrack · [r] rename · [q] quit`
+- [x] run full suite: `go test ./...`; plus `go vet ./...` and `go build ./...`
 
 ### Task 7: Update documentation
 - [ ] update `CLAUDE.md`: cmd subcommand list (drop `track`/`untrack`), TUI state-machine

@@ -174,6 +174,22 @@ func TestFindMatches(t *testing.T) {
 	}
 }
 
+func TestRenderStatusBarFocusTools(t *testing.T) {
+	m := Model{width: 80, focus: focusTools}
+	got := m.renderStatusBar()
+
+	for _, want := range []string{"search", "quit"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("focusTools status bar = %q, missing %q", got, want)
+		}
+	}
+	for _, absent := range []string{"filter", "github", "check", "navigate"} {
+		if strings.Contains(got, absent) {
+			t.Errorf("focusTools status bar = %q, should not contain %q", got, absent)
+		}
+	}
+}
+
 func TestScrollColumn(t *testing.T) {
 	const thumb = "▐"
 

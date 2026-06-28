@@ -162,21 +162,21 @@
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] remove `case "f"` and the direct status-filter shortcut keys in the `focusTools` handler
-- [ ] remove the `metaFilter` field and its reads in `filteredMeta()` (~700-703) and
+- [x] remove `case "f"` and the direct status-filter shortcut keys in the `focusTools` handler
+- [x] remove the `metaFilter` field and its reads in `filteredMeta()` (~700-703) and
       `renderStatusBar` (~784-787), so the list always shows all tracked tools; remove the now
       dead `else` empty-state branch ("No tools match current filter.") in `renderLeftContent`
       (~870-874)
-- [ ] remove `case "v"`, its `checkVersionMsg` type/handler/`fetchVersionCmd`, AND the
+- [x] remove `case "v"`, its `checkVersionMsg` type/handler/`fetchVersionCmd`, AND the
       orphaned `checkingVersionTool` field (84) with its refs (227-229, 574-576); keep the
       `Init` `versionMsg` async fetch (214-224) intact
-- [ ] remove `case "o"` and `openBrowser` (delete `openBrowser` only if no longer referenced)
-- [ ] update the stale CLI-referencing strings in `renderLeftContent` (~871) and `renderCard`
+- [x] remove `case "o"` and `openBrowser` (delete `openBrowser` only if no longer referenced)
+- [x] update the stale CLI-referencing strings in `renderLeftContent` (~871) and `renderCard`
       (~974) to point at the new `t` action instead of `keys track …`
-- [ ] simplify the `focusTools` default help bar to `[/] search · [q] quit` (the t/u/r hints
+- [x] simplify the `focusTools` default help bar to `[/] search · [q] quit` (the t/u/r hints
       are added in their tasks)
-- [ ] add/adjust a `renderStatusBar` test asserting the decluttered `focusTools` hint string
-- [ ] run `go build ./... && go vet ./... && go test ./...` — must pass before next task
+- [x] add/adjust a `renderStatusBar` test asserting the decluttered `focusTools` hint string
+- [x] run `go build ./... && go vet ./... && go test ./...` — must pass before next task
 
 ### Task 3: Add track mode (`t`)
 

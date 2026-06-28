@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -38,13 +37,6 @@ type versionMsg struct {
 	installed  string
 	latest     string
 	repoStatus string
-}
-
-type checkVersionMsg struct {
-	toolName   string
-	latest     string
-	repoStatus string
-	err        error
 }
 
 type changelogMsg struct {
@@ -81,7 +73,6 @@ type Model struct {
 	repoCards           map[string]version.RepoCard
 	changelogData       map[string]changelogMsg
 	changelogLoadingFor string
-	checkingVersionTool string
 	focus               int
 	toolsViewport       viewport.Model
 	briefViewport       viewport.Model
@@ -99,7 +90,6 @@ type Model struct {
 	tagsInput   textinput.Model
 
 	meta         []loader.ToolMeta
-	metaFilter   loader.Status
 	metaSelected int
 
 	helpMode      int
@@ -218,24 +208,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.repoStatus != "" {
 			m.repoStatus[msg.toolName] = msg.repoStatus
-		}
-		m.toolsViewport.SetContent(m.renderLeftContent())
-		m.briefViewport.SetContent(m.renderCard())
-		return m, nil
-
-	case checkVersionMsg:
-		if msg.toolName == m.checkingVersionTool {
-			m.checkingVersionTool = ""
-		}
-		if msg.err == nil {
-			vi := m.versions[msg.toolName]
-			vi.Latest = msg.latest
-			m.versions[msg.toolName] = vi
-			if msg.repoStatus != "" {
-				m.repoStatus[msg.toolName] = msg.repoStatus
-			}
-		} else {
-			m.statusMsg = "Version check failed: " + msg.err.Error()
 		}
 		m.toolsViewport.SetContent(m.renderLeftContent())
 		m.briefViewport.SetContent(m.renderCard())
@@ -525,64 +497,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-		case "f":
-			if m.focus == focusTools {
-				switch m.metaFilter {
-				case "":
-					m.metaFilter = loader.StatusActive
-				case loader.StatusActive:
-					m.metaFilter = loader.StatusTrying
-				case loader.StatusTrying:
-					m.metaFilter = loader.StatusForgotten
-				case loader.StatusForgotten:
-					m.metaFilter = loader.StatusArchived
-				default:
-					m.metaFilter = ""
-				}
-				m.metaSelected = 0
-				m.setToolsContent()
-				m.briefViewport.SetContent(m.renderCard())
-			}
-
-		case "1":
-			m.metaFilter = loader.StatusActive
-			m.metaSelected = 0
-			m.setToolsContent()
-			m.briefViewport.SetContent(m.renderCard())
-		case "2":
-			m.metaFilter = loader.StatusTrying
-			m.metaSelected = 0
-			m.setToolsContent()
-			m.briefViewport.SetContent(m.renderCard())
-		case "3":
-			m.metaFilter = loader.StatusForgotten
-			m.metaSelected = 0
-			m.setToolsContent()
-			m.briefViewport.SetContent(m.renderCard())
-		case "4":
-			m.metaFilter = loader.StatusArchived
-			m.metaSelected = 0
-			m.setToolsContent()
-			m.briefViewport.SetContent(m.renderCard())
-		case "a":
-			m.metaFilter = ""
-			m.metaSelected = 0
-			m.setToolsContent()
-			m.briefViewport.SetContent(m.renderCard())
-
-		case "v":
-			if m.focus == focusTools && m.checkingVersionTool == "" {
-				if t, ok := m.selectedTool(); ok && t.GitHub != "" {
-					m.checkingVersionTool = t.Name
-					return m, fetchVersionCmd(t)
-				}
-			}
-
-		case "o":
-			if t, ok := m.selectedTool(); ok && t.GitHub != "" {
-				openBrowser("https://" + t.GitHub)
-			}
-
 		case "e":
 			if m.focus == focusBrief {
 				if mt, ok := m.selectedMeta(); ok {
@@ -697,15 +611,6 @@ func (m Model) selectedTool() (loader.Tool, bool) {
 
 func (m Model) filteredMeta() []loader.ToolMeta {
 	source := m.meta
-	if m.metaFilter != "" {
-		var filtered []loader.ToolMeta
-		for _, mt := range m.meta {
-			if mt.Status == m.metaFilter {
-				filtered = append(filtered, mt)
-			}
-		}
-		source = filtered
-	}
 
 	if m.searching {
 		query := strings.ToLower(strings.TrimSpace(m.search.Value()))
@@ -781,22 +686,8 @@ func (m Model) renderStatusBar() string {
 		hints := keyHint("↑↓") + " scroll  " + keyHint("h") + " --help  " + keyHint("m") + " man  " + keyHint("/") + " search  " + keyHint("←") + " back  " + keyHint("q") + " quit"
 		return style.Render(hints)
 	}
-	filterHint := ""
-	if m.metaFilter != "" {
-		filterHint = keyHint("a") + " all  "
-	}
-	versionHint := ""
-	if t, ok := m.selectedTool(); ok && t.GitHub != "" {
-		versionHint = keyHint("v") + " check  "
-	}
 	return style.Render(
-		keyHint("j/k") + " navigate  " +
-			keyHint("→") + " details  " +
-			keyHint("f") + " filter  " +
-			filterHint +
-			keyHint("/") + " search  " +
-			versionHint +
-			keyHint("o") + " github  " +
+		keyHint("/") + " search  " +
 			keyHint("q") + " quit",
 	)
 }
@@ -867,10 +758,8 @@ func (m Model) renderLeftContent() string {
 	if len(filtered) == 0 {
 		if m.searching {
 			sb.WriteString(ui.DescStyle.Render("  No matches.") + "\n")
-		} else if len(m.meta) == 0 {
-			sb.WriteString(ui.DescStyle.Render("  No tools tracked.\n  Add one:\n  keys track <tool>\n  --github ...") + "\n")
 		} else {
-			sb.WriteString(ui.DescStyle.Render("  No tools match\n  current filter.") + "\n")
+			sb.WriteString(ui.DescStyle.Render("  No tools tracked.\n  Press t to add one.") + "\n")
 		}
 	}
 
@@ -971,7 +860,7 @@ func scrollColumn(vp viewport.Model, focused bool) string {
 
 func (m Model) renderCard() string {
 	if len(m.meta) == 0 {
-		return ui.DescStyle.Render("no tools tracked.\nadd one: keys track <tool> --github <repo>")
+		return ui.DescStyle.Render("no tools tracked.\npress t to add one.")
 	}
 
 	t, ok := m.selectedTool()
@@ -1132,19 +1021,6 @@ func (m Model) hasUpdate(toolName string) bool {
 	return ok && version.IsNewer(vi.Installed, vi.Latest)
 }
 
-func openBrowser(url string) {
-	var cmd string
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = "open"
-	case "windows":
-		cmd = "start"
-	default:
-		cmd = "xdg-open"
-	}
-	exec.Command(cmd, url).Start() //nolint:errcheck
-}
-
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// Panels sit flush (each is panelW+2 wide incl. borders) with no outer
 	// horizontal margin, so screen X maps directly to panel spans.
@@ -1275,19 +1151,6 @@ func renderLangBar(langs map[string]int, width, firstLineUsed int) string {
 		lines = append(lines, cur.String())
 	}
 	return strings.Join(lines, "\n")
-}
-
-func fetchVersionCmd(t loader.Tool) tea.Cmd {
-	return func() tea.Msg {
-		latest, err := version.FetchAndCache(t.GitHub)
-		repoStatus := version.GetCachedRepoStatus(t.GitHub)
-		return checkVersionMsg{
-			toolName:   t.Name,
-			latest:     latest,
-			repoStatus: repoStatus,
-			err:        err,
-		}
-	}
 }
 
 func fetchRepoCardCmd(t loader.Tool) tea.Cmd {

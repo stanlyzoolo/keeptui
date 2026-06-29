@@ -200,8 +200,8 @@ Key design decisions:
 - [x] confirm `internal/cmd/` is gone and nothing imports it
 
 ### Task 9: Finalize documentation and plan
-- [ ] re-read README/CLAUDE/glossary diffs for consistency
-- [ ] move this plan to `docs/plans/completed/`
+- [x] re-read README/CLAUDE/glossary diffs for consistency
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 

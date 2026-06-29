@@ -114,11 +114,11 @@ Key design decisions:
 - Delete: `internal/cmd/status_cmd.go`, `internal/cmd/note.go`, `internal/cmd/list.go` (whole `internal/cmd/` package)
 - Modify: `main.go`
 
-- [ ] delete the `internal/cmd/` directory
-- [ ] rewrite `main.go`: `main()` loads meta and calls `runTUI()`; remove `runCommand`, `parseListFlags`, `helpText`, `tuiOptions`, the `-h/--help`, `-s`, and `<tool>` handling, and the `internal/cmd` import
-- [ ] keep `runTUI` but drop the `tuiOptions` parameter (temporary `model.New(meta, model.Options{})` call is fixed in Task 2)
-- [ ] `go build ./...` — will fail only on the `model.New` signature, fixed in Task 2; CLI removal itself must compile-clean otherwise
-- [ ] no unit tests for `main.go` (thin launcher); verify via build
+- [x] delete the `internal/cmd/` directory
+- [x] rewrite `main.go`: `main()` loads meta and calls `runTUI()`; remove `runCommand`, `parseListFlags`, `helpText`, `tuiOptions`, the `-h/--help`, `-s`, and `<tool>` handling, and the `internal/cmd` import
+- [x] keep `runTUI` but drop the `tuiOptions` parameter (temporary `model.New(meta, model.Options{})` call is fixed in Task 2)
+- [x] `go build ./...` — will fail only on the `model.New` signature, fixed in Task 2; CLI removal itself must compile-clean otherwise
+- [x] no unit tests for `main.go` (thin launcher); verify via build
 
 ### Task 2: Remove model.Options and simplify New
 

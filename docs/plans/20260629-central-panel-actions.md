@@ -188,10 +188,10 @@ Key design decisions:
 - Modify: `CLAUDE.md`
 - Modify: `internal/ui/docs/glossary.md`
 
-- [ ] `README.md`: remove the CLI commands section (`keys status`/`note`/`list`); document the app as TUI-only; update the central-panel Help Bar and key list
-- [ ] `CLAUDE.md`: remove the stale `internal/cmd` subcommand row; document central-panel actions (`o`/`c`/`s`/`e`/`t`) and the CLI removal; fix data flow to `model.New(meta)`
-- [ ] `internal/ui/docs/glossary.md`: update only affected entries (central Help Bar; remove `keys status/note/list` references) — full glossary rewrite is OUT OF SCOPE
-- [ ] no unit tests (docs only)
+- [x] `README.md`: remove the CLI commands section (`keys status`/`note`/`list`); document the app as TUI-only; update the central-panel Help Bar and key list
+- [x] `CLAUDE.md`: remove the stale `internal/cmd` subcommand row; document central-panel actions (`o`/`c`/`s`/`e`/`t`) and the CLI removal; fix data flow to `model.New(meta)`
+- [x] `internal/ui/docs/glossary.md`: update only affected entries (central Help Bar; remove `keys status/note/list` references) — full glossary rewrite is OUT OF SCOPE
+- [x] no unit tests (docs only)
 
 ### Task 8: Verify acceptance criteria
 - [ ] verify all Overview requirements are implemented (`o`/`c`/`s` actions, CLI gone, Help Bar updated)

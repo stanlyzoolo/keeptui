@@ -153,13 +153,11 @@
 - Полноширинная строка в самом низу экрана с округлой рамкой.
 - Содержит контекстные подсказки клавиш в формате `[key] действие`.
 - Меняется в зависимости от состояния:
-  - Focus Left: навигация, поиск, переход в My Tools, `[v] check version` (если есть GitHub).
-  - Focus Header: `[v] check version`, `[c] changelog`, навигация.
-  - Focus Right (Keys): копирование, changelog, GitHub.
-  - Focus Right (Commands): детали команды, копирование.
-  - Changelog Overlay: прокрутка, `[o] open in browser`, закрытие.
+  - Focus Tools (`focusTools`): `[/] search  [t] track  [u] untrack  [r] rename  [q] quit`.
+  - Focus Brief (`focusBrief`, центральная карточка): `[o] open repo  [c] changelog  [s] status  [e] note  [t] tags  [q] quit` — действия над данными, которые карточка уже показывает; навигационные подсказки (scroll/help/back) намеренно убраны, сами клавиши работают.
+  - Focus Help (`focusHelp`): `[↑↓] scroll  [h] --help  [m] man  [/] search  [←] back  [q] quit`.
   - Search Mode: поле ввода и выход из поиска.
-  - Status Message: временное сообщение (например `Copied: <key>`).
+  - Status Message: временное сообщение (например `no repo for <tool>`).
 
 ### Key Hint — Подсказка клавиши
 - Код: `keyHint()`

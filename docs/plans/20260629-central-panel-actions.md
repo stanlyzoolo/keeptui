@@ -194,10 +194,10 @@ Key design decisions:
 - [x] no unit tests (docs only)
 
 ### Task 8: Verify acceptance criteria
-- [ ] verify all Overview requirements are implemented (`o`/`c`/`s` actions, CLI gone, Help Bar updated)
-- [ ] verify edge cases: no-`GitHub` tool, status cycle wraps correctly, actions are inert outside `focusBrief`
-- [ ] run full suite: `go build ./... && go vet ./... && go test ./...`
-- [ ] confirm `internal/cmd/` is gone and nothing imports it
+- [x] verify all Overview requirements are implemented (`o`/`c`/`s` actions, CLI gone, Help Bar updated)
+- [x] verify edge cases: no-`GitHub` tool, status cycle wraps correctly, actions are inert outside `focusBrief`
+- [x] run full suite: `go build ./... && go vet ./... && go test ./...`
+- [x] confirm `internal/cmd/` is gone and nothing imports it
 
 ### Task 9: Finalize documentation and plan
 - [ ] re-read README/CLAUDE/glossary diffs for consistency

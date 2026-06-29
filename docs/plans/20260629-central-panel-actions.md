@@ -139,13 +139,13 @@ Key design decisions:
 - Create: `internal/model/browser.go`
 - Create or Modify: `internal/model/browser_test.go`
 
-- [ ] add pure `browserCommand(goos, url string) (string, []string)` covering darwin/windows/default
-- [ ] define `openURLMsg{ err error }` message type (in `browser.go` or alongside the other msg types in `model.go`)
-- [ ] add `openURLCmd(url string) tea.Cmd` that runs the resolved command via `exec.Command(...).Start()` and returns `openURLMsg{err}`
-- [ ] add `case openURLMsg` to the `Update` type-switch (`model.go:219`): on `err != nil` set `m.statusMsg` to the error text, else clear/leave it
-- [ ] write tests for `browserCommand` per `GOOS` (darwin, windows, linux/default) — assert binary + args, no process launch
-- [ ] write a test driving `openURLMsg{err: …}` through `Update` and asserting `m.statusMsg` is set
-- [ ] run `go test ./...` — must pass before Task 4
+- [x] add pure `browserCommand(goos, url string) (string, []string)` covering darwin/windows/default
+- [x] define `openURLMsg{ err error }` message type (in `browser.go` or alongside the other msg types in `model.go`)
+- [x] add `openURLCmd(url string) tea.Cmd` that runs the resolved command via `exec.Command(...).Start()` and returns `openURLMsg{err}`
+- [x] add `case openURLMsg` to the `Update` type-switch (`model.go:219`): on `err != nil` set `m.statusMsg` to the error text, else clear/leave it
+- [x] write tests for `browserCommand` per `GOOS` (darwin, windows, linux/default) — assert binary + args, no process launch
+- [x] write a test driving `openURLMsg{err: …}` through `Update` and asserting `m.statusMsg` is set
+- [x] run `go test ./...` — must pass before Task 4
 
 ### Task 4: Wire `o` and `c` actions in the focusBrief branch
 

@@ -226,6 +226,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case openURLMsg:
+		if msg.err != nil {
+			m.statusMsg = msg.err.Error()
+		}
+		return m, nil
+
 	case helpOutputMsg:
 		m.helpLoadingFor = ""
 		cached := m.helpCache[msg.toolName]

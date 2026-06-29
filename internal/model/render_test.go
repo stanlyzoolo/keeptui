@@ -510,6 +510,54 @@ func TestUpdateBriefOpenActions(t *testing.T) {
 	})
 }
 
+func TestUpdateBriefStatusCycle(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	keyS := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")}
+
+	t.Run("cycles status through the full loop", func(t *testing.T) {
+		m := Model{
+			meta:         []loader.ToolMeta{{Name: "tool-x", Status: loader.StatusActive}},
+			metaSelected: 0,
+			focus:        focusBrief,
+		}
+		m.tools = loader.ToolsFromMeta(m.meta)
+
+		want := []loader.Status{
+			loader.StatusTrying,
+			loader.StatusForgotten,
+			loader.StatusArchived,
+			loader.StatusActive,
+		}
+
+		var cur tea.Model = m
+		for i, w := range want {
+			updated, _ := cur.(Model).Update(keyS)
+			nm := updated.(Model)
+			got := loader.FindMeta(nm.meta, "tool-x").Status
+			if got != w {
+				t.Errorf("step %d: status = %q, want %q", i, got, w)
+			}
+			cur = nm
+		}
+	})
+
+	t.Run("inert outside focusBrief", func(t *testing.T) {
+		m := Model{
+			meta:         []loader.ToolMeta{{Name: "tool-x", Status: loader.StatusActive}},
+			metaSelected: 0,
+			focus:        focusTools,
+		}
+		m.tools = loader.ToolsFromMeta(m.meta)
+
+		updated, _ := m.Update(keyS)
+		nm := updated.(Model)
+		if got := loader.FindMeta(nm.meta, "tool-x").Status; got != loader.StatusActive {
+			t.Errorf("status = %q, want %q (unchanged outside focusBrief)", got, loader.StatusActive)
+		}
+	})
+}
+
 func TestScrollColumn(t *testing.T) {
 	const thumb = "▐"
 

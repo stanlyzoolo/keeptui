@@ -165,10 +165,10 @@ Key design decisions:
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] add `case "s"` in the `focusBrief` branch: `selectedMeta()` → `mt.Status = loader.NextStatus(mt.Status)` → `m.meta = loader.UpsertMeta(m.meta, mt)` → `loader.SaveMeta(m.meta)` → `m.briefViewport.SetContent(m.renderCard())` (no `ToolsFromMeta`, matching note/tags)
-- [ ] write a test driving `s` through the full cycle `active → trying → forgotten → archived → active` and asserting `m.meta` reflects each step
-- [ ] write a test that `s` outside `focusBrief` (e.g. `focusTools`) does not change status
-- [ ] run `go test ./...` — must pass before Task 6
+- [x] add `case "s"` in the `focusBrief` branch: `selectedMeta()` → `mt.Status = loader.NextStatus(mt.Status)` → `m.meta = loader.UpsertMeta(m.meta, mt)` → `loader.SaveMeta(m.meta)` → `m.briefViewport.SetContent(m.renderCard())` (no `ToolsFromMeta`, matching note/tags)
+- [x] write a test driving `s` through the full cycle `active → trying → forgotten → archived → active` and asserting `m.meta` reflects each step
+- [x] write a test that `s` outside `focusBrief` (e.g. `focusTools`) does not change status
+- [x] run `go test ./...` — must pass before Task 6
 
 ### Task 6: Update the central-panel Help Bar
 

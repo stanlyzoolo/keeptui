@@ -577,6 +577,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, openURLCmd("https://" + t.GitHub + "/releases")
 				}
 			}
+
+		case "s":
+			if m.focus == focusBrief {
+				if mt, ok := m.selectedMeta(); ok {
+					mt.Status = loader.NextStatus(mt.Status)
+					m.meta = loader.UpsertMeta(m.meta, mt)
+					loader.SaveMeta(m.meta) //nolint:errcheck
+					m.briefViewport.SetContent(m.renderCard())
+					return m, nil
+				}
+			}
 		}
 
 		if m.focus == focusBrief {

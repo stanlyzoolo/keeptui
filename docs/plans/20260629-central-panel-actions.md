@@ -127,11 +127,11 @@ Key design decisions:
 - Modify: `main.go`
 - Modify: `internal/model/render_test.go` (only if any test references `Options`/`New`)
 
-- [ ] remove `Options` struct (`model.go:117-120`) and the `InitialTool`/`InitialSearch` blocks (`model.go:163-177`)
-- [ ] change signature to `func New(meta []loader.ToolMeta) Model`
-- [ ] update the `model.New(...)` call in `main.go` to `model.New(meta)`
-- [ ] grep for other `model.New`/`Options` references and fix call sites
-- [ ] run `go build ./...` and `go test ./...` — must pass before Task 3
+- [x] remove `Options` struct (`model.go:117-120`) and the `InitialTool`/`InitialSearch` blocks (`model.go:163-177`)
+- [x] change signature to `func New(meta []loader.ToolMeta) Model`
+- [x] update the `model.New(...)` call in `main.go` to `model.New(meta)`
+- [x] grep for other `model.New`/`Options` references and fix call sites
+- [x] run `go build ./...` and `go test ./...` — must pass before Task 3
 
 ### Task 3: Add the openURL browser helper
 

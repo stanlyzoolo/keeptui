@@ -114,12 +114,7 @@ type Model struct {
 	helpW  int
 }
 
-type Options struct {
-	InitialTool   string
-	InitialSearch string
-}
-
-func New(meta []loader.ToolMeta, opts Options) Model {
+func New(meta []loader.ToolMeta) Model {
 	ti := textinput.New()
 	ti.Placeholder = "search..."
 	ti.CharLimit = 64
@@ -158,22 +153,6 @@ func New(meta []loader.ToolMeta, opts Options) Model {
 		trackInput:    tri,
 		nameInput:     nmi,
 		meta:          meta,
-	}
-
-	if opts.InitialTool != "" {
-		for i, mt := range m.meta {
-			if strings.EqualFold(mt.Name, opts.InitialTool) {
-				m.metaSelected = i
-				m.focus = focusBrief
-				break
-			}
-		}
-	}
-
-	if opts.InitialSearch != "" {
-		m.searching = true
-		m.search.SetValue(opts.InitialSearch)
-		m.search.Focus()
 	}
 
 	return m

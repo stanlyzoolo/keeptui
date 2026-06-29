@@ -21,7 +21,7 @@ func runTUI() {
 	}
 
 	p := tea.NewProgram(
-		model.New(meta, model.Options{}),
+		model.New(meta),
 		tea.WithAltScreen(),
 		tea.WithMouseCellMotion(),
 	)

@@ -555,6 +555,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, textinput.Blink
 				}
 			}
+
+		case "o":
+			if m.focus == focusBrief {
+				if t, ok := m.selectedTool(); ok {
+					if t.GitHub == "" {
+						m.statusMsg = "no repo for " + t.Name
+						return m, nil
+					}
+					return m, openURLCmd("https://" + t.GitHub)
+				}
+			}
+
+		case "c":
+			if m.focus == focusBrief {
+				if t, ok := m.selectedTool(); ok {
+					if t.GitHub == "" {
+						m.statusMsg = "no repo for " + t.Name
+						return m, nil
+					}
+					return m, openURLCmd("https://" + t.GitHub + "/releases")
+				}
+			}
 		}
 
 		if m.focus == focusBrief {

@@ -153,11 +153,11 @@ Key design decisions:
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] add `case "o"` in the `Update()` key switch: when `focus == focusBrief`, use `selectedTool()`; if `GitHub == ""` set `m.statusMsg = "no repo for " + t.Name` and `return m, nil`, else `return m, openURLCmd("https://" + t.GitHub)` (explicit return matches the `e`/`t` handlers and avoids falling through to `briefViewport.Update`)
-- [ ] add `case "c"`: same guard and explicit returns, URL `"https://" + t.GitHub + "/releases"`
-- [ ] write a test: `o`/`c` on a tool with no `GitHub` sets `m.statusMsg` to `"no repo for <tool>"` and does not return an exec command
-- [ ] write a test: `o`/`c` on a tool with `GitHub` returns a non-nil command (exec not actually run)
-- [ ] run `go test ./...` — must pass before Task 5
+- [x] add `case "o"` in the `Update()` key switch: when `focus == focusBrief`, use `selectedTool()`; if `GitHub == ""` set `m.statusMsg = "no repo for " + t.Name` and `return m, nil`, else `return m, openURLCmd("https://" + t.GitHub)` (explicit return matches the `e`/`t` handlers and avoids falling through to `briefViewport.Update`)
+- [x] add `case "c"`: same guard and explicit returns, URL `"https://" + t.GitHub + "/releases"`
+- [x] write a test: `o`/`c` on a tool with no `GitHub` sets `m.statusMsg` to `"no repo for <tool>"` and does not return an exec command
+- [x] write a test: `o`/`c` on a tool with `GitHub` returns a non-nil command (exec not actually run)
+- [x] run `go test ./...` — must pass before Task 5
 
 ### Task 5: Wire the `s` status-cycle action
 

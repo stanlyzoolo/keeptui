@@ -925,7 +925,7 @@ func (m Model) renderStatusBar() string {
 		return style.Render(ui.SearchPromptStyle.Render(m.statusMsg))
 	}
 	if m.focus == focusBrief {
-		hints := keyHint("↑↓") + " scroll  " + keyHint("→") + " help  " + keyHint("←") + " back  " + keyHint("e") + " edit note  " + keyHint("t") + " edit tags  " + keyHint("q") + " quit"
+		hints := keyHint("o") + " open repo  " + keyHint("c") + " changelog  " + keyHint("s") + " status  " + keyHint("e") + " note  " + keyHint("t") + " tags  " + keyHint("q") + " quit"
 		return style.Render(hints)
 	}
 	if m.focus == focusHelp {

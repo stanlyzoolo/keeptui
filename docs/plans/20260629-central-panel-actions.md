@@ -176,10 +176,10 @@ Key design decisions:
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] replace the `focusBrief` branch in `renderStatusBar()` with `[o] open repo  [c] changelog  [s] status  [e] note  [t] tags  [q] quit` (using `keyHint`)
-- [ ] confirm navigation keys (`↑↓` scroll, `→/←` panel nav, `q`) still work — only the hints are removed
-- [ ] write/extend a test asserting the `focusBrief` status bar contains `[o]`,`[c]`,`[s]`,`[e]`,`[t]`,`[q]` and does NOT contain `scroll`, `help`, or `back`
-- [ ] run `go test ./...` — must pass before Task 7
+- [x] replace the `focusBrief` branch in `renderStatusBar()` with `[o] open repo  [c] changelog  [s] status  [e] note  [t] tags  [q] quit` (using `keyHint`)
+- [x] confirm navigation keys (`↑↓` scroll, `→/←` panel nav, `q`) still work — only the hints are removed
+- [x] write/extend a test asserting the `focusBrief` status bar contains `[o]`,`[c]`,`[s]`,`[e]`,`[t]`,`[q]` and does NOT contain `scroll`, `help`, or `back`
+- [x] run `go test ./...` — must pass before Task 7
 
 ### Task 7: Update documentation
 

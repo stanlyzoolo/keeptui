@@ -194,6 +194,22 @@ func TestRenderStatusBarFocusTools(t *testing.T) {
 	}
 }
 
+func TestRenderStatusBarFocusBrief(t *testing.T) {
+	m := Model{width: 80, focus: focusBrief}
+	got := m.renderStatusBar()
+
+	for _, want := range []string{"[o]", "[c]", "[s]", "[e]", "[t]", "[q]"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("focusBrief status bar = %q, missing %q", got, want)
+		}
+	}
+	for _, absent := range []string{"scroll", "help", "back"} {
+		if strings.Contains(got, absent) {
+			t.Errorf("focusBrief status bar = %q, should not contain %q", got, absent)
+		}
+	}
+}
+
 func TestRenderStatusBarTracking(t *testing.T) {
 	m := Model{width: 80, tracking: true, trackInput: textinput.New()}
 	got := m.renderStatusBar()

@@ -14,10 +14,8 @@ const helpText = `keys — personal CLI/TUI tool registry
 
 Usage:
   keys                          open interactive TUI
-  keys track <tool> [--github <repo>] [--status ...] [--tags ...] [--note "..."]
   keys status <tool> active|trying|forgotten|archived
   keys note <tool> "text"
-  keys untrack <tool>
   keys list, --list             list tracked tools
   keys list --active|--trying|--forgotten|--archived  filter by status
   keys list --tag <name>        filter by tag
@@ -70,17 +68,11 @@ func runCommand(args []string, opts tuiOptions) error {
 	case "--list":
 		return cmd.RunList()
 
-	case "track":
-		return cmd.RunTrack(args[1:])
-
 	case "status":
 		return cmd.RunStatus(args[1:])
 
 	case "note":
 		return cmd.RunNote(args[1:])
-
-	case "untrack":
-		return cmd.RunUntrack(args[1:])
 
 	case "list":
 		flags := parseListFlags(args[1:])

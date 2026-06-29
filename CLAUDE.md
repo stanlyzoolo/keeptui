@@ -31,7 +31,7 @@ Release is triggered by pushing a `v*` tag; GitHub Actions builds for darwin/lin
 | `internal/ui` | Lip Gloss styles and `PlaceOverlay` helper |
 | `internal/version` | Detect installed version (`version_cmd`), fetch latest from GitHub API with 24h cache |
 | `internal/tldr` | Fetch and parse tldr-pages for `keys fetch <tool>` |
-| `internal/cmd` | One file per CLI subcommand (`check`, `edit`, `fetch`, `import`, `list`, `new`, `note`, `status`, `track`, `untrack`, `validate`) |
+| `internal/cmd` | One file per CLI subcommand (`check`, `edit`, `fetch`, `import`, `list`, `new`, `note`, `status`, `validate`) |
 
 ### Data flow
 
@@ -47,6 +47,7 @@ The model has two top-level views (`viewHotkeys` / `viewMyTools`) toggled by `Ta
 - The right panel has two tabs: `[Keys]` (categories + bindings) and `[Commands]` (command groups from tldr).
 - Overlays: changelog popup (`showChangelog`) and command detail popup (`showPopup`) are rendered via `ui.PlaceOverlay`.
 - Search (`/`) filters across all tools and all bindings simultaneously; selection is disabled while searching.
+- Tracking is managed from the left tool-list panel (`focusTools`), not the CLI: `t` track (add by GitHub URL or plain name), `u` untrack (with confirmation), `r` rename (fix the binary name when the repo name differs). Each is a mode flag (`tracking`/`confirmingUntrack`/`renaming`) handled by an early branch in `Update()` and a matching branch in `renderStatusBar()`, mirroring the `editingNote`/`editingTags` input pattern. Mutations go through `loader.UpsertMeta`/`RemoveMeta`, persist via `loader.SaveMeta`, then rebuild `m.tools = loader.ToolsFromMeta(m.meta)` and refresh the viewport.
 
 ### Adding a new built-in tool
 

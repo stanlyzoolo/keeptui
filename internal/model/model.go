@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -38,13 +37,6 @@ type versionMsg struct {
 	installed  string
 	latest     string
 	repoStatus string
-}
-
-type checkVersionMsg struct {
-	toolName   string
-	latest     string
-	repoStatus string
-	err        error
 }
 
 type changelogMsg struct {
@@ -81,7 +73,6 @@ type Model struct {
 	repoCards           map[string]version.RepoCard
 	changelogData       map[string]changelogMsg
 	changelogLoadingFor string
-	checkingVersionTool string
 	focus               int
 	toolsViewport       viewport.Model
 	briefViewport       viewport.Model
@@ -98,8 +89,16 @@ type Model struct {
 	noteInput   textinput.Model
 	tagsInput   textinput.Model
 
+	tracking   bool
+	trackInput textinput.Model
+
+	confirmingUntrack bool
+	untrackTarget     string
+
+	renaming  bool
+	nameInput textinput.Model
+
 	meta         []loader.ToolMeta
-	metaFilter   loader.Status
 	metaSelected int
 
 	helpMode      int
@@ -137,6 +136,14 @@ func New(meta []loader.ToolMeta, opts Options) Model {
 	hsi.Placeholder = "search help..."
 	hsi.CharLimit = 128
 
+	tri := textinput.New()
+	tri.Placeholder = "github url or tool name..."
+	tri.CharLimit = 256
+
+	nmi := textinput.New()
+	nmi.Placeholder = "new name..."
+	nmi.CharLimit = 256
+
 	m := Model{
 		tools:         loader.ToolsFromMeta(meta),
 		versions:      make(map[string]VersionInfo),
@@ -148,6 +155,8 @@ func New(meta []loader.ToolMeta, opts Options) Model {
 		noteInput:     ni,
 		tagsInput:     tgi,
 		helpSearch:    hsi,
+		trackInput:    tri,
+		nameInput:     nmi,
 		meta:          meta,
 	}
 
@@ -223,24 +232,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.briefViewport.SetContent(m.renderCard())
 		return m, nil
 
-	case checkVersionMsg:
-		if msg.toolName == m.checkingVersionTool {
-			m.checkingVersionTool = ""
-		}
-		if msg.err == nil {
-			vi := m.versions[msg.toolName]
-			vi.Latest = msg.latest
-			m.versions[msg.toolName] = vi
-			if msg.repoStatus != "" {
-				m.repoStatus[msg.toolName] = msg.repoStatus
-			}
-		} else {
-			m.statusMsg = "Version check failed: " + msg.err.Error()
-		}
-		m.toolsViewport.SetContent(m.renderLeftContent())
-		m.briefViewport.SetContent(m.renderCard())
-		return m, nil
-
 	case changelogMsg:
 		if msg.toolName == m.changelogLoadingFor {
 			m.changelogLoadingFor = ""
@@ -307,6 +298,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.editingTags {
 			return m.updateTagsEdit(msg)
+		}
+		if m.tracking {
+			return m.updateTrackInput(msg)
+		}
+		if m.confirmingUntrack {
+			return m.updateUntrackConfirm(msg)
+		}
+		if m.renaming {
+			return m.updateRenameInput(msg)
 		}
 
 		if m.helpSearching {
@@ -525,64 +525,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
-		case "f":
-			if m.focus == focusTools {
-				switch m.metaFilter {
-				case "":
-					m.metaFilter = loader.StatusActive
-				case loader.StatusActive:
-					m.metaFilter = loader.StatusTrying
-				case loader.StatusTrying:
-					m.metaFilter = loader.StatusForgotten
-				case loader.StatusForgotten:
-					m.metaFilter = loader.StatusArchived
-				default:
-					m.metaFilter = ""
-				}
-				m.metaSelected = 0
-				m.setToolsContent()
-				m.briefViewport.SetContent(m.renderCard())
-			}
-
-		case "1":
-			m.metaFilter = loader.StatusActive
-			m.metaSelected = 0
-			m.setToolsContent()
-			m.briefViewport.SetContent(m.renderCard())
-		case "2":
-			m.metaFilter = loader.StatusTrying
-			m.metaSelected = 0
-			m.setToolsContent()
-			m.briefViewport.SetContent(m.renderCard())
-		case "3":
-			m.metaFilter = loader.StatusForgotten
-			m.metaSelected = 0
-			m.setToolsContent()
-			m.briefViewport.SetContent(m.renderCard())
-		case "4":
-			m.metaFilter = loader.StatusArchived
-			m.metaSelected = 0
-			m.setToolsContent()
-			m.briefViewport.SetContent(m.renderCard())
-		case "a":
-			m.metaFilter = ""
-			m.metaSelected = 0
-			m.setToolsContent()
-			m.briefViewport.SetContent(m.renderCard())
-
-		case "v":
-			if m.focus == focusTools && m.checkingVersionTool == "" {
-				if t, ok := m.selectedTool(); ok && t.GitHub != "" {
-					m.checkingVersionTool = t.Name
-					return m, fetchVersionCmd(t)
-				}
-			}
-
-		case "o":
-			if t, ok := m.selectedTool(); ok && t.GitHub != "" {
-				openBrowser("https://" + t.GitHub)
-			}
-
 		case "e":
 			if m.focus == focusBrief {
 				if mt, ok := m.selectedMeta(); ok {
@@ -601,6 +543,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.tagsInput.SetValue(strings.Join(mt.Tags, ", "))
 					m.tagsInput.Focus()
 					m.briefViewport.SetContent(m.renderCard())
+					return m, textinput.Blink
+				}
+			} else if m.focus == focusTools {
+				m.tracking = true
+				m.trackInput.SetValue("")
+				m.trackInput.Focus()
+				return m, textinput.Blink
+			}
+
+		case "u":
+			if m.focus == focusTools {
+				if mt, ok := m.selectedMeta(); ok {
+					m.confirmingUntrack = true
+					m.untrackTarget = mt.Name
+					return m, nil
+				}
+			}
+
+		case "r":
+			if m.focus == focusTools {
+				if mt, ok := m.selectedMeta(); ok {
+					m.renaming = true
+					m.nameInput.SetValue(mt.Name)
+					m.nameInput.Focus()
 					return m, textinput.Blink
 				}
 			}
@@ -674,6 +640,158 @@ func (m Model) updateTagsEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
+// trackTool adds (or updates) a tracked tool from a GitHub URL or plain name.
+// It returns the updated meta slice and a status message ("" on a fresh add,
+// "already tracked" when the name was already present). Empty input is a no-op.
+func trackTool(meta []loader.ToolMeta, input string) ([]loader.ToolMeta, string) {
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return meta, ""
+	}
+	name, github, _ := loader.ParseToolRef(input)
+	status := ""
+	if loader.FindMeta(meta, name) != nil {
+		status = "already tracked"
+	}
+	entry := loader.ToolMeta{
+		Name:   name,
+		GitHub: github,
+		Status: loader.StatusTrying,
+		Added:  loader.TodayDate(),
+	}
+	return loader.UpsertMeta(meta, entry), status
+}
+
+func (m Model) updateTrackInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		m.tracking = false
+		m.trackInput.Blur()
+		input := strings.TrimSpace(m.trackInput.Value())
+		if input == "" {
+			return m, nil
+		}
+		name, _, _ := loader.ParseToolRef(input)
+		var status string
+		m.meta, status = trackTool(m.meta, input)
+		loader.SaveMeta(m.meta) //nolint:errcheck
+		m.tools = loader.ToolsFromMeta(m.meta)
+		for i, mt := range m.meta {
+			if mt.Name == name {
+				m.metaSelected = i
+				break
+			}
+		}
+		m.setToolsContent()
+		m.briefViewport.GotoTop()
+		m.briefViewport.SetContent(m.renderCard())
+		m.statusMsg = status
+		return m, m.autoFetchCmdsForSelected()
+	case "esc":
+		m.tracking = false
+		m.trackInput.Blur()
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.trackInput, cmd = m.trackInput.Update(msg)
+		return m, cmd
+	}
+}
+
+func (m Model) updateUntrackConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		m.confirmingUntrack = false
+		m.meta = loader.RemoveMeta(m.meta, m.untrackTarget)
+		loader.SaveMeta(m.meta) //nolint:errcheck
+		m.tools = loader.ToolsFromMeta(m.meta)
+		m.untrackTarget = ""
+		// Keep metaSelected at the same index so selection lands on the next
+		// item; clamp to the new last index (or 0 when the list is empty).
+		if m.metaSelected > len(m.meta)-1 {
+			m.metaSelected = max(len(m.meta)-1, 0)
+		}
+		m.setToolsContent()
+		m.briefViewport.GotoTop()
+		m.briefViewport.SetContent(m.renderCard())
+		return m, m.autoFetchCmdsForSelected()
+	default:
+		// esc or any other key cancels.
+		m.confirmingUntrack = false
+		m.untrackTarget = ""
+		return m, nil
+	}
+}
+
+// renameTool changes a tracked tool's Name from old to newName, preserving its
+// GitHub/Status/Tags/Note/Added fields. An empty newName (after trimming) or a
+// newName equal to old is a no-op. A collision with another tracked tool's name
+// is rejected with an error and leaves meta unchanged.
+func renameTool(meta []loader.ToolMeta, old, newName string) ([]loader.ToolMeta, error) {
+	newName = strings.TrimSpace(newName)
+	if newName == "" || newName == old {
+		return meta, nil
+	}
+	if loader.FindMeta(meta, newName) != nil {
+		return meta, fmt.Errorf("name already exists")
+	}
+	for i := range meta {
+		if meta[i].Name == old {
+			meta[i].Name = newName
+			return meta, nil
+		}
+	}
+	return meta, nil
+}
+
+func (m Model) updateRenameInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		mt, ok := m.selectedMeta()
+		if !ok {
+			m.renaming = false
+			m.nameInput.Blur()
+			return m, nil
+		}
+		old := mt.Name
+		newName := strings.TrimSpace(m.nameInput.Value())
+		updated, err := renameTool(m.meta, old, newName)
+		if err != nil {
+			m.renaming = false
+			m.nameInput.Blur()
+			m.statusMsg = err.Error()
+			return m, nil
+		}
+		m.renaming = false
+		m.nameInput.Blur()
+		if newName == "" || newName == old {
+			return m, nil
+		}
+		m.meta = updated
+		loader.SaveMeta(m.meta) //nolint:errcheck
+		m.tools = loader.ToolsFromMeta(m.meta)
+		delete(m.helpCache, old)
+		for i, e := range m.meta {
+			if e.Name == newName {
+				m.metaSelected = i
+				break
+			}
+		}
+		m.setToolsContent()
+		m.briefViewport.GotoTop()
+		m.briefViewport.SetContent(m.renderCard())
+		return m, m.autoFetchCmdsForSelected()
+	case "esc":
+		m.renaming = false
+		m.nameInput.Blur()
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.nameInput, cmd = m.nameInput.Update(msg)
+		return m, cmd
+	}
+}
+
 func (m Model) selectedMeta() (loader.ToolMeta, bool) {
 	filtered := m.filteredMeta()
 	if m.metaSelected < 0 || m.metaSelected >= len(filtered) {
@@ -697,15 +815,6 @@ func (m Model) selectedTool() (loader.Tool, bool) {
 
 func (m Model) filteredMeta() []loader.ToolMeta {
 	source := m.meta
-	if m.metaFilter != "" {
-		var filtered []loader.ToolMeta
-		for _, mt := range m.meta {
-			if mt.Status == m.metaFilter {
-				filtered = append(filtered, mt)
-			}
-		}
-		source = filtered
-	}
 
 	if m.searching {
 		query := strings.ToLower(strings.TrimSpace(m.search.Value()))
@@ -770,6 +879,30 @@ func (m Model) renderStatusBar() string {
 	if m.editingTags {
 		return style.Render(keyHint("enter") + " save  " + keyHint("esc") + " cancel  " + ui.MetaNoteStyle.Render("comma-separated"))
 	}
+	if m.tracking {
+		return style.Render(fmt.Sprintf(
+			"%s %s  %s cancel",
+			ui.SearchPromptStyle.Render("track (github url or tool name):"),
+			m.trackInput.View(),
+			keyHint("esc"),
+		))
+	}
+	if m.confirmingUntrack {
+		return style.Render(fmt.Sprintf(
+			"%s  %s yes  %s no",
+			ui.SearchPromptStyle.Render("Untrack "+m.untrackTarget+"?"),
+			keyHint("enter"),
+			keyHint("esc"),
+		))
+	}
+	if m.renaming {
+		return style.Render(fmt.Sprintf(
+			"%s %s  %s cancel",
+			ui.SearchPromptStyle.Render("rename to:"),
+			m.nameInput.View(),
+			keyHint("esc"),
+		))
+	}
 	if m.statusMsg != "" {
 		return style.Render(ui.SearchPromptStyle.Render(m.statusMsg))
 	}
@@ -781,22 +914,11 @@ func (m Model) renderStatusBar() string {
 		hints := keyHint("↑↓") + " scroll  " + keyHint("h") + " --help  " + keyHint("m") + " man  " + keyHint("/") + " search  " + keyHint("←") + " back  " + keyHint("q") + " quit"
 		return style.Render(hints)
 	}
-	filterHint := ""
-	if m.metaFilter != "" {
-		filterHint = keyHint("a") + " all  "
-	}
-	versionHint := ""
-	if t, ok := m.selectedTool(); ok && t.GitHub != "" {
-		versionHint = keyHint("v") + " check  "
-	}
 	return style.Render(
-		keyHint("j/k") + " navigate  " +
-			keyHint("→") + " details  " +
-			keyHint("f") + " filter  " +
-			filterHint +
-			keyHint("/") + " search  " +
-			versionHint +
-			keyHint("o") + " github  " +
+		keyHint("/") + " search  " +
+			keyHint("t") + " track  " +
+			keyHint("u") + " untrack  " +
+			keyHint("r") + " rename  " +
 			keyHint("q") + " quit",
 	)
 }
@@ -867,10 +989,8 @@ func (m Model) renderLeftContent() string {
 	if len(filtered) == 0 {
 		if m.searching {
 			sb.WriteString(ui.DescStyle.Render("  No matches.") + "\n")
-		} else if len(m.meta) == 0 {
-			sb.WriteString(ui.DescStyle.Render("  No tools tracked.\n  Add one:\n  keys track <tool>\n  --github ...") + "\n")
 		} else {
-			sb.WriteString(ui.DescStyle.Render("  No tools match\n  current filter.") + "\n")
+			sb.WriteString(ui.DescStyle.Render("  No tools tracked.\n  Press t to add one.") + "\n")
 		}
 	}
 
@@ -971,7 +1091,7 @@ func scrollColumn(vp viewport.Model, focused bool) string {
 
 func (m Model) renderCard() string {
 	if len(m.meta) == 0 {
-		return ui.DescStyle.Render("no tools tracked.\nadd one: keys track <tool> --github <repo>")
+		return ui.DescStyle.Render("no tools tracked.\npress t to add one.")
 	}
 
 	t, ok := m.selectedTool()
@@ -1132,19 +1252,6 @@ func (m Model) hasUpdate(toolName string) bool {
 	return ok && version.IsNewer(vi.Installed, vi.Latest)
 }
 
-func openBrowser(url string) {
-	var cmd string
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = "open"
-	case "windows":
-		cmd = "start"
-	default:
-		cmd = "xdg-open"
-	}
-	exec.Command(cmd, url).Start() //nolint:errcheck
-}
-
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// Panels sit flush (each is panelW+2 wide incl. borders) with no outer
 	// horizontal margin, so screen X maps directly to panel spans.
@@ -1275,19 +1382,6 @@ func renderLangBar(langs map[string]int, width, firstLineUsed int) string {
 		lines = append(lines, cur.String())
 	}
 	return strings.Join(lines, "\n")
-}
-
-func fetchVersionCmd(t loader.Tool) tea.Cmd {
-	return func() tea.Msg {
-		latest, err := version.FetchAndCache(t.GitHub)
-		repoStatus := version.GetCachedRepoStatus(t.GitHub)
-		return checkVersionMsg{
-			toolName:   t.Name,
-			latest:     latest,
-			repoStatus: repoStatus,
-			err:        err,
-		}
-	}
 }
 
 func fetchRepoCardCmd(t loader.Tool) tea.Cmd {

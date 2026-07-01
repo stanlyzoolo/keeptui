@@ -1469,6 +1469,14 @@ func (m *Model) autoFetchCmdsForSelected() tea.Cmd {
 			m.helpViewport.GotoTop()
 		}
 	}
+	if t, ok := m.selectedTool(); ok {
+		if m.needsVersion(t) {
+			cmds = append(cmds, fetchVersionCmd(t))
+		}
+		if m.needsRepoCard(t) {
+			cmds = append(cmds, fetchRepoCardCmd(t))
+		}
+	}
 	return tea.Batch(cmds...)
 }
 

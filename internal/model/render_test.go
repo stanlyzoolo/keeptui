@@ -669,3 +669,36 @@ func TestNeedsRepoCard(t *testing.T) {
 		})
 	}
 }
+
+func TestAutoFetchCmdsForSelected_QueuesFetches(t *testing.T) {
+	m := &Model{
+		meta:         []loader.ToolMeta{{Name: "git", GitHub: "cli/cli"}},
+		tools:        []loader.Tool{{Name: "git", GitHub: "cli/cli"}},
+		metaSelected: 0,
+	}
+	if cmd := m.autoFetchCmdsForSelected(); cmd == nil {
+		t.Fatal("expected non-nil batched Cmd for a fresh selected tool with GitHub")
+	}
+}
+
+func TestAutoFetchCmdsForSelected_NoFetchWhenCached(t *testing.T) {
+	name := "git"
+	m := &Model{
+		meta:          []loader.ToolMeta{{Name: name, GitHub: "cli/cli"}},
+		tools:         []loader.Tool{{Name: name, GitHub: "cli/cli"}},
+		metaSelected:  0,
+		changelogData: map[string]changelogMsg{name: {}},
+		helpCache:     map[string][2]string{name: {helpModeHelp: "cached help"}},
+		versions:      map[string]VersionInfo{name: {}},
+		repoCards:     map[string]version.RepoCard{name: {}},
+	}
+	if m.needsVersion(m.tools[0]) {
+		t.Error("needsVersion should be false when version is cached")
+	}
+	if m.needsRepoCard(m.tools[0]) {
+		t.Error("needsRepoCard should be false when repo card is cached")
+	}
+	if cmd := m.autoFetchCmdsForSelected(); cmd != nil {
+		t.Fatal("expected nil Cmd when all sources are already cached")
+	}
+}

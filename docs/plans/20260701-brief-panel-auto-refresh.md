@@ -141,14 +141,14 @@ Key design decisions:
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] in `autoFetchCmdsForSelected()` (`model.go:1429`), after the changelog/help block: for the
+- [x] in `autoFetchCmdsForSelected()` (`model.go:1429`), after the changelog/help block: for the
   selected tool, append `fetchVersionCmd(t)` when `m.needsVersion(t)` and `fetchRepoCardCmd(t)`
   when `m.needsRepoCard(t)`
-- [ ] write a test: on a model with an empty `repoCards`/`versions` cache and a selected tool
+- [x] write a test: on a model with an empty `repoCards`/`versions` cache and a selected tool
   with `GitHub`, `autoFetchCmdsForSelected()` returns a non-nil batched command
-- [ ] write a test: when `repoCards`/`versions` already hold the selected tool, the predicates
+- [x] write a test: when `repoCards`/`versions` already hold the selected tool, the predicates
   report no fetch needed (guards prevent re-fetch)
-- [ ] run `go test ./...` — must pass before Task 4
+- [x] run `go test ./...` — must pass before Task 4
 
 ### Task 4: Clean stale name-keyed caches on rename
 

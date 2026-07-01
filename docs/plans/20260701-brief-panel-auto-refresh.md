@@ -156,11 +156,11 @@ Key design decisions:
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] in `updateRenameInput` (`model.go:791`), alongside `delete(m.helpCache, old)`, delete
+- [x] in `updateRenameInput` (`model.go:791`), alongside `delete(m.helpCache, old)`, delete
   `m.repoCards[old]`, `m.versions[old]`, `m.repoStatus[old]`, `m.changelogData[old]`
-- [ ] write a test driving `updateRenameInput` (enter with a new name) through `Update()` and
+- [x] write a test driving `updateRenameInput` (enter with a new name) through `Update()` and
   asserting the old-name keys are gone from `m.repoCards` / `m.versions`
-- [ ] run `go test ./...` — must pass before Task 5
+- [x] run `go test ./...` — must pass before Task 5
 
 ### Task 5: Verify acceptance criteria
 - [ ] verify About + `[info]` + version populate after tracking a tool without restart

@@ -702,3 +702,42 @@ func TestAutoFetchCmdsForSelected_NoFetchWhenCached(t *testing.T) {
 		t.Fatal("expected nil Cmd when all sources are already cached")
 	}
 }
+
+func TestUpdateRenameInputClearsStaleCaches(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	old := "cli"
+	newName := "gh"
+	m := Model{
+		meta:          []loader.ToolMeta{{Name: old, GitHub: "cli/cli"}},
+		metaSelected:  0,
+		renaming:      true,
+		nameInput:     textinput.New(),
+		repoCards:     map[string]version.RepoCard{old: {}},
+		versions:      map[string]VersionInfo{old: {}},
+		repoStatus:    map[string]string{old: "ok"},
+		changelogData: map[string]changelogMsg{old: {}},
+		helpCache:     map[string][2]string{old: {helpModeHelp: "cached"}},
+	}
+	m.tools = loader.ToolsFromMeta(m.meta)
+	m.nameInput.SetValue(newName)
+
+	updated, _ := m.updateRenameInput(tea.KeyMsg{Type: tea.KeyEnter})
+	nm := updated.(Model)
+
+	if _, ok := nm.repoCards[old]; ok {
+		t.Errorf("repoCards still holds stale old-name key %q after rename", old)
+	}
+	if _, ok := nm.versions[old]; ok {
+		t.Errorf("versions still holds stale old-name key %q after rename", old)
+	}
+	if _, ok := nm.repoStatus[old]; ok {
+		t.Errorf("repoStatus still holds stale old-name key %q after rename", old)
+	}
+	if _, ok := nm.changelogData[old]; ok {
+		t.Errorf("changelogData still holds stale old-name key %q after rename", old)
+	}
+	if _, ok := nm.helpCache[old]; ok {
+		t.Errorf("helpCache still holds stale old-name key %q after rename", old)
+	}
+}

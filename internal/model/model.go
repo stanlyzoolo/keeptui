@@ -779,6 +779,10 @@ func (m Model) updateRenameInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		loader.SaveMeta(m.meta) //nolint:errcheck
 		m.tools = loader.ToolsFromMeta(m.meta)
 		delete(m.helpCache, old)
+		delete(m.repoCards, old)
+		delete(m.versions, old)
+		delete(m.repoStatus, old)
+		delete(m.changelogData, old)
 		for i, e := range m.meta {
 			if e.Name == newName {
 				m.metaSelected = i

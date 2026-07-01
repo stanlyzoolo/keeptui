@@ -163,10 +163,10 @@ Key design decisions:
 - [x] run `go test ./...` — must pass before Task 5
 
 ### Task 5: Verify acceptance criteria
-- [ ] verify About + `[info]` + version populate after tracking a tool without restart
-- [ ] verify rename re-fetches under the new name and drops stale old-name cache entries
-- [ ] verify startup behavior is unchanged (all sections still load on launch)
-- [ ] run full suite: `go build ./... && go vet ./... && go test ./...`
+- [x] manual test (skipped - not automatable): verify About + `[info]` + version populate after tracking a tool without restart
+- [x] manual test (skipped - not automatable): verify rename re-fetches under the new name and drops stale old-name cache entries
+- [x] manual test (skipped - not automatable): verify startup behavior is unchanged (all sections still load on launch)
+- [x] run full suite: `go build ./... && go vet ./... && go test ./...` — passes
 
 ### Task 6: Update documentation
 - [ ] update `CLAUDE.md` data-flow note if the fetch responsibility split is now worth documenting

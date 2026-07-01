@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/lepeshko/keys/internal/loader"
+	"github.com/lepeshko/keys/internal/version"
 )
 
 func TestWrapText(t *testing.T) {
@@ -598,5 +599,73 @@ func TestFetchVersionCmd(t *testing.T) {
 	cmd := fetchVersionCmd(loader.Tool{Name: "git", GitHub: ""})
 	if cmd == nil {
 		t.Fatal("expected non-nil tea.Cmd from fetchVersionCmd")
+	}
+}
+
+func TestNeedsVersion(t *testing.T) {
+	tests := []struct {
+		name     string
+		tool     loader.Tool
+		versions map[string]VersionInfo
+		want     bool
+	}{
+		{
+			name: "fresh tool needs version",
+			tool: loader.Tool{Name: "git", GitHub: "cli/cli"},
+			want: true,
+		},
+		{
+			name:     "cached tool does not need version",
+			tool:     loader.Tool{Name: "git", GitHub: "cli/cli"},
+			versions: map[string]VersionInfo{"git": {}},
+			want:     false,
+		},
+		{
+			name: "version fires even without GitHub",
+			tool: loader.Tool{Name: "git", GitHub: ""},
+			want: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &Model{versions: tt.versions}
+			if got := m.needsVersion(tt.tool); got != tt.want {
+				t.Errorf("needsVersion() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNeedsRepoCard(t *testing.T) {
+	tests := []struct {
+		name      string
+		tool      loader.Tool
+		repoCards map[string]version.RepoCard
+		want      bool
+	}{
+		{
+			name: "fresh tool with GitHub needs repo card",
+			tool: loader.Tool{Name: "git", GitHub: "cli/cli"},
+			want: true,
+		},
+		{
+			name:      "cached tool does not need repo card",
+			tool:      loader.Tool{Name: "git", GitHub: "cli/cli"},
+			repoCards: map[string]version.RepoCard{"git": {}},
+			want:      false,
+		},
+		{
+			name: "repo card not needed without GitHub",
+			tool: loader.Tool{Name: "git", GitHub: ""},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := &Model{repoCards: tt.repoCards}
+			if got := m.needsRepoCard(tt.tool); got != tt.want {
+				t.Errorf("needsRepoCard() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

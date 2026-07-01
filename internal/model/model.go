@@ -1429,6 +1429,23 @@ func fetchChangelogCmd(githubField, toolName string) tea.Cmd {
 	}
 }
 
+// needsVersion reports whether the version info for t has not been fetched yet.
+// Version is detected locally, so it fires regardless of GitHub, matching Init().
+func (m *Model) needsVersion(t loader.Tool) bool {
+	_, ok := m.versions[t.Name]
+	return !ok
+}
+
+// needsRepoCard reports whether the repo card for t must still be fetched.
+// Requires a GitHub ref (matching the Init() guard) and no cached card.
+func (m *Model) needsRepoCard(t loader.Tool) bool {
+	if t.GitHub == "" {
+		return false
+	}
+	_, ok := m.repoCards[t.Name]
+	return !ok
+}
+
 // autoFetchCmdsForSelected returns a batched Cmd that auto-fetches changelog
 // and --help for the currently selected tool if not yet cached.
 // Uses a pointer receiver so it can update loading state fields on m.

@@ -128,12 +128,12 @@ Key design decisions:
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] add `func (m *Model) needsVersion(t loader.Tool) bool` (true when `m.versions` has no entry)
-- [ ] add `func (m *Model) needsRepoCard(t loader.Tool) bool` (true when `t.GitHub != ""` and
+- [x] add `func (m *Model) needsVersion(t loader.Tool) bool` (true when `m.versions` has no entry)
+- [x] add `func (m *Model) needsRepoCard(t loader.Tool) bool` (true when `t.GitHub != ""` and
   `m.repoCards` has no entry)
-- [ ] write table tests: fresh tool → true; cached tool → false; repo card with empty `GitHub`
+- [x] write table tests: fresh tool → true; cached tool → false; repo card with empty `GitHub`
   → false; version with empty `GitHub` → true
-- [ ] run `go test ./...` — must pass before Task 3
+- [x] run `go test ./...` — must pass before Task 3
 
 ### Task 3: Queue repo-card and version fetches in autoFetchCmdsForSelected
 

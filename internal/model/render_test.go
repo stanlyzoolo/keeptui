@@ -1,12 +1,15 @@
 package model
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/lepeshko/keys/internal/loader"
 	"github.com/lepeshko/keys/internal/version"
@@ -102,6 +105,45 @@ func TestCleanTerminalOutput(t *testing.T) {
 		})
 	}
 }
+
+func TestColorizeHelp(t *testing.T) {
+	// Force truecolor so styled tokens actually emit ANSI escapes; otherwise
+	// lipgloss strips color under a non-TTY test run and hides the bug.
+	lipgloss.SetColorProfile(termenv.TrueColor)
+
+	// A dash inside a word (e.g. "golangci-lint") must not be styled as a
+	// short flag, which would inject an ANSI escape mid-word.
+	got := colorizeHelp("golangci-lint runs linters")
+	if strings.Contains(got, "golangci\x1b") {
+		t.Errorf("colorizeHelp injected escape inside word: %q", got)
+	}
+
+	// A real flag preceded by whitespace should still be styled.
+	got = colorizeHelp("use --verbose for details")
+	if !strings.Contains(got, "\x1b") {
+		t.Errorf("colorizeHelp did not style a real flag: %q", got)
+	}
+
+	// A flag followed by a [bracket]/<angle> meta token must not be corrupted:
+	// the meta regex must never match the '[' inside the flag's ANSI escape,
+	// which would leave a visible "[38;2;…m" and doubled ESC bytes.
+	for _, in := range []string{
+		"--foo [bar] enable it",
+		"usage: tool [options] --verbose",
+		"see <arg> and --flag here",
+	} {
+		got := colorizeHelp(in)
+		if strings.Contains(got, "\x1b\x1b") {
+			t.Errorf("colorizeHelp produced doubled ESC for %q: %q", in, got)
+		}
+		// After stripping every valid CSI escape, no raw "[…m" may remain.
+		if leftover := ansiCSI.ReplaceAllString(got, ""); strings.Contains(leftover, "[38;") {
+			t.Errorf("colorizeHelp leaked a stripped-ESC escape for %q: %q", in, got)
+		}
+	}
+}
+
+var ansiCSI = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 func TestStripMarkdown(t *testing.T) {
 	tests := []struct {

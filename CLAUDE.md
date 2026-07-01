@@ -37,6 +37,8 @@ Release is triggered by pushing a `v*` tag; GitHub Actions builds for darwin/lin
 2. `model.New(meta)` builds the model from the tracker metadata. (`loader.Load()` still merges built-in configs — embedded via `//go:embed data/tools` — with user configs from `~/.config/keys/tools/<tool>/config.yaml`, user files winning.)
 3. On `Init()`, the model fires goroutines to fetch installed/latest versions and repo cards asynchronously; results arrive as messages and update the UI.
 
+**Async fetch responsibility split**: two paths must stay symmetric. `Init()` fetches all four sources per tool on startup — version (`fetchVersionCmd`), repo card (`fetchRepoCardCmd`), changelog, and `--help`. `autoFetchCmdsForSelected()` runs after track/untrack/rename and selection changes; it re-fetches the same sources for the selected tool, guarded by the pure predicates `needsVersion(t)` / `needsRepoCard(t)` (skip if already cached; repo card also requires `t.GitHub != ""`). If a tool is added or renamed mid-session, this path is what populates its card without a restart. Rename also deletes the stale old-name entries from `m.repoCards` / `m.versions` / `m.repoStatus` / `m.changelogData` / `m.helpCache` so the tool re-fetches under its new name.
+
 ### TUI state machine
 
 The model is a three-panel layout with focus cycling via `→/←` between `focusTools` (tool list), `focusBrief` (the central info card), and `focusHelp` (the `--help` / `man` viewport).

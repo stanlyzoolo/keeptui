@@ -161,17 +161,7 @@ func New(meta []loader.ToolMeta) Model {
 func (m Model) Init() tea.Cmd {
 	cmds := make([]tea.Cmd, 0, len(m.tools)*2)
 	for _, t := range m.tools {
-		cmds = append(cmds, func() tea.Msg {
-			installed := version.InstalledVersion(t)
-			latest := version.GetLatest(t.GitHub)
-			repoStatus := version.GetCachedRepoStatus(t.GitHub)
-			return versionMsg{
-				toolName:   t.Name,
-				installed:  installed,
-				latest:     latest,
-				repoStatus: repoStatus,
-			}
-		})
+		cmds = append(cmds, fetchVersionCmd(t))
 		if t.GitHub != "" {
 			cmds = append(cmds, fetchRepoCardCmd(t))
 		}
@@ -789,6 +779,10 @@ func (m Model) updateRenameInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		loader.SaveMeta(m.meta) //nolint:errcheck
 		m.tools = loader.ToolsFromMeta(m.meta)
 		delete(m.helpCache, old)
+		delete(m.repoCards, old)
+		delete(m.versions, old)
+		delete(m.repoStatus, old)
+		delete(m.changelogData, old)
 		for i, e := range m.meta {
 			if e.Name == newName {
 				m.metaSelected = i
@@ -1402,6 +1396,22 @@ func renderLangBar(langs map[string]int, width, firstLineUsed int) string {
 	return strings.Join(lines, "\n")
 }
 
+// fetchVersionCmd returns a Cmd that detects the installed version, fetches the
+// latest release, and reads the cached repo status for t, emitting a versionMsg.
+func fetchVersionCmd(t loader.Tool) tea.Cmd {
+	return func() tea.Msg {
+		installed := version.InstalledVersion(t)
+		latest := version.GetLatest(t.GitHub)
+		repoStatus := version.GetCachedRepoStatus(t.GitHub)
+		return versionMsg{
+			toolName:   t.Name,
+			installed:  installed,
+			latest:     latest,
+			repoStatus: repoStatus,
+		}
+	}
+}
+
 func fetchRepoCardCmd(t loader.Tool) tea.Cmd {
 	return func() tea.Msg {
 		card := version.GetRepoCard(t.GitHub)
@@ -1423,16 +1433,41 @@ func fetchChangelogCmd(githubField, toolName string) tea.Cmd {
 	}
 }
 
+// needsVersion reports whether the version info for t has not been fetched yet.
+// Version is detected locally, so it fires regardless of GitHub, matching Init().
+func (m *Model) needsVersion(t loader.Tool) bool {
+	_, ok := m.versions[t.Name]
+	return !ok
+}
+
+// needsRepoCard reports whether the repo card for t must still be fetched.
+// Requires a GitHub ref (matching the Init() guard) and no cached card.
+func (m *Model) needsRepoCard(t loader.Tool) bool {
+	if t.GitHub == "" {
+		return false
+	}
+	_, ok := m.repoCards[t.Name]
+	return !ok
+}
+
 // autoFetchCmdsForSelected returns a batched Cmd that auto-fetches changelog
 // and --help for the currently selected tool if not yet cached.
 // Uses a pointer receiver so it can update loading state fields on m.
 func (m *Model) autoFetchCmdsForSelected() tea.Cmd {
 	var cmds []tea.Cmd
-	if t, ok := m.selectedTool(); ok && t.GitHub != "" {
-		if _, already := m.changelogData[t.Name]; !already && m.changelogLoadingFor != t.Name {
-			m.changelogLoadingFor = t.Name
-			m.briefViewport.SetContent(m.renderCard())
-			cmds = append(cmds, fetchChangelogCmd(t.GitHub, t.Name))
+	if t, ok := m.selectedTool(); ok {
+		if t.GitHub != "" {
+			if _, already := m.changelogData[t.Name]; !already && m.changelogLoadingFor != t.Name {
+				m.changelogLoadingFor = t.Name
+				m.briefViewport.SetContent(m.renderCard())
+				cmds = append(cmds, fetchChangelogCmd(t.GitHub, t.Name))
+			}
+		}
+		if m.needsVersion(t) {
+			cmds = append(cmds, fetchVersionCmd(t))
+		}
+		if m.needsRepoCard(t) {
+			cmds = append(cmds, fetchRepoCardCmd(t))
 		}
 	}
 	if mt, ok := m.selectedMeta(); ok {

@@ -595,10 +595,35 @@ func TestScrollColumn(t *testing.T) {
 	})
 }
 
+// countBatchedCmds executes cmd and reports how many commands it batches.
+// A nil cmd counts as 0; a single non-batch cmd counts as 1. Only call this
+// when the batched cmds are side-effect free to execute (or when a BatchMsg is
+// expected), since tea.Batch collapses a lone cmd into that cmd directly.
+func countBatchedCmds(cmd tea.Cmd) int {
+	if cmd == nil {
+		return 0
+	}
+	switch msg := cmd().(type) {
+	case tea.BatchMsg:
+		return len(msg)
+	default:
+		return 1
+	}
+}
+
 func TestFetchVersionCmd(t *testing.T) {
-	cmd := fetchVersionCmd(loader.Tool{Name: "git", GitHub: ""})
+	// GitHub "" keeps GetLatest/GetCachedRepoStatus offline and a nonexistent
+	// name makes InstalledVersion skip exec, so the closure runs with no I/O.
+	cmd := fetchVersionCmd(loader.Tool{Name: "nonexistent-tool-xyz", GitHub: ""})
 	if cmd == nil {
 		t.Fatal("expected non-nil tea.Cmd from fetchVersionCmd")
+	}
+	msg, ok := cmd().(versionMsg)
+	if !ok {
+		t.Fatalf("expected versionMsg, got %T", cmd())
+	}
+	if msg.toolName != "nonexistent-tool-xyz" {
+		t.Errorf("toolName = %q, want %q", msg.toolName, "nonexistent-tool-xyz")
 	}
 }
 
@@ -671,13 +696,24 @@ func TestNeedsRepoCard(t *testing.T) {
 }
 
 func TestAutoFetchCmdsForSelected_QueuesFetches(t *testing.T) {
+	name := "git"
+	// Changelog and --help are already cached so those branches append nothing;
+	// only version + repo card are missing. This isolates the new fetch block:
+	// a non-nil batch alone would pass even without it (changelog/help fire too),
+	// so assert the batch holds exactly the two expected commands.
 	m := &Model{
-		meta:         []loader.ToolMeta{{Name: "git", GitHub: "cli/cli"}},
-		tools:        []loader.Tool{{Name: "git", GitHub: "cli/cli"}},
-		metaSelected: 0,
+		meta:          []loader.ToolMeta{{Name: name, GitHub: "cli/cli"}},
+		tools:         []loader.Tool{{Name: name, GitHub: "cli/cli"}},
+		metaSelected:  0,
+		changelogData: map[string]changelogMsg{name: {}},
+		helpCache:     map[string][2]string{name: {helpModeHelp: "cached"}},
 	}
-	if cmd := m.autoFetchCmdsForSelected(); cmd == nil {
-		t.Fatal("expected non-nil batched Cmd for a fresh selected tool with GitHub")
+	cmd := m.autoFetchCmdsForSelected()
+	if cmd == nil {
+		t.Fatal("expected non-nil batched Cmd queuing version + repo card fetches")
+	}
+	if got := countBatchedCmds(cmd); got != 2 {
+		t.Fatalf("expected exactly 2 queued cmds (version + repo card), got %d", got)
 	}
 }
 
@@ -739,5 +775,36 @@ func TestUpdateRenameInputClearsStaleCaches(t *testing.T) {
 	}
 	if _, ok := nm.helpCache[old]; ok {
 		t.Errorf("helpCache still holds stale old-name key %q after rename", old)
+	}
+}
+
+// TestUpdateVersionAndRepoCardMsgPopulateCaches closes the loop the rename test
+// opens: after stale keys are cleared, the async fetch results must repopulate
+// the caches under the (new) tool name. This drives the messages through
+// Update() to prove the toolName keying is correct end to end.
+func TestUpdateVersionAndRepoCardMsgPopulateCaches(t *testing.T) {
+	m := Model{
+		meta:          []loader.ToolMeta{{Name: "gh", GitHub: "cli/cli"}},
+		metaSelected:  0,
+		versions:      map[string]VersionInfo{},
+		repoStatus:    map[string]string{},
+		repoCards:     map[string]version.RepoCard{},
+		changelogData: map[string]changelogMsg{},
+	}
+	m.tools = loader.ToolsFromMeta(m.meta)
+
+	updated, _ := m.Update(versionMsg{toolName: "gh", installed: "1.0", latest: "2.0", repoStatus: "active"})
+	nm := updated.(Model)
+	if got, ok := nm.versions["gh"]; !ok || got.Installed != "1.0" || got.Latest != "2.0" {
+		t.Errorf("versions[gh] = %+v (ok=%v), want {Installed:1.0 Latest:2.0}", got, ok)
+	}
+	if got := nm.repoStatus["gh"]; got != "active" {
+		t.Errorf("repoStatus[gh] = %q, want %q", got, "active")
+	}
+
+	updated2, _ := nm.Update(repoCardMsg{toolName: "gh", card: version.RepoCard{}})
+	nm2 := updated2.(Model)
+	if _, ok := nm2.repoCards["gh"]; !ok {
+		t.Errorf("repoCards not populated under name 'gh' after repoCardMsg")
 	}
 }

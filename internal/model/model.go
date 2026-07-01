@@ -1455,11 +1455,19 @@ func (m *Model) needsRepoCard(t loader.Tool) bool {
 // Uses a pointer receiver so it can update loading state fields on m.
 func (m *Model) autoFetchCmdsForSelected() tea.Cmd {
 	var cmds []tea.Cmd
-	if t, ok := m.selectedTool(); ok && t.GitHub != "" {
-		if _, already := m.changelogData[t.Name]; !already && m.changelogLoadingFor != t.Name {
-			m.changelogLoadingFor = t.Name
-			m.briefViewport.SetContent(m.renderCard())
-			cmds = append(cmds, fetchChangelogCmd(t.GitHub, t.Name))
+	if t, ok := m.selectedTool(); ok {
+		if t.GitHub != "" {
+			if _, already := m.changelogData[t.Name]; !already && m.changelogLoadingFor != t.Name {
+				m.changelogLoadingFor = t.Name
+				m.briefViewport.SetContent(m.renderCard())
+				cmds = append(cmds, fetchChangelogCmd(t.GitHub, t.Name))
+			}
+		}
+		if m.needsVersion(t) {
+			cmds = append(cmds, fetchVersionCmd(t))
+		}
+		if m.needsRepoCard(t) {
+			cmds = append(cmds, fetchRepoCardCmd(t))
 		}
 	}
 	if mt, ok := m.selectedMeta(); ok {
@@ -1471,14 +1479,6 @@ func (m *Model) autoFetchCmdsForSelected() tea.Cmd {
 		} else {
 			m.helpViewport.SetContent(m.renderHelpContent())
 			m.helpViewport.GotoTop()
-		}
-	}
-	if t, ok := m.selectedTool(); ok {
-		if m.needsVersion(t) {
-			cmds = append(cmds, fetchVersionCmd(t))
-		}
-		if m.needsRepoCard(t) {
-			cmds = append(cmds, fetchRepoCardCmd(t))
 		}
 	}
 	return tea.Batch(cmds...)

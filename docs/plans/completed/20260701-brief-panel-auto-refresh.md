@@ -169,9 +169,9 @@ Key design decisions:
 - [x] run full suite: `go build ./... && go vet ./... && go test ./...` — passes
 
 ### Task 6: Update documentation
-- [ ] update `CLAUDE.md` data-flow note if the fetch responsibility split is now worth documenting
+- [x] update `CLAUDE.md` data-flow note if the fetch responsibility split is now worth documenting
   (`Init()` vs `autoFetchCmdsForSelected()`); skip if it adds no clarity
-- [ ] move this plan to `docs/plans/completed/`
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 

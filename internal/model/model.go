@@ -1585,11 +1585,17 @@ func cleanTerminalOutput(s string) string {
 	return string(out)
 }
 
-var (
-	helpFlagRe    = regexp.MustCompile(`(--?[a-zA-Z][a-zA-Z0-9\-_]*)`)
-	helpMetaAngle = regexp.MustCompile(`<[^>]+>`)
-	helpMetaBrack = regexp.MustCompile(`\[[^\]]+\]`)
-)
+// helpTokenRe matches every highlightable token (flag, <meta>, [meta]) in one
+// alternation so colorizeHelp can style them in a single pass over the original
+// line. Scanning once is essential: styled tokens embed ANSI escapes that
+// contain '[', so a second regex pass (e.g. the bracket pattern) would match
+// inside those escapes and corrupt them into visible "[38;2;…m" garbage.
+//   - group 1: word boundary before a flag (line start, whitespace, or '(')
+//   - group 2: the flag itself; a boundary is required so a dash inside a word
+//     like "golangci-lint" is not mistaken for a short flag
+//   - group 3: <angle> meta token
+//   - group 4: [bracket] meta token
+var helpTokenRe = regexp.MustCompile(`(^|[\s(])(--?[a-zA-Z][a-zA-Z0-9\-_]*)|(<[^>]+>)|(\[[^\]]+\])`)
 
 // stylePrefix returns the raw ANSI prefix a lipgloss style emits, so base text
 // color can be re-asserted after nested styled tokens reset it.
@@ -1611,21 +1617,31 @@ func colorizeHelp(s string) string {
 			lines[i] = ui.HelpSectionStyle.Render(line)
 			continue
 		}
-		// Re-assert the base color after each styled token so the whole line
-		// stays the unified content color (matching the changelog body).
-		line = helpFlagRe.ReplaceAllStringFunc(line, func(m string) string {
-			return ui.HelpFlagStyle.Render(m) + base
-		})
-		line = helpMetaAngle.ReplaceAllStringFunc(line, func(m string) string {
-			return ui.HelpMetaStyle.Render(m) + base
-		})
-		line = helpMetaBrack.ReplaceAllStringFunc(line, func(m string) string {
-			return ui.HelpMetaStyle.Render(m) + base
-		})
-		if line != "" {
-			line = base + line + reset
+		if line == "" {
+			continue
 		}
-		lines[i] = line
+		// Single pass over the ORIGINAL line. Each styled token re-asserts the
+		// base color after it so the rest of the line stays the unified content
+		// color (matching the changelog body). We never re-scan styled output,
+		// so the '[' inside injected escapes can't be mis-matched as meta.
+		var b strings.Builder
+		last := 0
+		for _, m := range helpTokenRe.FindAllStringSubmatchIndex(line, -1) {
+			b.WriteString(line[last:m[0]])
+			switch {
+			case m[4] >= 0: // flag: group 1 = boundary, group 2 = flag text
+				b.WriteString(line[m[2]:m[3]])
+				b.WriteString(ui.HelpFlagStyle.Render(line[m[4]:m[5]]))
+			case m[6] >= 0: // <angle> meta
+				b.WriteString(ui.HelpMetaStyle.Render(line[m[6]:m[7]]))
+			case m[8] >= 0: // [bracket] meta
+				b.WriteString(ui.HelpMetaStyle.Render(line[m[8]:m[9]]))
+			}
+			b.WriteString(base)
+			last = m[1]
+		}
+		b.WriteString(line[last:])
+		lines[i] = base + b.String() + reset
 	}
 	return strings.Join(lines, "\n")
 }

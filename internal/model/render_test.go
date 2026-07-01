@@ -593,3 +593,10 @@ func TestScrollColumn(t *testing.T) {
 		}
 	})
 }
+
+func TestFetchVersionCmd(t *testing.T) {
+	cmd := fetchVersionCmd(loader.Tool{Name: "git", GitHub: ""})
+	if cmd == nil {
+		t.Fatal("expected non-nil tea.Cmd from fetchVersionCmd")
+	}
+}

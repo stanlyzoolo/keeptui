@@ -161,17 +161,7 @@ func New(meta []loader.ToolMeta) Model {
 func (m Model) Init() tea.Cmd {
 	cmds := make([]tea.Cmd, 0, len(m.tools)*2)
 	for _, t := range m.tools {
-		cmds = append(cmds, func() tea.Msg {
-			installed := version.InstalledVersion(t)
-			latest := version.GetLatest(t.GitHub)
-			repoStatus := version.GetCachedRepoStatus(t.GitHub)
-			return versionMsg{
-				toolName:   t.Name,
-				installed:  installed,
-				latest:     latest,
-				repoStatus: repoStatus,
-			}
-		})
+		cmds = append(cmds, fetchVersionCmd(t))
 		if t.GitHub != "" {
 			cmds = append(cmds, fetchRepoCardCmd(t))
 		}
@@ -1400,6 +1390,22 @@ func renderLangBar(langs map[string]int, width, firstLineUsed int) string {
 		lines = append(lines, cur.String())
 	}
 	return strings.Join(lines, "\n")
+}
+
+// fetchVersionCmd returns a Cmd that detects the installed version, fetches the
+// latest release, and reads the cached repo status for t, emitting a versionMsg.
+func fetchVersionCmd(t loader.Tool) tea.Cmd {
+	return func() tea.Msg {
+		installed := version.InstalledVersion(t)
+		latest := version.GetLatest(t.GitHub)
+		repoStatus := version.GetCachedRepoStatus(t.GitHub)
+		return versionMsg{
+			toolName:   t.Name,
+			installed:  installed,
+			latest:     latest,
+			repoStatus: repoStatus,
+		}
+	}
 }
 
 func fetchRepoCardCmd(t loader.Tool) tea.Cmd {

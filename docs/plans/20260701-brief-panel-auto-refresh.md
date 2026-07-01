@@ -115,12 +115,12 @@ Key design decisions:
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] add `func fetchVersionCmd(t loader.Tool) tea.Cmd` returning the closure currently inline in
+- [x] add `func fetchVersionCmd(t loader.Tool) tea.Cmd` returning the closure currently inline in
   `Init()` (`model.go:164-174`), producing `versionMsg`
-- [ ] replace the inline goroutine in `Init()` with `cmds = append(cmds, fetchVersionCmd(t))` —
+- [x] replace the inline goroutine in `Init()` with `cmds = append(cmds, fetchVersionCmd(t))` —
   startup behavior unchanged
-- [ ] write a test asserting `fetchVersionCmd(t)` returns a non-nil `tea.Cmd` (no network assert)
-- [ ] run `go build ./... && go test ./...` — must pass before Task 2
+- [x] write a test asserting `fetchVersionCmd(t)` returns a non-nil `tea.Cmd` (no network assert)
+- [x] run `go build ./... && go test ./...` — must pass before Task 2
 
 ### Task 2: Add needsVersion / needsRepoCard predicates
 

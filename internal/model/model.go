@@ -114,12 +114,7 @@ type Model struct {
 	helpW  int
 }
 
-type Options struct {
-	InitialTool   string
-	InitialSearch string
-}
-
-func New(meta []loader.ToolMeta, opts Options) Model {
+func New(meta []loader.ToolMeta) Model {
 	ti := textinput.New()
 	ti.Placeholder = "search..."
 	ti.CharLimit = 64
@@ -158,22 +153,6 @@ func New(meta []loader.ToolMeta, opts Options) Model {
 		trackInput:    tri,
 		nameInput:     nmi,
 		meta:          meta,
-	}
-
-	if opts.InitialTool != "" {
-		for i, mt := range m.meta {
-			if strings.EqualFold(mt.Name, opts.InitialTool) {
-				m.metaSelected = i
-				m.focus = focusBrief
-				break
-			}
-		}
-	}
-
-	if opts.InitialSearch != "" {
-		m.searching = true
-		m.search.SetValue(opts.InitialSearch)
-		m.search.Focus()
 	}
 
 	return m
@@ -244,6 +223,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err == nil {
 			m.repoCards[msg.toolName] = msg.card
 			m.briefViewport.SetContent(m.renderCard())
+		}
+		return m, nil
+
+	case openURLMsg:
+		if msg.err != nil {
+			m.statusMsg = msg.err.Error()
 		}
 		return m, nil
 
@@ -568,6 +553,39 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.nameInput.SetValue(mt.Name)
 					m.nameInput.Focus()
 					return m, textinput.Blink
+				}
+			}
+
+		case "o":
+			if m.focus == focusBrief {
+				if t, ok := m.selectedTool(); ok {
+					if t.GitHub == "" {
+						m.statusMsg = "no repo for " + t.Name
+						return m, nil
+					}
+					return m, openURLCmd("https://" + t.GitHub)
+				}
+			}
+
+		case "c":
+			if m.focus == focusBrief {
+				if t, ok := m.selectedTool(); ok {
+					if t.GitHub == "" {
+						m.statusMsg = "no repo for " + t.Name
+						return m, nil
+					}
+					return m, openURLCmd("https://" + t.GitHub + "/releases")
+				}
+			}
+
+		case "s":
+			if m.focus == focusBrief {
+				if mt, ok := m.selectedMeta(); ok {
+					mt.Status = loader.NextStatus(mt.Status)
+					m.meta = loader.UpsertMeta(m.meta, mt)
+					loader.SaveMeta(m.meta) //nolint:errcheck
+					m.briefViewport.SetContent(m.renderCard())
+					return m, nil
 				}
 			}
 		}
@@ -907,7 +925,7 @@ func (m Model) renderStatusBar() string {
 		return style.Render(ui.SearchPromptStyle.Render(m.statusMsg))
 	}
 	if m.focus == focusBrief {
-		hints := keyHint("↑↓") + " scroll  " + keyHint("→") + " help  " + keyHint("←") + " back  " + keyHint("e") + " edit note  " + keyHint("t") + " edit tags  " + keyHint("q") + " quit"
+		hints := keyHint("o") + " open repo  " + keyHint("c") + " changelog  " + keyHint("s") + " status  " + keyHint("e") + " note  " + keyHint("t") + " tags  " + keyHint("q") + " quit"
 		return style.Render(hints)
 	}
 	if m.focus == focusHelp {

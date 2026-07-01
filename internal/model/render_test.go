@@ -194,6 +194,22 @@ func TestRenderStatusBarFocusTools(t *testing.T) {
 	}
 }
 
+func TestRenderStatusBarFocusBrief(t *testing.T) {
+	m := Model{width: 80, focus: focusBrief}
+	got := m.renderStatusBar()
+
+	for _, want := range []string{"[o]", "[c]", "[s]", "[e]", "[t]", "[q]"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("focusBrief status bar = %q, missing %q", got, want)
+		}
+	}
+	for _, absent := range []string{"scroll", "help", "back"} {
+		if strings.Contains(got, absent) {
+			t.Errorf("focusBrief status bar = %q, should not contain %q", got, absent)
+		}
+	}
+}
+
 func TestRenderStatusBarTracking(t *testing.T) {
 	m := Model{width: 80, tracking: true, trackInput: textinput.New()}
 	got := m.renderStatusBar()
@@ -459,6 +475,103 @@ func TestRenameToolSavePath(t *testing.T) {
 	if loader.FindMeta(loaded, "git") != nil {
 		t.Errorf("old 'git' should not be in saved meta")
 	}
+}
+
+func TestUpdateBriefOpenActions(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	keyO := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("o")}
+	keyC := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("c")}
+
+	t.Run("no repo sets status message and no command", func(t *testing.T) {
+		for _, key := range []tea.KeyMsg{keyO, keyC} {
+			m := Model{
+				meta:         []loader.ToolMeta{{Name: "tool-x"}},
+				metaSelected: 0,
+				focus:        focusBrief,
+			}
+			m.tools = loader.ToolsFromMeta(m.meta)
+
+			updated, cmd := m.Update(key)
+			nm := updated.(Model)
+
+			if nm.statusMsg != "no repo for tool-x" {
+				t.Errorf("key %q: statusMsg = %q, want %q", key.String(), nm.statusMsg, "no repo for tool-x")
+			}
+			if cmd != nil {
+				t.Errorf("key %q: cmd = %v, want nil for no-repo tool", key.String(), cmd)
+			}
+		}
+	})
+
+	t.Run("repo set returns a non-nil command", func(t *testing.T) {
+		for _, key := range []tea.KeyMsg{keyO, keyC} {
+			m := Model{
+				meta:         []loader.ToolMeta{{Name: "tool-x", GitHub: "github.com/owner/tool-x"}},
+				metaSelected: 0,
+				focus:        focusBrief,
+			}
+			m.tools = loader.ToolsFromMeta(m.meta)
+
+			updated, cmd := m.Update(key)
+			nm := updated.(Model)
+
+			if nm.statusMsg != "" {
+				t.Errorf("key %q: statusMsg = %q, want empty", key.String(), nm.statusMsg)
+			}
+			if cmd == nil {
+				t.Errorf("key %q: cmd = nil, want non-nil for tool with repo", key.String())
+			}
+		}
+	})
+}
+
+func TestUpdateBriefStatusCycle(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	keyS := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("s")}
+
+	t.Run("cycles status through the full loop", func(t *testing.T) {
+		m := Model{
+			meta:         []loader.ToolMeta{{Name: "tool-x", Status: loader.StatusActive}},
+			metaSelected: 0,
+			focus:        focusBrief,
+		}
+		m.tools = loader.ToolsFromMeta(m.meta)
+
+		want := []loader.Status{
+			loader.StatusTrying,
+			loader.StatusForgotten,
+			loader.StatusArchived,
+			loader.StatusActive,
+		}
+
+		var cur tea.Model = m
+		for i, w := range want {
+			updated, _ := cur.(Model).Update(keyS)
+			nm := updated.(Model)
+			got := loader.FindMeta(nm.meta, "tool-x").Status
+			if got != w {
+				t.Errorf("step %d: status = %q, want %q", i, got, w)
+			}
+			cur = nm
+		}
+	})
+
+	t.Run("inert outside focusBrief", func(t *testing.T) {
+		m := Model{
+			meta:         []loader.ToolMeta{{Name: "tool-x", Status: loader.StatusActive}},
+			metaSelected: 0,
+			focus:        focusTools,
+		}
+		m.tools = loader.ToolsFromMeta(m.meta)
+
+		updated, _ := m.Update(keyS)
+		nm := updated.(Model)
+		if got := loader.FindMeta(nm.meta, "tool-x").Status; got != loader.StatusActive {
+			t.Errorf("status = %q, want %q (unchanged outside focusBrief)", got, loader.StatusActive)
+		}
+	})
 }
 
 func TestScrollColumn(t *testing.T) {

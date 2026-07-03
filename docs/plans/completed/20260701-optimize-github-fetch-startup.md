@@ -151,9 +151,9 @@
 - [x] полный прогон: `go build ./... && go vet ./... && go test ./...`.
 
 ### Task 6: [Final] Update documentation
-- [ ] обновить CLAUDE.md: описать новый async-fetch split (`fetchInstalledCmd`/`fetchRemoteCmd`, `installedMsg`/`remoteMsg`, `needsInstalled`/`needsRemote`) и правило записи кэша через `updateCacheEntry` под `cacheMu`.
-- [ ] обновить README.md при необходимости (вряд ли нужно — внутренняя механика).
-- [ ] переместить этот план в `docs/plans/completed/`.
+- [x] обновить CLAUDE.md: описать новый async-fetch split (`fetchInstalledCmd`/`fetchRemoteCmd`, `installedMsg`/`remoteMsg`, `needsInstalled`/`needsRemote`) и правило записи кэша через `updateCacheEntry` под `cacheMu`.
+- [x] обновить README.md при необходимости (не требуется — внутренняя механика, README её не описывает).
+- [x] переместить этот план в `docs/plans/completed/`.
 
 ## Post-Completion
 *Требует ручного/внешнего действия — без чекбоксов, информационно.*

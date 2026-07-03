@@ -32,11 +32,23 @@ type VersionInfo struct {
 	Latest    string
 }
 
-type versionMsg struct {
+// installedMsg carries the locally detected installed version for a tool.
+// It is emitted by fetchInstalledCmd independently of any network activity so
+// the installed version renders immediately, without waiting on GitHub.
+type installedMsg struct {
+	toolName  string
+	installed string
+}
+
+// remoteMsg carries the result of a single network pass (release + repo info +
+// languages) for a tool with a GitHub ref. It merges the latest tag, repo
+// status and repo card in one message.
+type remoteMsg struct {
 	toolName   string
-	installed  string
 	latest     string
 	repoStatus string
+	card       version.RepoCard
+	err        error
 }
 
 type changelogMsg struct {
@@ -46,12 +58,6 @@ type changelogMsg struct {
 	htmlUrl     string
 	publishedAt string
 	err         error
-}
-
-type repoCardMsg struct {
-	toolName string
-	card     version.RepoCard
-	err      error
 }
 
 type helpOutputMsg struct {
@@ -161,9 +167,9 @@ func New(meta []loader.ToolMeta) Model {
 func (m Model) Init() tea.Cmd {
 	cmds := make([]tea.Cmd, 0, len(m.tools)*2)
 	for _, t := range m.tools {
-		cmds = append(cmds, fetchVersionCmd(t))
+		cmds = append(cmds, fetchInstalledCmd(t))
 		if t.GitHub != "" {
-			cmds = append(cmds, fetchRepoCardCmd(t))
+			cmds = append(cmds, fetchRemoteCmd(t))
 		}
 	}
 	if m.searching {
@@ -189,14 +195,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
 
-	case versionMsg:
-		m.versions[msg.toolName] = VersionInfo{
-			Installed: msg.installed,
-			Latest:    msg.latest,
-		}
-		if msg.repoStatus != "" {
-			m.repoStatus[msg.toolName] = msg.repoStatus
-		}
+	case installedMsg:
+		info := m.versions[msg.toolName]
+		info.Installed = msg.installed
+		m.versions[msg.toolName] = info
 		m.toolsViewport.SetContent(m.renderLeftContent())
 		m.briefViewport.SetContent(m.renderCard())
 		return m, nil
@@ -209,9 +211,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.briefViewport.SetContent(m.renderCard())
 		return m, nil
 
-	case repoCardMsg:
+	case remoteMsg:
 		if msg.err == nil {
+			info := m.versions[msg.toolName]
+			info.Latest = msg.latest
+			m.versions[msg.toolName] = info
+			if msg.repoStatus != "" {
+				m.repoStatus[msg.toolName] = msg.repoStatus
+			}
 			m.repoCards[msg.toolName] = msg.card
+			m.toolsViewport.SetContent(m.renderLeftContent())
 			m.briefViewport.SetContent(m.renderCard())
 		}
 		return m, nil
@@ -1396,26 +1405,40 @@ func renderLangBar(langs map[string]int, width, firstLineUsed int) string {
 	return strings.Join(lines, "\n")
 }
 
-// fetchVersionCmd returns a Cmd that detects the installed version, fetches the
-// latest release, and reads the cached repo status for t, emitting a versionMsg.
-func fetchVersionCmd(t loader.Tool) tea.Cmd {
+// fetchInstalledCmd returns a Cmd that detects the installed version of t
+// locally (subprocess) and emits an installedMsg. It never touches the network,
+// so the installed version can render before any GitHub fetch completes.
+func fetchInstalledCmd(t loader.Tool) tea.Cmd {
 	return func() tea.Msg {
 		installed := version.InstalledVersion(t)
-		latest := version.GetLatest(t.GitHub)
-		repoStatus := version.GetCachedRepoStatus(t.GitHub)
-		return versionMsg{
-			toolName:   t.Name,
-			installed:  installed,
-			latest:     latest,
-			repoStatus: repoStatus,
+		return installedMsg{
+			toolName:  t.Name,
+			installed: installed,
 		}
 	}
 }
 
-func fetchRepoCardCmd(t loader.Tool) tea.Cmd {
+// fetchRemoteCmd returns a Cmd that makes a single network pass over t's
+// repository via version.GetRepoData (release + repo info + languages) and emits
+// a remoteMsg carrying the latest tag, repo status and repo card together.
+func fetchRemoteCmd(t loader.Tool) tea.Cmd {
 	return func() tea.Msg {
-		card := version.GetRepoCard(t.GitHub)
-		return repoCardMsg{toolName: t.Name, card: card}
+		d := version.GetRepoData(t.GitHub)
+		return remoteMsg{
+			toolName:   t.Name,
+			latest:     d.Latest,
+			repoStatus: d.RepoStatus,
+			card: version.RepoCard{
+				About:       d.About,
+				Stars:       d.Stars,
+				Languages:   d.Languages,
+				Latest:      d.Latest,
+				PublishedAt: d.PublishedAt,
+				HtmlUrl:     d.HtmlUrl,
+				Body:        d.Body,
+				RepoStatus:  d.RepoStatus,
+			},
+		}
 	}
 }
 
@@ -1433,21 +1456,26 @@ func fetchChangelogCmd(githubField, toolName string) tea.Cmd {
 	}
 }
 
-// needsVersion reports whether the version info for t has not been fetched yet.
-// Version is detected locally, so it fires regardless of GitHub, matching Init().
-func (m *Model) needsVersion(t loader.Tool) bool {
-	_, ok := m.versions[t.Name]
-	return !ok
+// needsInstalled reports whether the installed version for t is not yet known.
+// Detected locally, so it fires regardless of GitHub, matching Init(). Guards
+// against re-running the subprocess on every cursor movement.
+func (m *Model) needsInstalled(t loader.Tool) bool {
+	info, ok := m.versions[t.Name]
+	return !ok || info.Installed == ""
 }
 
-// needsRepoCard reports whether the repo card for t must still be fetched.
-// Requires a GitHub ref (matching the Init() guard) and no cached card.
-func (m *Model) needsRepoCard(t loader.Tool) bool {
+// needsRemote reports whether the network pass for t must still run.
+// Requires a GitHub ref (matching the Init() guard) and either an unknown
+// latest tag or a missing repo card.
+func (m *Model) needsRemote(t loader.Tool) bool {
 	if t.GitHub == "" {
 		return false
 	}
-	_, ok := m.repoCards[t.Name]
-	return !ok
+	if _, ok := m.repoCards[t.Name]; !ok {
+		return true
+	}
+	info := m.versions[t.Name]
+	return info.Latest == ""
 }
 
 // autoFetchCmdsForSelected returns a batched Cmd that auto-fetches changelog
@@ -1463,11 +1491,11 @@ func (m *Model) autoFetchCmdsForSelected() tea.Cmd {
 				cmds = append(cmds, fetchChangelogCmd(t.GitHub, t.Name))
 			}
 		}
-		if m.needsVersion(t) {
-			cmds = append(cmds, fetchVersionCmd(t))
+		if m.needsInstalled(t) {
+			cmds = append(cmds, fetchInstalledCmd(t))
 		}
-		if m.needsRepoCard(t) {
-			cmds = append(cmds, fetchRepoCardCmd(t))
+		if m.needsRemote(t) {
+			cmds = append(cmds, fetchRemoteCmd(t))
 		}
 	}
 	if mt, ok := m.selectedMeta(); ok {

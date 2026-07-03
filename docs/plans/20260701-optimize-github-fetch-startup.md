@@ -135,13 +135,13 @@
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] добавить типы `installedMsg` и `remoteMsg`; добавить `fetchInstalledCmd(t)` (локальный `InstalledVersion`) и `fetchRemoteCmd(t)` (через `version.GetRepoData`).
-- [ ] обработчики в `Update`: `installedMsg` мержит `Installed` в существующую `VersionInfo`; `remoteMsg` мержит `Latest` + пишет `m.repoStatus` + `m.repoCards` (сохранять уже имеющиеся поля).
-- [ ] обновить `Init()`: на тул — `fetchInstalledCmd` всегда, `fetchRemoteCmd` при `t.GitHub != ""`; help/changelog для выбранного оставить как есть.
-- [ ] заменить `needsVersion`/`needsRepoCard` на `needsInstalled`/`needsRemote`; обновить `autoFetchCmdsForSelected()` на новые команды/guard'ы.
-- [ ] удалить неиспользуемые `versionMsg`/`repoCardMsg`/`fetchVersionCmd`/`fetchRepoCardCmd` (проверив, что нигде не остались ссылки; rename-путь на `model.go:783` не трогаем — мапы те же).
-- [ ] написать тесты: `installedMsg` затем `remoteMsg` (и наоборот) дают полную `VersionInfo{Installed, Latest}` без потери полей; `remoteMsg` наполняет `repoCards`/`repoStatus`; тул без `GitHub` получает только `Installed`.
-- [ ] `go build ./... && go vet ./... && go test ./...` — зелёные перед следующей задачей.
+- [x] добавить типы `installedMsg` и `remoteMsg`; добавить `fetchInstalledCmd(t)` (локальный `InstalledVersion`) и `fetchRemoteCmd(t)` (через `version.GetRepoData`).
+- [x] обработчики в `Update`: `installedMsg` мержит `Installed` в существующую `VersionInfo`; `remoteMsg` мержит `Latest` + пишет `m.repoStatus` + `m.repoCards` (сохранять уже имеющиеся поля).
+- [x] обновить `Init()`: на тул — `fetchInstalledCmd` всегда, `fetchRemoteCmd` при `t.GitHub != ""`; help/changelog для выбранного оставить как есть.
+- [x] заменить `needsVersion`/`needsRepoCard` на `needsInstalled`/`needsRemote`; обновить `autoFetchCmdsForSelected()` на новые команды/guard'ы.
+- [x] удалить неиспользуемые `versionMsg`/`repoCardMsg`/`fetchVersionCmd`/`fetchRepoCardCmd` (проверив, что нигде не остались ссылки; rename-путь на `model.go:783` не трогаем — мапы те же).
+- [x] написать тесты: `installedMsg` затем `remoteMsg` (и наоборот) дают полную `VersionInfo{Installed, Latest}` без потери полей; `remoteMsg` наполняет `repoCards`/`repoStatus`; тул без `GitHub` получает только `Installed`.
+- [x] `go build ./... && go vet ./... && go test ./...` — зелёные перед следующей задачей.
 
 ### Task 5: Verify acceptance criteria
 - [ ] версии/статусы/карточки по-прежнему корректно отображаются (юнит-тесты рендера зелёные).

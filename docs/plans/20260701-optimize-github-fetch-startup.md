@@ -110,12 +110,12 @@
 - Modify: `internal/version/github.go`
 - Modify: `internal/version/github_test.go`
 
-- [ ] переписать `GetLatest`: вместо `cache[repo]=...; SaveCache(cache)` — `updateCacheEntry`, поля отсутствующие в свежей записи брать из `existing` (сохранить fallback `RepoStatus`/`Languages`).
-- [ ] переписать `GetRepoCard` аналогично через `updateCacheEntry`.
-- [ ] переписать `GetChangelog` аналогично через `updateCacheEntry`.
-- [ ] привести `FetchAndCache` к `updateCacheEntry` (убрать ручной `cacheMu.Lock`/дублирование логики).
-- [ ] обновить/добавить тесты: чтение-после-записи для каждого пути; параллельный `Init`-подобный сценарий (release+card на несколько repo) сохраняет все записи.
-- [ ] `go test ./internal/version/` — зелёные перед следующей задачей.
+- [x] переписать `GetLatest`: вместо `cache[repo]=...; SaveCache(cache)` — `updateCacheEntry`, поля отсутствующие в свежей записи брать из `existing` (сохранить fallback `RepoStatus`/`Languages`).
+- [x] переписать `GetRepoCard` аналогично через `updateCacheEntry`.
+- [x] переписать `GetChangelog` аналогично через `updateCacheEntry`.
+- [x] привести `FetchAndCache` к `updateCacheEntry` (убрать ручной `cacheMu.Lock`/дублирование логики).
+- [x] обновить/добавить тесты: чтение-после-записи для каждого пути; параллельный `Init`-подобный сценарий (release+card на несколько repo) сохраняет все записи.
+- [x] `go test ./internal/version/` — зелёные перед следующей задачей.
 
 ### Task 3: Единый сетевой проход `GetRepoData` (B)
 

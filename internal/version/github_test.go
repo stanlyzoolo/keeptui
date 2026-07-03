@@ -144,6 +144,145 @@ func TestUpdateCacheEntryConcurrentSameRepo(t *testing.T) {
 	}
 }
 
+// githubTestServer returns an httptest server that answers the release, repo
+// info and languages endpoints, plus a cleanup that restores the package vars.
+func githubTestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case len(r.URL.Path) >= 10 && r.URL.Path[len(r.URL.Path)-10:] == "/languages":
+			json.NewEncoder(w).Encode(map[string]int{"Go": 1000})
+		case len(r.URL.Path) >= 7 && r.URL.Path[len(r.URL.Path)-7:] == "/latest":
+			json.NewEncoder(w).Encode(map[string]string{
+				"tag_name":     "v2.3.4",
+				"body":         "release notes",
+				"html_url":     "https://github.com" + r.URL.Path,
+				"published_at": "2025-01-01T00:00:00Z",
+			})
+		default:
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"archived":         false,
+				"description":      "test tool",
+				"stargazers_count": 42,
+			})
+		}
+	}))
+	origAPIBase := testAPIBase
+	origCacheDir := testCacheDir
+	testAPIBase = srv.URL
+	testCacheDir = t.TempDir()
+	t.Cleanup(func() {
+		srv.Close()
+		testAPIBase = origAPIBase
+		testCacheDir = origCacheDir
+	})
+	return srv
+}
+
+// TestGetLatestReadAfterWrite verifies GetLatest persists its result through
+// updateCacheEntry so a subsequent read within TTL is served from cache.
+func TestGetLatestReadAfterWrite(t *testing.T) {
+	githubTestServer(t)
+
+	if got := GetLatest("github.com/owner/repo"); got != "v2.3.4" {
+		t.Fatalf("GetLatest = %q, want v2.3.4", got)
+	}
+	entry, ok := LoadCache()["owner/repo"]
+	if !ok {
+		t.Fatal("cache missing entry after GetLatest")
+	}
+	if entry.Latest != "v2.3.4" {
+		t.Errorf("cached Latest = %q, want v2.3.4", entry.Latest)
+	}
+	if entry.RepoStatus != "active" {
+		t.Errorf("cached RepoStatus = %q, want active", entry.RepoStatus)
+	}
+}
+
+// TestGetRepoCardReadAfterWrite verifies GetRepoCard persists languages and
+// preserves the Latest tag already stored by an earlier GetLatest.
+func TestGetRepoCardReadAfterWrite(t *testing.T) {
+	githubTestServer(t)
+
+	GetLatest("github.com/owner/repo")
+	card := GetRepoCard("github.com/owner/repo")
+	if card.Languages["Go"] != 1000 {
+		t.Errorf("card languages = %v, want Go:1000", card.Languages)
+	}
+	if card.Latest != "v2.3.4" {
+		t.Errorf("card Latest = %q, want v2.3.4 (preserved from GetLatest)", card.Latest)
+	}
+	entry := LoadCache()["owner/repo"]
+	if entry.Languages == nil {
+		t.Error("cached Languages nil after GetRepoCard")
+	}
+	if entry.Latest != "v2.3.4" {
+		t.Errorf("cached Latest = %q, want v2.3.4 preserved", entry.Latest)
+	}
+}
+
+// TestGetChangelogReadAfterWrite verifies GetChangelog persists body and
+// preserves languages already populated by GetRepoCard.
+func TestGetChangelogReadAfterWrite(t *testing.T) {
+	githubTestServer(t)
+
+	GetRepoCard("github.com/owner/repo")
+	info, err := GetChangelog("github.com/owner/repo")
+	if err != nil {
+		t.Fatalf("GetChangelog: %v", err)
+	}
+	if info.Body != "release notes" {
+		t.Errorf("changelog Body = %q, want release notes", info.Body)
+	}
+	entry := LoadCache()["owner/repo"]
+	if entry.Body != "release notes" {
+		t.Errorf("cached Body = %q, want release notes", entry.Body)
+	}
+	if entry.Languages["Go"] != 1000 {
+		t.Errorf("cached Languages = %v, want Go:1000 preserved from GetRepoCard", entry.Languages)
+	}
+}
+
+// TestConcurrentInitLikeFetch mimics startup: for several repos GetLatest and
+// GetRepoCard run in parallel; every repo must end up with both release and
+// card fields intact — no lost write between the two paths.
+func TestConcurrentInitLikeFetch(t *testing.T) {
+	githubTestServer(t)
+
+	repos := []string{"owner/toolA", "owner/toolB", "owner/toolC", "owner/toolD"}
+	var wg sync.WaitGroup
+	for _, repo := range repos {
+		field := "github.com/" + repo
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			GetLatest(field)
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			GetRepoCard(field)
+		}()
+	}
+	wg.Wait()
+
+	cache := LoadCache()
+	for _, repo := range repos {
+		entry, ok := cache[repo]
+		if !ok {
+			t.Errorf("cache missing entry for %q", repo)
+			continue
+		}
+		if entry.Latest != "v2.3.4" {
+			t.Errorf("%q Latest = %q, want v2.3.4", repo, entry.Latest)
+		}
+		if entry.Languages["Go"] != 1000 {
+			t.Errorf("%q Languages = %v, want Go:1000", repo, entry.Languages)
+		}
+	}
+}
+
 // TestExtractRepo guards the delegation to loader.NormalizeRepo so a stored
 // github field is normalized to "owner/repo" before it reaches the GitHub API.
 func TestExtractRepo(t *testing.T) {

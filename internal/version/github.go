@@ -82,22 +82,23 @@ func GetLatest(githubField string) string {
 	}
 
 	repoStatus, about, stars, _ := fetchRepoInfo(repo)
-	newEntry := CacheEntry{
-		Latest:      info.Tag,
-		Body:        info.Body,
-		HtmlUrl:     info.HtmlUrl,
-		PublishedAt: info.PublishedAt,
-		CheckedAt:   time.Now(),
-		RepoStatus:  repoStatus,
-		About:       about,
-		Stars:       stars,
-		Languages:   entry.Languages,
-	}
-	if repoStatus == "" && cached {
-		newEntry.RepoStatus = entry.RepoStatus
-	}
-	cache[repo] = newEntry
-	SaveCache(cache)
+	updateCacheEntry(repo, func(existing CacheEntry) CacheEntry {
+		newEntry := CacheEntry{
+			Latest:      info.Tag,
+			Body:        info.Body,
+			HtmlUrl:     info.HtmlUrl,
+			PublishedAt: info.PublishedAt,
+			CheckedAt:   time.Now(),
+			RepoStatus:  repoStatus,
+			About:       about,
+			Stars:       stars,
+			Languages:   existing.Languages,
+		}
+		if repoStatus == "" {
+			newEntry.RepoStatus = existing.RepoStatus
+		}
+		return newEntry
+	})
 	return info.Tag
 }
 
@@ -129,27 +130,23 @@ func FetchAndCache(githubField string) (string, error) {
 	}
 	repoStatus, about, stars, _ := fetchRepoInfo(repo)
 
-	cacheMu.Lock()
-	defer cacheMu.Unlock()
-
-	cache := LoadCache()
-	existing := cache[repo]
-	newEntry := CacheEntry{
-		Latest:      info.Tag,
-		Body:        info.Body,
-		HtmlUrl:     info.HtmlUrl,
-		PublishedAt: info.PublishedAt,
-		CheckedAt:   time.Now(),
-		RepoStatus:  repoStatus,
-		About:       about,
-		Stars:       stars,
-		Languages:   existing.Languages,
-	}
-	if repoStatus == "" {
-		newEntry.RepoStatus = existing.RepoStatus
-	}
-	cache[repo] = newEntry
-	SaveCache(cache)
+	updateCacheEntry(repo, func(existing CacheEntry) CacheEntry {
+		newEntry := CacheEntry{
+			Latest:      info.Tag,
+			Body:        info.Body,
+			HtmlUrl:     info.HtmlUrl,
+			PublishedAt: info.PublishedAt,
+			CheckedAt:   time.Now(),
+			RepoStatus:  repoStatus,
+			About:       about,
+			Stars:       stars,
+			Languages:   existing.Languages,
+		}
+		if repoStatus == "" {
+			newEntry.RepoStatus = existing.RepoStatus
+		}
+		return newEntry
+	})
 	return info.Tag, nil
 }
 
@@ -179,19 +176,19 @@ func GetChangelog(githubField string) (ReleaseInfo, error) {
 		return ReleaseInfo{}, err
 	}
 
-	existing := cache[repo]
-	cache[repo] = CacheEntry{
-		Latest:      info.Tag,
-		Body:        info.Body,
-		HtmlUrl:     info.HtmlUrl,
-		PublishedAt: info.PublishedAt,
-		CheckedAt:   time.Now(),
-		RepoStatus:  existing.RepoStatus,
-		About:       existing.About,
-		Stars:       existing.Stars,
-		Languages:   existing.Languages,
-	}
-	SaveCache(cache)
+	updateCacheEntry(repo, func(existing CacheEntry) CacheEntry {
+		return CacheEntry{
+			Latest:      info.Tag,
+			Body:        info.Body,
+			HtmlUrl:     info.HtmlUrl,
+			PublishedAt: info.PublishedAt,
+			CheckedAt:   time.Now(),
+			RepoStatus:  existing.RepoStatus,
+			About:       existing.About,
+			Stars:       existing.Stars,
+			Languages:   existing.Languages,
+		}
+	})
 	return info, nil
 }
 
@@ -350,32 +347,35 @@ func GetRepoCard(githubField string) RepoCard {
 	repoStatus, about, stars, _ := fetchRepoInfo(repo)
 	langs, _ := fetchLanguages(repo)
 
-	newEntry := CacheEntry{
-		Latest:      entry.Latest,
-		Body:        entry.Body,
-		HtmlUrl:     entry.HtmlUrl,
-		PublishedAt: entry.PublishedAt,
-		CheckedAt:   time.Now(),
-		RepoStatus:  repoStatus,
-		About:       about,
-		Stars:       stars,
-		Languages:   langs,
-	}
-	if repoStatus == "" && cached {
-		newEntry.RepoStatus = entry.RepoStatus
-	}
-	cache[repo] = newEntry
-	SaveCache(cache)
+	var stored CacheEntry
+	updateCacheEntry(repo, func(existing CacheEntry) CacheEntry {
+		newEntry := CacheEntry{
+			Latest:      existing.Latest,
+			Body:        existing.Body,
+			HtmlUrl:     existing.HtmlUrl,
+			PublishedAt: existing.PublishedAt,
+			CheckedAt:   time.Now(),
+			RepoStatus:  repoStatus,
+			About:       about,
+			Stars:       stars,
+			Languages:   langs,
+		}
+		if repoStatus == "" {
+			newEntry.RepoStatus = existing.RepoStatus
+		}
+		stored = newEntry
+		return newEntry
+	})
 
 	return RepoCard{
 		About:       about,
 		Stars:       stars,
 		Languages:   langs,
-		Latest:      newEntry.Latest,
-		PublishedAt: newEntry.PublishedAt,
-		HtmlUrl:     newEntry.HtmlUrl,
-		Body:        newEntry.Body,
-		RepoStatus:  newEntry.RepoStatus,
+		Latest:      stored.Latest,
+		PublishedAt: stored.PublishedAt,
+		HtmlUrl:     stored.HtmlUrl,
+		Body:        stored.Body,
+		RepoStatus:  stored.RepoStatus,
 	}
 }
 

@@ -358,6 +358,76 @@ func TestGetRepoDataSinglePass(t *testing.T) {
 	}
 }
 
+// TestGetRepoDataLanguagesFailureStillCaches verifies that when the languages
+// endpoint fails (leaving Languages nil) but the other endpoints succeed, a
+// second call within TTL is still served from cache and does not trigger a full
+// three-endpoint re-fetch. This guards the regression where the cache-hit gate
+// required Languages != nil, forcing a network pass on every start for any repo
+// whose languages endpoint was flaky or rate-limited.
+func TestGetRepoDataLanguagesFailureStillCaches(t *testing.T) {
+	var mu sync.Mutex
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests++
+		mu.Unlock()
+		switch {
+		case len(r.URL.Path) >= 10 && r.URL.Path[len(r.URL.Path)-10:] == "/languages":
+			w.WriteHeader(http.StatusInternalServerError)
+		case len(r.URL.Path) >= 7 && r.URL.Path[len(r.URL.Path)-7:] == "/latest":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{
+				"tag_name":     "v1.0.0",
+				"body":         "release notes",
+				"html_url":     "https://github.com" + r.URL.Path,
+				"published_at": "2025-01-01T00:00:00Z",
+			})
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"archived":         false,
+				"description":      "test tool",
+				"stargazers_count": 7,
+			})
+		}
+	}))
+	origAPIBase := testAPIBase
+	origCacheDir := testCacheDir
+	testAPIBase = srv.URL
+	testCacheDir = t.TempDir()
+	defer func() {
+		srv.Close()
+		testAPIBase = origAPIBase
+		testCacheDir = origCacheDir
+	}()
+
+	d := GetRepoData("github.com/owner/repo")
+	if d.Latest != "v1.0.0" {
+		t.Errorf("Latest = %q, want v1.0.0", d.Latest)
+	}
+	if d.Languages != nil {
+		t.Errorf("Languages = %v, want nil after languages fetch failure", d.Languages)
+	}
+
+	mu.Lock()
+	afterFirst := requests
+	mu.Unlock()
+	if afterFirst == 0 {
+		t.Fatal("expected network requests on first GetRepoData")
+	}
+
+	d2 := GetRepoData("github.com/owner/repo")
+	mu.Lock()
+	afterSecond := requests
+	mu.Unlock()
+	if afterSecond != afterFirst {
+		t.Errorf("second GetRepoData made %d extra requests, want 0 (cache hit despite nil Languages)", afterSecond-afterFirst)
+	}
+	if d2.Latest != "v1.0.0" {
+		t.Errorf("cache-hit Latest = %q, want v1.0.0", d2.Latest)
+	}
+}
+
 // TestGetRepoDataInvalidField verifies empty and unparseable github fields
 // return a zero RepoData without panicking or hitting the network.
 func TestGetRepoDataInvalidField(t *testing.T) {

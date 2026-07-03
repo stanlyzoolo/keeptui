@@ -86,12 +86,13 @@ func repoDataFromEntry(e CacheEntry) RepoData {
 type Cache map[string]CacheEntry
 
 // GetRepoData fetches release, repo info and languages for a tool's github
-// field in a single pass and returns the combined data. A fresh, fully
-// populated cache entry (within TTL, with languages) is served without any
-// network call. On a miss it makes one call to each endpoint and persists the
-// result atomically via updateCacheEntry; fields whose fetch fails are kept
-// from the existing entry (stale fallback), so a rate-limited release does not
-// wipe a previously known tag or card.
+// field in a single pass and returns the combined data. A cache entry within
+// TTL is served without any network call. On a miss it makes one call to each
+// endpoint and persists the result atomically via updateCacheEntry; fields
+// whose fetch fails are kept from the existing entry (stale fallback), so a
+// rate-limited release does not wipe a previously known tag or card. Freshness
+// is decided on CheckedAt alone: a failed languages fetch leaves Languages nil
+// but must not force a full three-endpoint re-fetch on every subsequent start.
 func GetRepoData(githubField string) RepoData {
 	if githubField == "" {
 		return RepoData{}
@@ -103,7 +104,7 @@ func GetRepoData(githubField string) RepoData {
 
 	cache := LoadCache()
 	entry, cached := cache[repo]
-	if cached && time.Since(entry.CheckedAt) < cacheTTL && entry.Languages != nil {
+	if cached && time.Since(entry.CheckedAt) < cacheTTL {
 		return repoDataFromEntry(entry)
 	}
 
@@ -140,20 +141,6 @@ func GetRepoData(githubField string) RepoData {
 // value on network error.
 func GetLatest(githubField string) string {
 	return GetRepoData(githubField).Latest
-}
-
-// GetCachedRepoStatus returns the repository status from cache without making a network request.
-// Returns "active", "archived", or "" if not yet known.
-func GetCachedRepoStatus(githubField string) string {
-	if githubField == "" {
-		return ""
-	}
-	repo := extractRepo(githubField)
-	if repo == "" {
-		return ""
-	}
-	cache := LoadCache()
-	return cache[repo].RepoStatus
 }
 
 // FetchAndCache force-fetches the latest release, bypassing the cache TTL.

@@ -99,10 +99,10 @@
 - Modify: `internal/version/github.go`
 - Modify: `internal/version/github_test.go`
 
-- [ ] добавить `updateCacheEntry(repo string, mutate func(CacheEntry) CacheEntry)` — под `cacheMu`: `LoadCache` → `mutate(cache[repo])` → `SaveCache`.
-- [ ] написать тест: M горутин параллельно зовут `updateCacheEntry` для M разных repo → после — в кэше присутствуют все M записей (нет потерянных).
-- [ ] написать тест: конкурентные обновления одного repo не теряют последнее значение (сериализация под мьютексом).
-- [ ] `go test ./internal/version/` — зелёные перед следующей задачей.
+- [x] добавить `updateCacheEntry(repo string, mutate func(CacheEntry) CacheEntry)` — под `cacheMu`: `LoadCache` → `mutate(cache[repo])` → `SaveCache`.
+- [x] написать тест: M горутин параллельно зовут `updateCacheEntry` для M разных repo → после — в кэше присутствуют все M записей (нет потерянных).
+- [x] написать тест: конкурентные обновления одного repo не теряют последнее значение (сериализация под мьютексом).
+- [x] `go test ./internal/version/` — зелёные перед следующей задачей.
 
 ### Task 2: Перевод всех путей записи кэша на `updateCacheEntry` (A)
 

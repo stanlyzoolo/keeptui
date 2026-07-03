@@ -410,6 +410,19 @@ func LoadCache() Cache {
 	return c
 }
 
+// updateCacheEntry atomically applies mutate to a single repo's cache entry.
+// It holds cacheMu across a fresh LoadCache → mutate → SaveCache cycle so that
+// concurrent goroutines never overwrite each other's writes: mutate receives the
+// current on-disk entry (or a zero value if absent) and must return the entry to
+// store, pulling any fields it doesn't set from existing.
+func updateCacheEntry(repo string, mutate func(existing CacheEntry) CacheEntry) {
+	cacheMu.Lock()
+	defer cacheMu.Unlock()
+	cache := LoadCache()
+	cache[repo] = mutate(cache[repo])
+	SaveCache(cache)
+}
+
 func SaveCache(c Cache) {
 	path, err := cacheFilePath()
 	if err != nil {

@@ -70,6 +70,80 @@ func TestConcurrentFetch(t *testing.T) {
 	}
 }
 
+// TestUpdateCacheEntryConcurrentRepos verifies that parallel updateCacheEntry
+// calls for distinct repos all persist — no write is lost to a lost-update race.
+func TestUpdateCacheEntryConcurrentRepos(t *testing.T) {
+	dir := t.TempDir()
+	origCacheDir := testCacheDir
+	defer func() { testCacheDir = origCacheDir }()
+	testCacheDir = dir
+
+	const m = 20
+	repos := make([]string, m)
+	for i := 0; i < m; i++ {
+		repos[i] = "owner/tool" + string(rune('A'+i))
+	}
+
+	var wg sync.WaitGroup
+	for _, repo := range repos {
+		wg.Add(1)
+		go func(r string) {
+			defer wg.Done()
+			updateCacheEntry(r, func(existing CacheEntry) CacheEntry {
+				existing.Latest = r
+				return existing
+			})
+		}(repo)
+	}
+	wg.Wait()
+
+	cache := LoadCache()
+	if len(cache) != m {
+		t.Fatalf("cache has %d entries, want %d", len(cache), m)
+	}
+	for _, repo := range repos {
+		entry, ok := cache[repo]
+		if !ok {
+			t.Errorf("cache missing entry for %q", repo)
+			continue
+		}
+		if entry.Latest != repo {
+			t.Errorf("entry %q Latest = %q, want %q", repo, entry.Latest, repo)
+		}
+	}
+}
+
+// TestUpdateCacheEntryConcurrentSameRepo verifies that concurrent updates to a
+// single repo are serialized: the final count reflects every increment, so no
+// read-modify-write is lost.
+func TestUpdateCacheEntryConcurrentSameRepo(t *testing.T) {
+	dir := t.TempDir()
+	origCacheDir := testCacheDir
+	defer func() { testCacheDir = origCacheDir }()
+	testCacheDir = dir
+
+	const n = 50
+	const repo = "owner/tool"
+
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			updateCacheEntry(repo, func(existing CacheEntry) CacheEntry {
+				existing.Stars++
+				return existing
+			})
+		}()
+	}
+	wg.Wait()
+
+	cache := LoadCache()
+	if got := cache[repo].Stars; got != n {
+		t.Errorf("Stars = %d after %d concurrent increments, want %d", got, n, n)
+	}
+}
+
 // TestExtractRepo guards the delegation to loader.NormalizeRepo so a stored
 // github field is normalized to "owner/repo" before it reaches the GitHub API.
 func TestExtractRepo(t *testing.T) {

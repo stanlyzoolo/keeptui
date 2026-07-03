@@ -123,11 +123,11 @@
 - Modify: `internal/version/github.go`
 - Modify: `internal/version/github_test.go`
 
-- [ ] добавить тип `RepoData` и функцию `GetRepoData(githubField)`: кэш-хит при свежем TTL и заполненных полях; иначе `fetchRelease` + `fetchRepoInfo` + `fetchLanguages` **один раз**, запись через `updateCacheEntry`.
-- [ ] переориентировать `GetLatest`/`GetRepoCard` на общий путь (обёртки над кэшем/`GetRepoData`), убрав повторный `fetchRepoInfo`.
-- [ ] написать тест: `GetRepoData` возвращает latest+status+about+stars+languages за один вызов; повторный вызов в пределах TTL не инициирует сетевые вызовы (проверка кэш-хита).
-- [ ] написать тест на edge: пустой/невалидный `githubField` → пустой `RepoData` без паники.
-- [ ] `go test ./internal/version/` — зелёные перед следующей задачей.
+- [x] добавить тип `RepoData` и функцию `GetRepoData(githubField)`: кэш-хит при свежем TTL и заполненных полях; иначе `fetchRelease` + `fetchRepoInfo` + `fetchLanguages` **один раз**, запись через `updateCacheEntry`.
+- [x] переориентировать `GetLatest`/`GetRepoCard` на общий путь (обёртки над кэшем/`GetRepoData`), убрав повторный `fetchRepoInfo`.
+- [x] написать тест: `GetRepoData` возвращает latest+status+about+stars+languages за один вызов; повторный вызов в пределах TTL не инициирует сетевые вызовы (проверка кэш-хита).
+- [x] написать тест на edge: пустой/невалидный `githubField` → пустой `RepoData` без паники.
+- [x] `go test ./internal/version/` — зелёные перед следующей задачей.
 
 ### Task 4: Split команд модели — `installedMsg` + `remoteMsg` (C + wiring B)
 

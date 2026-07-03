@@ -55,51 +55,91 @@ type ReleaseInfo struct {
 	PublishedAt string
 }
 
+// RepoData is the combined result of a single network pass over a repository:
+// release + repo info + languages. It carries everything the TUI needs for the
+// version line and the repo card, so version and card no longer each fetch the
+// repo info separately.
+type RepoData struct {
+	Latest      string
+	RepoStatus  string
+	About       string
+	Stars       int
+	Languages   map[string]int
+	Body        string
+	HtmlUrl     string
+	PublishedAt string
+}
+
+func repoDataFromEntry(e CacheEntry) RepoData {
+	return RepoData{
+		Latest:      e.Latest,
+		RepoStatus:  e.RepoStatus,
+		About:       e.About,
+		Stars:       e.Stars,
+		Languages:   e.Languages,
+		Body:        e.Body,
+		HtmlUrl:     e.HtmlUrl,
+		PublishedAt: e.PublishedAt,
+	}
+}
+
 type Cache map[string]CacheEntry
 
-// GetLatest returns the latest release tag for a tool's github field.
-// Uses cache when fresh; fetches from GitHub API when stale.
-// Falls back to stale cache value on network error.
-func GetLatest(githubField string) string {
+// GetRepoData fetches release, repo info and languages for a tool's github
+// field in a single pass and returns the combined data. A fresh, fully
+// populated cache entry (within TTL, with languages) is served without any
+// network call. On a miss it makes one call to each endpoint and persists the
+// result atomically via updateCacheEntry; fields whose fetch fails are kept
+// from the existing entry (stale fallback), so a rate-limited release does not
+// wipe a previously known tag or card.
+func GetRepoData(githubField string) RepoData {
 	if githubField == "" {
-		return ""
+		return RepoData{}
 	}
 	repo := extractRepo(githubField)
 	if repo == "" {
-		return ""
+		return RepoData{}
 	}
 
 	cache := LoadCache()
 	entry, cached := cache[repo]
-
-	if cached && time.Since(entry.CheckedAt) < cacheTTL {
-		return entry.Latest
+	if cached && time.Since(entry.CheckedAt) < cacheTTL && entry.Languages != nil {
+		return repoDataFromEntry(entry)
 	}
 
-	info, err := fetchRelease(repo)
-	if err != nil {
-		return entry.Latest // stale value or ""
-	}
+	info, relErr := fetchRelease(repo)
+	repoStatus, about, stars, infoErr := fetchRepoInfo(repo)
+	langs, _ := fetchLanguages(repo)
 
-	repoStatus, about, stars, _ := fetchRepoInfo(repo)
+	var stored CacheEntry
 	updateCacheEntry(repo, func(existing CacheEntry) CacheEntry {
-		newEntry := CacheEntry{
-			Latest:      info.Tag,
-			Body:        info.Body,
-			HtmlUrl:     info.HtmlUrl,
-			PublishedAt: info.PublishedAt,
-			CheckedAt:   time.Now(),
-			RepoStatus:  repoStatus,
-			About:       about,
-			Stars:       stars,
-			Languages:   existing.Languages,
+		e := existing
+		e.CheckedAt = time.Now()
+		if relErr == nil {
+			e.Latest = info.Tag
+			e.Body = info.Body
+			e.HtmlUrl = info.HtmlUrl
+			e.PublishedAt = info.PublishedAt
 		}
-		if repoStatus == "" {
-			newEntry.RepoStatus = existing.RepoStatus
+		if infoErr == nil {
+			e.RepoStatus = repoStatus
+			e.About = about
+			e.Stars = stars
 		}
-		return newEntry
+		if langs != nil {
+			e.Languages = langs
+		}
+		stored = e
+		return e
 	})
-	return info.Tag
+	return repoDataFromEntry(stored)
+}
+
+// GetLatest returns the latest release tag for a tool's github field.
+// Thin wrapper over GetRepoData: uses cache when fresh, falls back to the stale
+// value on network error.
+func GetLatest(githubField string) string {
+	return GetRepoData(githubField).Latest
 }
 
 // GetCachedRepoStatus returns the repository status from cache without making a network request.
@@ -317,65 +357,20 @@ func fetchRelease(repo string) (ReleaseInfo, error) {
 	}, nil
 }
 
-// GetRepoCard returns repository metadata for display. Reads from cache when
-// fresh and languages are populated; otherwise fetches from GitHub API.
+// GetRepoCard returns repository metadata for display. Thin wrapper over
+// GetRepoData: reads from cache when fresh and languages are populated,
+// otherwise makes one network pass shared with the version lookup.
 func GetRepoCard(githubField string) RepoCard {
-	if githubField == "" {
-		return RepoCard{}
-	}
-	repo := extractRepo(githubField)
-	if repo == "" {
-		return RepoCard{}
-	}
-
-	cache := LoadCache()
-	entry, cached := cache[repo]
-
-	if cached && time.Since(entry.CheckedAt) < cacheTTL && entry.Languages != nil {
-		return RepoCard{
-			About:       entry.About,
-			Stars:       entry.Stars,
-			Languages:   entry.Languages,
-			Latest:      entry.Latest,
-			PublishedAt: entry.PublishedAt,
-			HtmlUrl:     entry.HtmlUrl,
-			Body:        entry.Body,
-			RepoStatus:  entry.RepoStatus,
-		}
-	}
-
-	repoStatus, about, stars, _ := fetchRepoInfo(repo)
-	langs, _ := fetchLanguages(repo)
-
-	var stored CacheEntry
-	updateCacheEntry(repo, func(existing CacheEntry) CacheEntry {
-		newEntry := CacheEntry{
-			Latest:      existing.Latest,
-			Body:        existing.Body,
-			HtmlUrl:     existing.HtmlUrl,
-			PublishedAt: existing.PublishedAt,
-			CheckedAt:   time.Now(),
-			RepoStatus:  repoStatus,
-			About:       about,
-			Stars:       stars,
-			Languages:   langs,
-		}
-		if repoStatus == "" {
-			newEntry.RepoStatus = existing.RepoStatus
-		}
-		stored = newEntry
-		return newEntry
-	})
-
+	d := GetRepoData(githubField)
 	return RepoCard{
-		About:       about,
-		Stars:       stars,
-		Languages:   langs,
-		Latest:      stored.Latest,
-		PublishedAt: stored.PublishedAt,
-		HtmlUrl:     stored.HtmlUrl,
-		Body:        stored.Body,
-		RepoStatus:  stored.RepoStatus,
+		About:       d.About,
+		Stars:       d.Stars,
+		Languages:   d.Languages,
+		Latest:      d.Latest,
+		PublishedAt: d.PublishedAt,
+		HtmlUrl:     d.HtmlUrl,
+		Body:        d.Body,
+		RepoStatus:  d.RepoStatus,
 	}
 }
 

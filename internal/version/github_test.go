@@ -283,6 +283,94 @@ func TestConcurrentInitLikeFetch(t *testing.T) {
 	}
 }
 
+// TestGetRepoDataSinglePass verifies GetRepoData returns latest+status+about+
+// stars+languages from one pass and that a second call within TTL is served
+// entirely from cache (no further network requests).
+func TestGetRepoDataSinglePass(t *testing.T) {
+	var mu sync.Mutex
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case len(r.URL.Path) >= 10 && r.URL.Path[len(r.URL.Path)-10:] == "/languages":
+			json.NewEncoder(w).Encode(map[string]int{"Go": 1000})
+		case len(r.URL.Path) >= 7 && r.URL.Path[len(r.URL.Path)-7:] == "/latest":
+			json.NewEncoder(w).Encode(map[string]string{
+				"tag_name":     "v3.1.4",
+				"body":         "release notes",
+				"html_url":     "https://github.com" + r.URL.Path,
+				"published_at": "2025-01-01T00:00:00Z",
+			})
+		default:
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"archived":         false,
+				"description":      "test tool",
+				"stargazers_count": 42,
+			})
+		}
+	}))
+	origAPIBase := testAPIBase
+	origCacheDir := testCacheDir
+	testAPIBase = srv.URL
+	testCacheDir = t.TempDir()
+	defer func() {
+		srv.Close()
+		testAPIBase = origAPIBase
+		testCacheDir = origCacheDir
+	}()
+
+	d := GetRepoData("github.com/owner/repo")
+	if d.Latest != "v3.1.4" {
+		t.Errorf("Latest = %q, want v3.1.4", d.Latest)
+	}
+	if d.RepoStatus != "active" {
+		t.Errorf("RepoStatus = %q, want active", d.RepoStatus)
+	}
+	if d.About != "test tool" {
+		t.Errorf("About = %q, want test tool", d.About)
+	}
+	if d.Stars != 42 {
+		t.Errorf("Stars = %d, want 42", d.Stars)
+	}
+	if d.Languages["Go"] != 1000 {
+		t.Errorf("Languages = %v, want Go:1000", d.Languages)
+	}
+
+	mu.Lock()
+	afterFirst := requests
+	mu.Unlock()
+	if afterFirst == 0 {
+		t.Fatal("expected network requests on first GetRepoData")
+	}
+
+	d2 := GetRepoData("github.com/owner/repo")
+	mu.Lock()
+	afterSecond := requests
+	mu.Unlock()
+	if afterSecond != afterFirst {
+		t.Errorf("second GetRepoData made %d extra requests, want 0 (cache hit)", afterSecond-afterFirst)
+	}
+	if d2.Latest != "v3.1.4" || d2.Languages["Go"] != 1000 {
+		t.Errorf("cache-hit RepoData = %+v, want same as first call", d2)
+	}
+}
+
+// TestGetRepoDataInvalidField verifies empty and unparseable github fields
+// return a zero RepoData without panicking or hitting the network.
+func TestGetRepoDataInvalidField(t *testing.T) {
+	for _, field := range []string{"", "onlyowner"} {
+		got := GetRepoData(field)
+		if got.Latest != "" || got.RepoStatus != "" || got.About != "" ||
+			got.Stars != 0 || got.Languages != nil || got.Body != "" ||
+			got.HtmlUrl != "" || got.PublishedAt != "" {
+			t.Errorf("GetRepoData(%q) = %+v, want zero RepoData", field, got)
+		}
+	}
+}
+
 // TestExtractRepo guards the delegation to loader.NormalizeRepo so a stored
 // github field is normalized to "owner/repo" before it reaches the GitHub API.
 func TestExtractRepo(t *testing.T) {

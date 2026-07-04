@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"regexp"
 	"strings"
 	"testing"
@@ -653,23 +654,23 @@ func countBatchedCmds(cmd tea.Cmd) int {
 	}
 }
 
-func TestFetchVersionCmd(t *testing.T) {
-	// GitHub "" keeps GetLatest/GetCachedRepoStatus offline and a nonexistent
-	// name makes InstalledVersion skip exec, so the closure runs with no I/O.
-	cmd := fetchVersionCmd(loader.Tool{Name: "nonexistent-tool-xyz", GitHub: ""})
+func TestFetchInstalledCmd(t *testing.T) {
+	// A nonexistent name makes InstalledVersion skip exec, so the closure runs
+	// with no network I/O and never touches GitHub.
+	cmd := fetchInstalledCmd(loader.Tool{Name: "nonexistent-tool-xyz", GitHub: ""})
 	if cmd == nil {
-		t.Fatal("expected non-nil tea.Cmd from fetchVersionCmd")
+		t.Fatal("expected non-nil tea.Cmd from fetchInstalledCmd")
 	}
-	msg, ok := cmd().(versionMsg)
+	msg, ok := cmd().(installedMsg)
 	if !ok {
-		t.Fatalf("expected versionMsg, got %T", cmd())
+		t.Fatalf("expected installedMsg, got %T", cmd())
 	}
 	if msg.toolName != "nonexistent-tool-xyz" {
 		t.Errorf("toolName = %q, want %q", msg.toolName, "nonexistent-tool-xyz")
 	}
 }
 
-func TestNeedsVersion(t *testing.T) {
+func TestNeedsInstalled(t *testing.T) {
 	tests := []struct {
 		name     string
 		tool     loader.Tool
@@ -677,18 +678,24 @@ func TestNeedsVersion(t *testing.T) {
 		want     bool
 	}{
 		{
-			name: "fresh tool needs version",
+			name: "fresh tool needs installed",
 			tool: loader.Tool{Name: "git", GitHub: "cli/cli"},
 			want: true,
 		},
 		{
-			name:     "cached tool does not need version",
+			name:     "known installed does not need refetch",
 			tool:     loader.Tool{Name: "git", GitHub: "cli/cli"},
-			versions: map[string]VersionInfo{"git": {}},
+			versions: map[string]VersionInfo{"git": {Installed: "1.0"}},
 			want:     false,
 		},
 		{
-			name: "version fires even without GitHub",
+			name:     "entry with only Latest still needs installed",
+			tool:     loader.Tool{Name: "git", GitHub: "cli/cli"},
+			versions: map[string]VersionInfo{"git": {Latest: "2.0"}},
+			want:     true,
+		},
+		{
+			name: "installed fires even without GitHub",
 			tool: loader.Tool{Name: "git", GitHub: ""},
 			want: true,
 		},
@@ -696,42 +703,51 @@ func TestNeedsVersion(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := &Model{versions: tt.versions}
-			if got := m.needsVersion(tt.tool); got != tt.want {
-				t.Errorf("needsVersion() = %v, want %v", got, tt.want)
+			if got := m.needsInstalled(tt.tool); got != tt.want {
+				t.Errorf("needsInstalled() = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
-func TestNeedsRepoCard(t *testing.T) {
+func TestNeedsRemote(t *testing.T) {
 	tests := []struct {
 		name      string
 		tool      loader.Tool
 		repoCards map[string]version.RepoCard
+		versions  map[string]VersionInfo
 		want      bool
 	}{
 		{
-			name: "fresh tool with GitHub needs repo card",
+			name: "fresh tool with GitHub needs remote",
 			tool: loader.Tool{Name: "git", GitHub: "cli/cli"},
 			want: true,
 		},
 		{
-			name:      "cached tool does not need repo card",
+			name:      "card and latest present: no remote",
 			tool:      loader.Tool{Name: "git", GitHub: "cli/cli"},
 			repoCards: map[string]version.RepoCard{"git": {}},
+			versions:  map[string]VersionInfo{"git": {Latest: "2.0"}},
 			want:      false,
 		},
 		{
-			name: "repo card not needed without GitHub",
+			name:      "card present but latest empty: needs remote",
+			tool:      loader.Tool{Name: "git", GitHub: "cli/cli"},
+			repoCards: map[string]version.RepoCard{"git": {}},
+			versions:  map[string]VersionInfo{"git": {Installed: "1.0"}},
+			want:      true,
+		},
+		{
+			name: "remote not needed without GitHub",
 			tool: loader.Tool{Name: "git", GitHub: ""},
 			want: false,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			m := &Model{repoCards: tt.repoCards}
-			if got := m.needsRepoCard(tt.tool); got != tt.want {
-				t.Errorf("needsRepoCard() = %v, want %v", got, tt.want)
+			m := &Model{repoCards: tt.repoCards, versions: tt.versions}
+			if got := m.needsRemote(tt.tool); got != tt.want {
+				t.Errorf("needsRemote() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -767,14 +783,14 @@ func TestAutoFetchCmdsForSelected_NoFetchWhenCached(t *testing.T) {
 		metaSelected:  0,
 		changelogData: map[string]changelogMsg{name: {}},
 		helpCache:     map[string][2]string{name: {helpModeHelp: "cached help"}},
-		versions:      map[string]VersionInfo{name: {}},
+		versions:      map[string]VersionInfo{name: {Installed: "1.0", Latest: "2.0"}},
 		repoCards:     map[string]version.RepoCard{name: {}},
 	}
-	if m.needsVersion(m.tools[0]) {
-		t.Error("needsVersion should be false when version is cached")
+	if m.needsInstalled(m.tools[0]) {
+		t.Error("needsInstalled should be false when installed version is cached")
 	}
-	if m.needsRepoCard(m.tools[0]) {
-		t.Error("needsRepoCard should be false when repo card is cached")
+	if m.needsRemote(m.tools[0]) {
+		t.Error("needsRemote should be false when repo card and latest are cached")
 	}
 	if cmd := m.autoFetchCmdsForSelected(); cmd != nil {
 		t.Fatal("expected nil Cmd when all sources are already cached")
@@ -820,33 +836,64 @@ func TestUpdateRenameInputClearsStaleCaches(t *testing.T) {
 	}
 }
 
-// TestUpdateVersionAndRepoCardMsgPopulateCaches closes the loop the rename test
+// TestUpdateInstalledAndRemoteMsgPopulateCaches closes the loop the rename test
 // opens: after stale keys are cleared, the async fetch results must repopulate
-// the caches under the (new) tool name. This drives the messages through
-// Update() to prove the toolName keying is correct end to end.
-func TestUpdateVersionAndRepoCardMsgPopulateCaches(t *testing.T) {
-	m := Model{
-		meta:          []loader.ToolMeta{{Name: "gh", GitHub: "cli/cli"}},
-		metaSelected:  0,
-		versions:      map[string]VersionInfo{},
-		repoStatus:    map[string]string{},
-		repoCards:     map[string]version.RepoCard{},
-		changelogData: map[string]changelogMsg{},
+// the caches under the (new) tool name. It also proves installedMsg and
+// remoteMsg merge into one VersionInfo without either clobbering the other's
+// field, in both arrival orders.
+func TestUpdateInstalledAndRemoteMsgPopulateCaches(t *testing.T) {
+	newModel := func() Model {
+		m := Model{
+			meta:          []loader.ToolMeta{{Name: "gh", GitHub: "cli/cli"}},
+			metaSelected:  0,
+			versions:      map[string]VersionInfo{},
+			repoStatus:    map[string]string{},
+			repoCards:     map[string]version.RepoCard{},
+			changelogData: map[string]changelogMsg{},
+		}
+		m.tools = loader.ToolsFromMeta(m.meta)
+		return m
 	}
-	m.tools = loader.ToolsFromMeta(m.meta)
 
-	updated, _ := m.Update(versionMsg{toolName: "gh", installed: "1.0", latest: "2.0", repoStatus: "active"})
+	// installed first, then remote.
+	m := newModel()
+	updated, _ := m.Update(installedMsg{toolName: "gh", installed: "1.0"})
 	nm := updated.(Model)
-	if got, ok := nm.versions["gh"]; !ok || got.Installed != "1.0" || got.Latest != "2.0" {
-		t.Errorf("versions[gh] = %+v (ok=%v), want {Installed:1.0 Latest:2.0}", got, ok)
+	if got := nm.versions["gh"]; got.Installed != "1.0" {
+		t.Errorf("after installedMsg versions[gh].Installed = %q, want 1.0", got.Installed)
+	}
+	updated, _ = nm.Update(remoteMsg{toolName: "gh", latest: "2.0", repoStatus: "active", card: version.RepoCard{About: "x"}})
+	nm = updated.(Model)
+	if got := nm.versions["gh"]; got.Installed != "1.0" || got.Latest != "2.0" {
+		t.Errorf("versions[gh] = %+v, want {Installed:1.0 Latest:2.0}", got)
 	}
 	if got := nm.repoStatus["gh"]; got != "active" {
-		t.Errorf("repoStatus[gh] = %q, want %q", got, "active")
+		t.Errorf("repoStatus[gh] = %q, want active", got)
+	}
+	if got, ok := nm.repoCards["gh"]; !ok || got.About != "x" {
+		t.Errorf("repoCards[gh] = %+v (ok=%v), want About:x", got, ok)
 	}
 
-	updated2, _ := nm.Update(repoCardMsg{toolName: "gh", card: version.RepoCard{}})
-	nm2 := updated2.(Model)
-	if _, ok := nm2.repoCards["gh"]; !ok {
-		t.Errorf("repoCards not populated under name 'gh' after repoCardMsg")
+	// remote first, then installed — installed must not wipe Latest.
+	m = newModel()
+	updated, _ = m.Update(remoteMsg{toolName: "gh", latest: "2.0", card: version.RepoCard{}})
+	nm = updated.(Model)
+	updated, _ = nm.Update(installedMsg{toolName: "gh", installed: "1.0"})
+	nm = updated.(Model)
+	if got := nm.versions["gh"]; got.Installed != "1.0" || got.Latest != "2.0" {
+		t.Errorf("reversed order versions[gh] = %+v, want {Installed:1.0 Latest:2.0}", got)
+	}
+
+	// remoteMsg with err set must not touch the caches.
+	m = newModel()
+	updated, _ = m.Update(remoteMsg{toolName: "gh", latest: "2.0", err: errBoom})
+	nm = updated.(Model)
+	if _, ok := nm.repoCards["gh"]; ok {
+		t.Errorf("repoCards populated despite remoteMsg error")
+	}
+	if got := nm.versions["gh"]; got.Latest != "" {
+		t.Errorf("versions[gh].Latest = %q, want empty on remoteMsg error", got.Latest)
 	}
 }
+
+var errBoom = errors.New("boom")

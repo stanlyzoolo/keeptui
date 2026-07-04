@@ -55,64 +55,103 @@ type ReleaseInfo struct {
 	PublishedAt string
 }
 
+// RepoData is the combined result of a single network pass over a repository:
+// release + repo info + languages. It carries everything the TUI needs for the
+// version line and the repo card, so version and card no longer each fetch the
+// repo info separately.
+type RepoData struct {
+	Latest      string
+	RepoStatus  string
+	About       string
+	Stars       int
+	Languages   map[string]int
+	Body        string
+	HtmlUrl     string
+	PublishedAt string
+}
+
+func repoDataFromEntry(e CacheEntry) RepoData {
+	return RepoData{
+		Latest:      e.Latest,
+		RepoStatus:  e.RepoStatus,
+		About:       e.About,
+		Stars:       e.Stars,
+		Languages:   e.Languages,
+		Body:        e.Body,
+		HtmlUrl:     e.HtmlUrl,
+		PublishedAt: e.PublishedAt,
+	}
+}
+
 type Cache map[string]CacheEntry
 
-// GetLatest returns the latest release tag for a tool's github field.
-// Uses cache when fresh; fetches from GitHub API when stale.
-// Falls back to stale cache value on network error.
-func GetLatest(githubField string) string {
+// GetRepoData fetches release, repo info and languages for a tool's github
+// field in a single pass and returns the combined data. A cache entry within
+// TTL is served without any network call. On a miss it makes one call to each
+// endpoint and persists the result atomically via updateCacheEntry; fields
+// whose fetch fails are kept from the existing entry (stale fallback), so a
+// rate-limited release does not wipe a previously known tag or card. Freshness
+// is decided on CheckedAt alone: a failed languages fetch leaves Languages nil
+// but must not force a full three-endpoint re-fetch on every subsequent start.
+// A total failure (both release and repo info fail) is not written at all, so a
+// cold-cache outage does not poison the entry as fresh-but-empty for the TTL.
+func GetRepoData(githubField string) RepoData {
 	if githubField == "" {
-		return ""
+		return RepoData{}
 	}
 	repo := extractRepo(githubField)
 	if repo == "" {
-		return ""
+		return RepoData{}
 	}
 
 	cache := LoadCache()
 	entry, cached := cache[repo]
-
 	if cached && time.Since(entry.CheckedAt) < cacheTTL {
-		return entry.Latest
+		return repoDataFromEntry(entry)
 	}
 
-	info, err := fetchRelease(repo)
-	if err != nil {
-		return entry.Latest // stale value or ""
+	info, relErr := fetchRelease(repo)
+	repoStatus, about, stars, infoErr := fetchRepoInfo(repo)
+	langs, _ := fetchLanguages(repo)
+
+	// Total fetch failure (offline / rate-limited): both the release and the repo
+	// info endpoints failed. Do not write a fresh-but-empty entry — since freshness
+	// is decided on CheckedAt alone, that would read back as a valid cache hit and
+	// suppress any retry for the full TTL. Return the stale entry (zero value if the
+	// cache was cold) so the next start retries.
+	if relErr != nil && infoErr != nil {
+		return repoDataFromEntry(entry)
 	}
 
-	repoStatus, about, stars, _ := fetchRepoInfo(repo)
-	newEntry := CacheEntry{
-		Latest:      info.Tag,
-		Body:        info.Body,
-		HtmlUrl:     info.HtmlUrl,
-		PublishedAt: info.PublishedAt,
-		CheckedAt:   time.Now(),
-		RepoStatus:  repoStatus,
-		About:       about,
-		Stars:       stars,
-		Languages:   entry.Languages,
-	}
-	if repoStatus == "" && cached {
-		newEntry.RepoStatus = entry.RepoStatus
-	}
-	cache[repo] = newEntry
-	SaveCache(cache)
-	return info.Tag
+	var stored CacheEntry
+	updateCacheEntry(repo, func(existing CacheEntry) CacheEntry {
+		e := existing
+		e.CheckedAt = time.Now()
+		if relErr == nil {
+			e.Latest = info.Tag
+			e.Body = info.Body
+			e.HtmlUrl = info.HtmlUrl
+			e.PublishedAt = info.PublishedAt
+		}
+		if infoErr == nil {
+			e.RepoStatus = repoStatus
+			e.About = about
+			e.Stars = stars
+		}
+		if langs != nil {
+			e.Languages = langs
+		}
+		stored = e
+		return e
+	})
+	return repoDataFromEntry(stored)
 }
 
-// GetCachedRepoStatus returns the repository status from cache without making a network request.
-// Returns "active", "archived", or "" if not yet known.
-func GetCachedRepoStatus(githubField string) string {
-	if githubField == "" {
-		return ""
-	}
-	repo := extractRepo(githubField)
-	if repo == "" {
-		return ""
-	}
-	cache := LoadCache()
-	return cache[repo].RepoStatus
+// GetLatest returns the latest release tag for a tool's github field.
+// Thin wrapper over GetRepoData: uses cache when fresh, falls back to the stale
+// value on network error.
+func GetLatest(githubField string) string {
+	return GetRepoData(githubField).Latest
 }
 
 // FetchAndCache force-fetches the latest release, bypassing the cache TTL.
@@ -129,27 +168,23 @@ func FetchAndCache(githubField string) (string, error) {
 	}
 	repoStatus, about, stars, _ := fetchRepoInfo(repo)
 
-	cacheMu.Lock()
-	defer cacheMu.Unlock()
-
-	cache := LoadCache()
-	existing := cache[repo]
-	newEntry := CacheEntry{
-		Latest:      info.Tag,
-		Body:        info.Body,
-		HtmlUrl:     info.HtmlUrl,
-		PublishedAt: info.PublishedAt,
-		CheckedAt:   time.Now(),
-		RepoStatus:  repoStatus,
-		About:       about,
-		Stars:       stars,
-		Languages:   existing.Languages,
-	}
-	if repoStatus == "" {
-		newEntry.RepoStatus = existing.RepoStatus
-	}
-	cache[repo] = newEntry
-	SaveCache(cache)
+	updateCacheEntry(repo, func(existing CacheEntry) CacheEntry {
+		newEntry := CacheEntry{
+			Latest:      info.Tag,
+			Body:        info.Body,
+			HtmlUrl:     info.HtmlUrl,
+			PublishedAt: info.PublishedAt,
+			CheckedAt:   time.Now(),
+			RepoStatus:  repoStatus,
+			About:       about,
+			Stars:       stars,
+			Languages:   existing.Languages,
+		}
+		if repoStatus == "" {
+			newEntry.RepoStatus = existing.RepoStatus
+		}
+		return newEntry
+	})
 	return info.Tag, nil
 }
 
@@ -179,19 +214,19 @@ func GetChangelog(githubField string) (ReleaseInfo, error) {
 		return ReleaseInfo{}, err
 	}
 
-	existing := cache[repo]
-	cache[repo] = CacheEntry{
-		Latest:      info.Tag,
-		Body:        info.Body,
-		HtmlUrl:     info.HtmlUrl,
-		PublishedAt: info.PublishedAt,
-		CheckedAt:   time.Now(),
-		RepoStatus:  existing.RepoStatus,
-		About:       existing.About,
-		Stars:       existing.Stars,
-		Languages:   existing.Languages,
-	}
-	SaveCache(cache)
+	updateCacheEntry(repo, func(existing CacheEntry) CacheEntry {
+		return CacheEntry{
+			Latest:      info.Tag,
+			Body:        info.Body,
+			HtmlUrl:     info.HtmlUrl,
+			PublishedAt: info.PublishedAt,
+			CheckedAt:   time.Now(),
+			RepoStatus:  existing.RepoStatus,
+			About:       existing.About,
+			Stars:       existing.Stars,
+			Languages:   existing.Languages,
+		}
+	})
 	return info, nil
 }
 
@@ -320,62 +355,20 @@ func fetchRelease(repo string) (ReleaseInfo, error) {
 	}, nil
 }
 
-// GetRepoCard returns repository metadata for display. Reads from cache when
-// fresh and languages are populated; otherwise fetches from GitHub API.
+// GetRepoCard returns repository metadata for display. Thin wrapper over
+// GetRepoData: reads from cache when fresh and languages are populated,
+// otherwise makes one network pass shared with the version lookup.
 func GetRepoCard(githubField string) RepoCard {
-	if githubField == "" {
-		return RepoCard{}
-	}
-	repo := extractRepo(githubField)
-	if repo == "" {
-		return RepoCard{}
-	}
-
-	cache := LoadCache()
-	entry, cached := cache[repo]
-
-	if cached && time.Since(entry.CheckedAt) < cacheTTL && entry.Languages != nil {
-		return RepoCard{
-			About:       entry.About,
-			Stars:       entry.Stars,
-			Languages:   entry.Languages,
-			Latest:      entry.Latest,
-			PublishedAt: entry.PublishedAt,
-			HtmlUrl:     entry.HtmlUrl,
-			Body:        entry.Body,
-			RepoStatus:  entry.RepoStatus,
-		}
-	}
-
-	repoStatus, about, stars, _ := fetchRepoInfo(repo)
-	langs, _ := fetchLanguages(repo)
-
-	newEntry := CacheEntry{
-		Latest:      entry.Latest,
-		Body:        entry.Body,
-		HtmlUrl:     entry.HtmlUrl,
-		PublishedAt: entry.PublishedAt,
-		CheckedAt:   time.Now(),
-		RepoStatus:  repoStatus,
-		About:       about,
-		Stars:       stars,
-		Languages:   langs,
-	}
-	if repoStatus == "" && cached {
-		newEntry.RepoStatus = entry.RepoStatus
-	}
-	cache[repo] = newEntry
-	SaveCache(cache)
-
+	d := GetRepoData(githubField)
 	return RepoCard{
-		About:       about,
-		Stars:       stars,
-		Languages:   langs,
-		Latest:      newEntry.Latest,
-		PublishedAt: newEntry.PublishedAt,
-		HtmlUrl:     newEntry.HtmlUrl,
-		Body:        newEntry.Body,
-		RepoStatus:  newEntry.RepoStatus,
+		About:       d.About,
+		Stars:       d.Stars,
+		Languages:   d.Languages,
+		Latest:      d.Latest,
+		PublishedAt: d.PublishedAt,
+		HtmlUrl:     d.HtmlUrl,
+		Body:        d.Body,
+		RepoStatus:  d.RepoStatus,
 	}
 }
 
@@ -408,6 +401,19 @@ func LoadCache() Cache {
 		return Cache{}
 	}
 	return c
+}
+
+// updateCacheEntry atomically applies mutate to a single repo's cache entry.
+// It holds cacheMu across a fresh LoadCache → mutate → SaveCache cycle so that
+// concurrent goroutines never overwrite each other's writes: mutate receives the
+// current on-disk entry (or a zero value if absent) and must return the entry to
+// store, pulling any fields it doesn't set from existing.
+func updateCacheEntry(repo string, mutate func(existing CacheEntry) CacheEntry) {
+	cacheMu.Lock()
+	defer cacheMu.Unlock()
+	cache := LoadCache()
+	cache[repo] = mutate(cache[repo])
+	SaveCache(cache)
 }
 
 func SaveCache(c Cache) {

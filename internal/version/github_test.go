@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 )
 
 // TestConcurrentFetch verifies that parallel FetchAndCache calls for multiple
@@ -66,6 +67,505 @@ func TestConcurrentFetch(t *testing.T) {
 	for _, repo := range repos {
 		if _, ok := cache[repo]; !ok {
 			t.Errorf("cache missing entry for %q after concurrent FetchAndCache", repo)
+		}
+	}
+}
+
+// TestUpdateCacheEntryConcurrentRepos verifies that parallel updateCacheEntry
+// calls for distinct repos all persist — no write is lost to a lost-update race.
+func TestUpdateCacheEntryConcurrentRepos(t *testing.T) {
+	dir := t.TempDir()
+	origCacheDir := testCacheDir
+	defer func() { testCacheDir = origCacheDir }()
+	testCacheDir = dir
+
+	const m = 20
+	repos := make([]string, m)
+	for i := 0; i < m; i++ {
+		repos[i] = "owner/tool" + string(rune('A'+i))
+	}
+
+	var wg sync.WaitGroup
+	for _, repo := range repos {
+		wg.Add(1)
+		go func(r string) {
+			defer wg.Done()
+			updateCacheEntry(r, func(existing CacheEntry) CacheEntry {
+				existing.Latest = r
+				return existing
+			})
+		}(repo)
+	}
+	wg.Wait()
+
+	cache := LoadCache()
+	if len(cache) != m {
+		t.Fatalf("cache has %d entries, want %d", len(cache), m)
+	}
+	for _, repo := range repos {
+		entry, ok := cache[repo]
+		if !ok {
+			t.Errorf("cache missing entry for %q", repo)
+			continue
+		}
+		if entry.Latest != repo {
+			t.Errorf("entry %q Latest = %q, want %q", repo, entry.Latest, repo)
+		}
+	}
+}
+
+// TestUpdateCacheEntryConcurrentSameRepo verifies that concurrent updates to a
+// single repo are serialized: the final count reflects every increment, so no
+// read-modify-write is lost.
+func TestUpdateCacheEntryConcurrentSameRepo(t *testing.T) {
+	dir := t.TempDir()
+	origCacheDir := testCacheDir
+	defer func() { testCacheDir = origCacheDir }()
+	testCacheDir = dir
+
+	const n = 50
+	const repo = "owner/tool"
+
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			updateCacheEntry(repo, func(existing CacheEntry) CacheEntry {
+				existing.Stars++
+				return existing
+			})
+		}()
+	}
+	wg.Wait()
+
+	cache := LoadCache()
+	if got := cache[repo].Stars; got != n {
+		t.Errorf("Stars = %d after %d concurrent increments, want %d", got, n, n)
+	}
+}
+
+// githubTestServer returns an httptest server that answers the release, repo
+// info and languages endpoints, plus a cleanup that restores the package vars.
+func githubTestServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case len(r.URL.Path) >= 10 && r.URL.Path[len(r.URL.Path)-10:] == "/languages":
+			json.NewEncoder(w).Encode(map[string]int{"Go": 1000})
+		case len(r.URL.Path) >= 7 && r.URL.Path[len(r.URL.Path)-7:] == "/latest":
+			json.NewEncoder(w).Encode(map[string]string{
+				"tag_name":     "v2.3.4",
+				"body":         "release notes",
+				"html_url":     "https://github.com" + r.URL.Path,
+				"published_at": "2025-01-01T00:00:00Z",
+			})
+		default:
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"archived":         false,
+				"description":      "test tool",
+				"stargazers_count": 42,
+			})
+		}
+	}))
+	origAPIBase := testAPIBase
+	origCacheDir := testCacheDir
+	testAPIBase = srv.URL
+	testCacheDir = t.TempDir()
+	t.Cleanup(func() {
+		srv.Close()
+		testAPIBase = origAPIBase
+		testCacheDir = origCacheDir
+	})
+	return srv
+}
+
+// TestGetLatestReadAfterWrite verifies GetLatest persists its result through
+// updateCacheEntry so a subsequent read within TTL is served from cache.
+func TestGetLatestReadAfterWrite(t *testing.T) {
+	githubTestServer(t)
+
+	if got := GetLatest("github.com/owner/repo"); got != "v2.3.4" {
+		t.Fatalf("GetLatest = %q, want v2.3.4", got)
+	}
+	entry, ok := LoadCache()["owner/repo"]
+	if !ok {
+		t.Fatal("cache missing entry after GetLatest")
+	}
+	if entry.Latest != "v2.3.4" {
+		t.Errorf("cached Latest = %q, want v2.3.4", entry.Latest)
+	}
+	if entry.RepoStatus != "active" {
+		t.Errorf("cached RepoStatus = %q, want active", entry.RepoStatus)
+	}
+}
+
+// TestGetRepoCardReadAfterWrite verifies GetRepoCard persists languages and
+// preserves the Latest tag already stored by an earlier GetLatest.
+func TestGetRepoCardReadAfterWrite(t *testing.T) {
+	githubTestServer(t)
+
+	GetLatest("github.com/owner/repo")
+	card := GetRepoCard("github.com/owner/repo")
+	if card.Languages["Go"] != 1000 {
+		t.Errorf("card languages = %v, want Go:1000", card.Languages)
+	}
+	if card.Latest != "v2.3.4" {
+		t.Errorf("card Latest = %q, want v2.3.4 (preserved from GetLatest)", card.Latest)
+	}
+	entry := LoadCache()["owner/repo"]
+	if entry.Languages == nil {
+		t.Error("cached Languages nil after GetRepoCard")
+	}
+	if entry.Latest != "v2.3.4" {
+		t.Errorf("cached Latest = %q, want v2.3.4 preserved", entry.Latest)
+	}
+}
+
+// TestGetChangelogReadAfterWrite verifies GetChangelog persists body and
+// preserves languages already populated by GetRepoCard.
+func TestGetChangelogReadAfterWrite(t *testing.T) {
+	githubTestServer(t)
+
+	GetRepoCard("github.com/owner/repo")
+	info, err := GetChangelog("github.com/owner/repo")
+	if err != nil {
+		t.Fatalf("GetChangelog: %v", err)
+	}
+	if info.Body != "release notes" {
+		t.Errorf("changelog Body = %q, want release notes", info.Body)
+	}
+	entry := LoadCache()["owner/repo"]
+	if entry.Body != "release notes" {
+		t.Errorf("cached Body = %q, want release notes", entry.Body)
+	}
+	if entry.Languages["Go"] != 1000 {
+		t.Errorf("cached Languages = %v, want Go:1000 preserved from GetRepoCard", entry.Languages)
+	}
+}
+
+// TestConcurrentInitLikeFetch mimics startup: for several repos GetLatest and
+// GetRepoCard run in parallel; every repo must end up with both release and
+// card fields intact — no lost write between the two paths.
+func TestConcurrentInitLikeFetch(t *testing.T) {
+	githubTestServer(t)
+
+	repos := []string{"owner/toolA", "owner/toolB", "owner/toolC", "owner/toolD"}
+	var wg sync.WaitGroup
+	for _, repo := range repos {
+		field := "github.com/" + repo
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			GetLatest(field)
+		}()
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			GetRepoCard(field)
+		}()
+	}
+	wg.Wait()
+
+	cache := LoadCache()
+	for _, repo := range repos {
+		entry, ok := cache[repo]
+		if !ok {
+			t.Errorf("cache missing entry for %q", repo)
+			continue
+		}
+		if entry.Latest != "v2.3.4" {
+			t.Errorf("%q Latest = %q, want v2.3.4", repo, entry.Latest)
+		}
+		if entry.Languages["Go"] != 1000 {
+			t.Errorf("%q Languages = %v, want Go:1000", repo, entry.Languages)
+		}
+	}
+}
+
+// TestGetRepoDataSinglePass verifies GetRepoData returns latest+status+about+
+// stars+languages from one pass and that a second call within TTL is served
+// entirely from cache (no further network requests).
+func TestGetRepoDataSinglePass(t *testing.T) {
+	var mu sync.Mutex
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests++
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case len(r.URL.Path) >= 10 && r.URL.Path[len(r.URL.Path)-10:] == "/languages":
+			json.NewEncoder(w).Encode(map[string]int{"Go": 1000})
+		case len(r.URL.Path) >= 7 && r.URL.Path[len(r.URL.Path)-7:] == "/latest":
+			json.NewEncoder(w).Encode(map[string]string{
+				"tag_name":     "v3.1.4",
+				"body":         "release notes",
+				"html_url":     "https://github.com" + r.URL.Path,
+				"published_at": "2025-01-01T00:00:00Z",
+			})
+		default:
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"archived":         false,
+				"description":      "test tool",
+				"stargazers_count": 42,
+			})
+		}
+	}))
+	origAPIBase := testAPIBase
+	origCacheDir := testCacheDir
+	testAPIBase = srv.URL
+	testCacheDir = t.TempDir()
+	defer func() {
+		srv.Close()
+		testAPIBase = origAPIBase
+		testCacheDir = origCacheDir
+	}()
+
+	d := GetRepoData("github.com/owner/repo")
+	if d.Latest != "v3.1.4" {
+		t.Errorf("Latest = %q, want v3.1.4", d.Latest)
+	}
+	if d.RepoStatus != "active" {
+		t.Errorf("RepoStatus = %q, want active", d.RepoStatus)
+	}
+	if d.About != "test tool" {
+		t.Errorf("About = %q, want test tool", d.About)
+	}
+	if d.Stars != 42 {
+		t.Errorf("Stars = %d, want 42", d.Stars)
+	}
+	if d.Languages["Go"] != 1000 {
+		t.Errorf("Languages = %v, want Go:1000", d.Languages)
+	}
+
+	mu.Lock()
+	afterFirst := requests
+	mu.Unlock()
+	if afterFirst == 0 {
+		t.Fatal("expected network requests on first GetRepoData")
+	}
+
+	d2 := GetRepoData("github.com/owner/repo")
+	mu.Lock()
+	afterSecond := requests
+	mu.Unlock()
+	if afterSecond != afterFirst {
+		t.Errorf("second GetRepoData made %d extra requests, want 0 (cache hit)", afterSecond-afterFirst)
+	}
+	if d2.Latest != "v3.1.4" || d2.Languages["Go"] != 1000 {
+		t.Errorf("cache-hit RepoData = %+v, want same as first call", d2)
+	}
+}
+
+// TestGetRepoDataLanguagesFailureStillCaches verifies that when the languages
+// endpoint fails (leaving Languages nil) but the other endpoints succeed, a
+// second call within TTL is still served from cache and does not trigger a full
+// three-endpoint re-fetch. This guards the regression where the cache-hit gate
+// required Languages != nil, forcing a network pass on every start for any repo
+// whose languages endpoint was flaky or rate-limited.
+func TestGetRepoDataLanguagesFailureStillCaches(t *testing.T) {
+	var mu sync.Mutex
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests++
+		mu.Unlock()
+		switch {
+		case len(r.URL.Path) >= 10 && r.URL.Path[len(r.URL.Path)-10:] == "/languages":
+			w.WriteHeader(http.StatusInternalServerError)
+		case len(r.URL.Path) >= 7 && r.URL.Path[len(r.URL.Path)-7:] == "/latest":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{
+				"tag_name":     "v1.0.0",
+				"body":         "release notes",
+				"html_url":     "https://github.com" + r.URL.Path,
+				"published_at": "2025-01-01T00:00:00Z",
+			})
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"archived":         false,
+				"description":      "test tool",
+				"stargazers_count": 7,
+			})
+		}
+	}))
+	origAPIBase := testAPIBase
+	origCacheDir := testCacheDir
+	testAPIBase = srv.URL
+	testCacheDir = t.TempDir()
+	defer func() {
+		srv.Close()
+		testAPIBase = origAPIBase
+		testCacheDir = origCacheDir
+	}()
+
+	d := GetRepoData("github.com/owner/repo")
+	if d.Latest != "v1.0.0" {
+		t.Errorf("Latest = %q, want v1.0.0", d.Latest)
+	}
+	if d.Languages != nil {
+		t.Errorf("Languages = %v, want nil after languages fetch failure", d.Languages)
+	}
+
+	mu.Lock()
+	afterFirst := requests
+	mu.Unlock()
+	if afterFirst == 0 {
+		t.Fatal("expected network requests on first GetRepoData")
+	}
+
+	d2 := GetRepoData("github.com/owner/repo")
+	mu.Lock()
+	afterSecond := requests
+	mu.Unlock()
+	if afterSecond != afterFirst {
+		t.Errorf("second GetRepoData made %d extra requests, want 0 (cache hit despite nil Languages)", afterSecond-afterFirst)
+	}
+	if d2.Latest != "v1.0.0" {
+		t.Errorf("cache-hit Latest = %q, want v1.0.0", d2.Latest)
+	}
+}
+
+// TestGetRepoDataTotalFailureDoesNotPoisonCache verifies that when both the
+// release and repo-info endpoints fail on a cold cache, GetRepoData does NOT
+// write a fresh-but-empty entry. A subsequent call must retry over the network
+// (not be served an empty cache hit) once the endpoints recover.
+func TestGetRepoDataTotalFailureDoesNotPoisonCache(t *testing.T) {
+	var mu sync.Mutex
+	requests := 0
+	fail := true
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests++
+		failing := fail
+		mu.Unlock()
+		if failing {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case len(r.URL.Path) >= 10 && r.URL.Path[len(r.URL.Path)-10:] == "/languages":
+			json.NewEncoder(w).Encode(map[string]int{"Go": 1000})
+		case len(r.URL.Path) >= 7 && r.URL.Path[len(r.URL.Path)-7:] == "/latest":
+			json.NewEncoder(w).Encode(map[string]string{"tag_name": "v2.0.0"})
+		default:
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"archived": false, "description": "test tool", "stargazers_count": 9,
+			})
+		}
+	}))
+	origAPIBase := testAPIBase
+	origCacheDir := testCacheDir
+	testAPIBase = srv.URL
+	testCacheDir = t.TempDir()
+	defer func() {
+		srv.Close()
+		testAPIBase = origAPIBase
+		testCacheDir = origCacheDir
+	}()
+
+	d := GetRepoData("github.com/owner/repo")
+	if d.Latest != "" || d.RepoStatus != "" {
+		t.Errorf("first (failing) GetRepoData = %+v, want zero RepoData", d)
+	}
+
+	// Endpoints recover; a second call must retry (no poisoned cache hit).
+	mu.Lock()
+	fail = false
+	afterFirst := requests
+	mu.Unlock()
+
+	d2 := GetRepoData("github.com/owner/repo")
+	mu.Lock()
+	afterSecond := requests
+	mu.Unlock()
+	if afterSecond == afterFirst {
+		t.Fatal("second GetRepoData made no requests, cache was poisoned by total failure")
+	}
+	if d2.Latest != "v2.0.0" {
+		t.Errorf("recovered Latest = %q, want v2.0.0", d2.Latest)
+	}
+}
+
+// TestGetRepoDataStaleFallbackOnReleaseFailure verifies that when only the
+// release endpoint fails on a re-fetch (repo info still succeeds), the failed
+// field keeps its stale cached value while the successful fields refresh. This
+// exercises the field-by-field stale fallback inside the updateCacheEntry mutate.
+func TestGetRepoDataStaleFallbackOnReleaseFailure(t *testing.T) {
+	var mu sync.Mutex
+	failRelease := false
+	stars := 11
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		fr := failRelease
+		curStars := stars
+		mu.Unlock()
+		switch {
+		case len(r.URL.Path) >= 10 && r.URL.Path[len(r.URL.Path)-10:] == "/languages":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]int{"Go": 500})
+		case len(r.URL.Path) >= 7 && r.URL.Path[len(r.URL.Path)-7:] == "/latest":
+			if fr {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"tag_name": "v1.2.3"})
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"archived": false, "description": "good tool", "stargazers_count": curStars,
+			})
+		}
+	}))
+	origAPIBase := testAPIBase
+	origCacheDir := testCacheDir
+	testAPIBase = srv.URL
+	testCacheDir = t.TempDir()
+	defer func() {
+		srv.Close()
+		testAPIBase = origAPIBase
+		testCacheDir = origCacheDir
+	}()
+
+	// Populate a good entry.
+	if d := GetRepoData("github.com/owner/repo"); d.Latest != "v1.2.3" {
+		t.Fatalf("setup: Latest = %q, want v1.2.3", d.Latest)
+	}
+
+	// Expire the cached entry so the next call re-fetches, fail only the release
+	// endpoint, and change stars so we can confirm the repo-info fields refreshed.
+	updateCacheEntry("owner/repo", func(e CacheEntry) CacheEntry {
+		e.CheckedAt = time.Now().Add(-2 * cacheTTL)
+		return e
+	})
+	mu.Lock()
+	failRelease = true
+	stars = 22
+	mu.Unlock()
+
+	d := GetRepoData("github.com/owner/repo")
+	if d.Latest != "v1.2.3" {
+		t.Errorf("stale fallback Latest = %q, want v1.2.3 preserved", d.Latest)
+	}
+	if d.Stars != 22 {
+		t.Errorf("refreshed Stars = %d, want 22 (repo info succeeded)", d.Stars)
+	}
+}
+
+// TestGetRepoDataInvalidField verifies empty and unparseable github fields
+// return a zero RepoData without panicking or hitting the network.
+func TestGetRepoDataInvalidField(t *testing.T) {
+	for _, field := range []string{"", "onlyowner"} {
+		got := GetRepoData(field)
+		if got.Latest != "" || got.RepoStatus != "" || got.About != "" ||
+			got.Stars != 0 || got.Languages != nil || got.Body != "" ||
+			got.HtmlUrl != "" || got.PublishedAt != "" {
+			t.Errorf("GetRepoData(%q) = %+v, want zero RepoData", field, got)
 		}
 	}
 }

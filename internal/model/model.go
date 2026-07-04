@@ -133,6 +133,10 @@ type Model struct {
 	// fetchRateCmd and refreshed by remote fetches. A Known==false snapshot
 	// never overwrites a previously-known value.
 	rate version.RateLimit
+
+	// showingAPIStatus toggles the L-triggered API-status overlay, which shows
+	// the token source, current rate limits, and reset time.
+	showingAPIStatus bool
 }
 
 func New(meta []loader.ToolMeta) Model {
@@ -327,6 +331,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.renaming {
 			return m.updateRenameInput(msg)
+		}
+		if m.showingAPIStatus {
+			return m.updateAPIStatus(msg)
 		}
 
 		if m.helpSearching {
@@ -623,6 +630,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 			}
+
+		case "L":
+			// Open the API-status overlay and refresh the rate numbers on demand
+			// (GET /rate_limit does not spend quota). Reached only when no other
+			// input/modal mode is active — those branches return earlier.
+			m.showingAPIStatus = true
+			return m, fetchRateCmd()
 		}
 
 		if m.focus == focusBrief {
@@ -898,6 +912,9 @@ func (m Model) View() string {
 	right := m.renderHelp()
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, middle, right)
 	layout := lipgloss.JoinVertical(lipgloss.Left, body, m.renderStatusBar())
+	if m.showingAPIStatus {
+		layout = ui.PlaceOverlay(layout, m.renderAPIStatus())
+	}
 	// Vertical margin only; no horizontal margin so panels/status bar reach the
 	// terminal edges.
 	return lipgloss.NewStyle().Margin(1, 0).Render(layout)
@@ -960,6 +977,9 @@ func (m Model) renderStatusBar() string {
 			keyHint("esc"),
 		))
 	}
+	if m.showingAPIStatus {
+		return style.Render(keyHint("r") + " refresh  " + keyHint("esc") + " close")
+	}
 	if m.statusMsg != "" {
 		return style.Render(ui.SearchPromptStyle.Render(m.statusMsg))
 	}
@@ -1012,6 +1032,90 @@ func (m Model) rateSignal() string {
 	default:
 		return ui.GithubStyle.Render(fmt.Sprintf("GH %d/%d", m.rate.Remaining, m.rate.Limit))
 	}
+}
+
+// rateIcon returns the styled indicator (none / ⚠ / ✕) for a rate snapshot,
+// sharing rateLowThreshold with the status-bar signal so the overlay and the
+// bar never disagree. Returns "" when nothing should flag.
+func rateIcon(rate version.RateLimit) string {
+	if !rate.Known {
+		return ""
+	}
+	switch {
+	case rate.Remaining == 0:
+		return ui.DangerStyle.Render("✕")
+	case rate.Remaining <= rateLowThreshold:
+		return ui.WarnStyle.Render("⚠")
+	default:
+		return ""
+	}
+}
+
+// maskToken renders a token as its first 4 and last 4 characters joined by
+// bullets (e.g. "ghp_••••••••3f2a"), never exposing the middle. Short tokens
+// are fully masked.
+func maskToken(t string) string {
+	if len(t) <= 8 {
+		return strings.Repeat("•", len(t))
+	}
+	return t[:4] + strings.Repeat("•", 8) + t[len(t)-4:]
+}
+
+// updateAPIStatus handles keys while the API-status overlay is open: [r]
+// refreshes the numbers, [esc] closes. Token entry/removal ([e]/[d]) is wired
+// in a later task.
+func (m Model) updateAPIStatus(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q":
+		m.showingAPIStatus = false
+		return m, nil
+	case "r":
+		return m, fetchRateCmd()
+	}
+	return m, nil
+}
+
+// renderAPIStatus builds the API-status overlay body: token source (masked),
+// current limits with the shared icon, and the reset time.
+func (m Model) renderAPIStatus() string {
+	var b strings.Builder
+	b.WriteString(ui.SectionLabelStyle.Render("GitHub API status") + "\n\n")
+
+	source := version.TokenSource()
+	tokenLine := "Token: " + source
+	if tok := version.Token(); tok != "" {
+		tokenLine += " (" + maskToken(tok) + ")"
+	}
+	b.WriteString(ui.InfoStyle.Render(tokenLine) + "\n")
+
+	if m.rate.Known {
+		icon := rateIcon(m.rate)
+		limitLine := fmt.Sprintf("Limit: %d / %d", m.rate.Remaining, m.rate.Limit)
+		if icon != "" {
+			limitLine = icon + " " + limitLine
+		}
+		b.WriteString(ui.InfoStyle.Render(limitLine) + "\n")
+		if !m.rate.Reset.IsZero() {
+			mins := int(time.Until(m.rate.Reset).Minutes())
+			if mins < 0 {
+				mins = 0
+			}
+			b.WriteString(ui.InfoStyle.Render(fmt.Sprintf(
+				"Reset: in %d min (%s)", mins, m.rate.Reset.Format("15:04"))) + "\n")
+		}
+	} else {
+		b.WriteString(ui.InfoStyle.Render("Limit: unknown") + "\n")
+	}
+
+	b.WriteString("\n")
+	hints := keyHint("e") + " set token  "
+	if source == "config" {
+		hints += keyHint("d") + " remove token  "
+	}
+	hints += keyHint("r") + " refresh  " + keyHint("esc") + " close"
+	b.WriteString(ui.MetaNoteStyle.Render(hints))
+
+	return ui.OverlayBorder.Render(b.String())
 }
 
 func (m Model) calcVpHeight() int {

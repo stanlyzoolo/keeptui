@@ -193,14 +193,14 @@ var (
 - Modify: `internal/model/model.go` (`showingAPIStatus` flag, `Update`, `View`, `renderStatusBar`)
 - Modify: `internal/model/render_test.go`
 
-- [ ] add `showingAPIStatus` flag; `L` key opens the overlay and fires `fetchRateCmd` — **guarded**: handle `L` only when no input/modal mode is active (`tracking`/`confirmingUntrack`/`renaming`/`editingNote`/`editingTags`/search and, inside the overlay, the token-input sub-mode)
-- [ ] render overlay via `ui.PlaceOverlay` — English labels: `Token: <source> (masked)`, `Limit: <icon> R / L`, `Reset: in X min (HH:MM)`, action hints `[e] set token  [d] remove token  [r] refresh  [esc] close`
-- [ ] icon next to `Limit` uses `rateLowThreshold` (none / `⚠` / `✕`) — single source of truth shared with status bar
-- [ ] `[r]` refresh → `fetchRateCmd` (updates `m.rate`, overlay stays open); `[esc]` closes; add matching `renderStatusBar()` branch for the overlay mode
-- [ ] show `[d]` only when `TokenSource()=="config"`
-- [ ] add token-masking helper (`ghp_••••••••3f2a`, first 4 + last 4)
-- [ ] write tests: overlay renders masked token + limit line + correct icon; `[d]` hidden for env source; masking helper output
-- [ ] run tests — must pass before task 7
+- [x] add `showingAPIStatus` flag; `L` key opens the overlay and fires `fetchRateCmd` — **guarded**: handle `L` only when no input/modal mode is active (`tracking`/`confirmingUntrack`/`renaming`/`editingNote`/`editingTags`/search and, inside the overlay, the token-input sub-mode)
+- [x] render overlay via `ui.PlaceOverlay` — English labels: `Token: <source> (masked)`, `Limit: <icon> R / L`, `Reset: in X min (HH:MM)`, action hints `[e] set token  [d] remove token  [r] refresh  [esc] close`
+- [x] icon next to `Limit` uses `rateLowThreshold` (none / `⚠` / `✕`) — single source of truth shared with status bar
+- [x] `[r]` refresh → `fetchRateCmd` (updates `m.rate`, overlay stays open); `[esc]` closes; add matching `renderStatusBar()` branch for the overlay mode
+- [x] show `[d]` only when `TokenSource()=="config"`
+- [x] add token-masking helper (`ghp_••••••••3f2a`, first 4 + last 4)
+- [x] write tests: overlay renders masked token + limit line + correct icon; `[d]` hidden for env source; masking helper output
+- [x] run tests — must pass before task 7
 
 ### Task 7: Token entry, validation, and removal in the overlay
 

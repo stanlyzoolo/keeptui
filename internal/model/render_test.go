@@ -1022,3 +1022,66 @@ func TestRemoteMsgRateLimitedHint(t *testing.T) {
 		t.Errorf("m.rate = %+v, want Known with Remaining 0", nm.rate)
 	}
 }
+
+func TestMaskToken(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"ghp_1234567890abcdef3f2a", "ghp_••••••••3f2a"},
+		{"12345678", "••••••••"},
+		{"abc", "•••"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		if got := maskToken(tt.in); got != tt.want {
+			t.Errorf("maskToken(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestRenderAPIStatusOverlay(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "ghp_1234567890abcdef3f2a")
+
+	m := Model{width: 80, height: 24, showingAPIStatus: true}
+	m.rate = version.RateLimit{Known: true, Remaining: 0, Limit: 60}
+	got := m.renderAPIStatus()
+
+	for _, want := range []string{"GitHub API status", "env", "ghp_••••••••3f2a", "0 / 60", "✕", "[e]", "[r]", "[esc]"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("overlay = %q, missing %q", got, want)
+		}
+	}
+	// [d] remove token is hidden for the env source.
+	if strings.Contains(got, "remove token") {
+		t.Errorf("overlay = %q, should not offer remove token for env source", got)
+	}
+}
+
+func TestRenderAPIStatusWarnIcon(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+
+	m := Model{width: 80, height: 24, showingAPIStatus: true}
+	m.rate = version.RateLimit{Known: true, Remaining: rateLowThreshold, Limit: 60}
+	got := m.renderAPIStatus()
+	if !strings.Contains(got, "⚠") {
+		t.Errorf("overlay = %q, missing warn icon", got)
+	}
+}
+
+func TestAPIStatusOverlayToggle(t *testing.T) {
+	m := Model{width: 80, height: 24, focus: focusTools, ready: true}
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("L")})
+	nm := updated.(Model)
+	if !nm.showingAPIStatus {
+		t.Fatalf("pressing L did not open the API-status overlay")
+	}
+	if cmd == nil {
+		t.Errorf("pressing L should fire a rate fetch cmd")
+	}
+	// esc closes it.
+	updated2, _ := nm.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if updated2.(Model).showingAPIStatus {
+		t.Errorf("esc did not close the API-status overlay")
+	}
+}

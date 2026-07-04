@@ -95,6 +95,12 @@ func ClearToken() error {
 	return nil
 }
 
+// Token returns the effective GitHub token (env precedence, else config file),
+// or "" when none is set. Used by the UI to render a masked preview.
+func Token() string {
+	return resolveToken()
+}
+
 // TokenSource reports where the effective token comes from: "env", "config",
 // or "none".
 func TokenSource() string {

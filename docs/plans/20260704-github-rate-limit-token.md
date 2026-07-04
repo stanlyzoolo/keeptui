@@ -218,11 +218,11 @@ var (
 
 ### Task 8: Verify acceptance criteria
 
-- [ ] verify all Overview requirements: hybrid rate read, status-bar signal, overlay, in-TUI token entry with validation, `0600` storage, graceful degradation
-- [ ] verify edge cases: env token present (config `[d]` hidden), no token + exhausted limit (danger signal, no modal error), malformed `/rate_limit` response
-- [ ] run `go build .`
-- [ ] run `go vet ./...`
-- [ ] run full test suite: `go test ./...`
+- [x] verify all Overview requirements: hybrid rate read, status-bar signal, overlay, in-TUI token entry with validation, `0600` storage, graceful degradation
+- [x] verify edge cases: env token present (config `[d]` hidden), no token + exhausted limit (danger signal, no modal error), malformed `/rate_limit` response
+- [x] run `go build .`
+- [x] run `go vet ./...`
+- [x] run full test suite: `go test ./...`
 
 ### Task 9: Update documentation
 

@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -48,7 +49,16 @@ type remoteMsg struct {
 	latest     string
 	repoStatus string
 	card       version.RepoCard
+	rate       version.RateLimit
 	err        error
+}
+
+// rateMsg carries a rate-limit snapshot fetched from GET /rate_limit, which
+// does not spend core quota. It seeds/refreshes m.rate independently of any
+// per-tool remote fetch (e.g. on startup and on the API-status overlay refresh).
+type rateMsg struct {
+	rate version.RateLimit
+	err  error
 }
 
 type changelogMsg struct {
@@ -118,6 +128,11 @@ type Model struct {
 	toolsW int
 	briefW int
 	helpW  int
+
+	// rate is the latest GitHub rate-limit snapshot, seeded on startup by
+	// fetchRateCmd and refreshed by remote fetches. A Known==false snapshot
+	// never overwrites a previously-known value.
+	rate version.RateLimit
 }
 
 func New(meta []loader.ToolMeta) Model {
@@ -165,7 +180,10 @@ func New(meta []loader.ToolMeta) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	cmds := make([]tea.Cmd, 0, len(m.tools)*2)
+	cmds := make([]tea.Cmd, 0, len(m.tools)*2+1)
+	// Seed the rate-limit signal up front; on warm-cache starts remote fetches
+	// make no request, so this is the only observation that populates m.rate.
+	cmds = append(cmds, fetchRateCmd())
 	for _, t := range m.tools {
 		cmds = append(cmds, fetchInstalledCmd(t))
 		if t.GitHub != "" {
@@ -212,6 +230,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case remoteMsg:
+		// Merge the rate snapshot without clobbering a known value with an
+		// unknown one (cache-hit remote fetches make no request, so carry
+		// Known==false).
+		if msg.rate.Known {
+			m.rate = msg.rate
+		}
 		if msg.err == nil {
 			info := m.versions[msg.toolName]
 			info.Latest = msg.latest
@@ -222,6 +246,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.repoCards[msg.toolName] = msg.card
 			m.toolsViewport.SetContent(m.renderLeftContent())
 			m.briefViewport.SetContent(m.renderCard())
+		} else if msg.repoStatus == "rate-limited" {
+			// Rate-limited with no card to show: mark the tool so the card can
+			// render "rate limited — press [L]" instead of a bare failure.
+			m.repoStatus[msg.toolName] = "rate-limited"
+			m.briefViewport.SetContent(m.renderCard())
+		}
+		return m, nil
+
+	case rateMsg:
+		// Non-clobber merge: only a successful, Known snapshot updates m.rate.
+		if msg.err == nil && msg.rate.Known {
+			m.rate = msg.rate
 		}
 		return m, nil
 
@@ -1424,10 +1460,16 @@ func fetchInstalledCmd(t loader.Tool) tea.Cmd {
 func fetchRemoteCmd(t loader.Tool) tea.Cmd {
 	return func() tea.Msg {
 		d := version.GetRepoData(t.GitHub)
+		repoStatus := d.RepoStatus
+		// Rate-limited and no data came back: signal the card to render a
+		// "rate limited" hint. This gives ErrRateLimited a real runtime consumer.
+		if errors.Is(d.Err, version.ErrRateLimited) && d.Latest == "" && d.About == "" {
+			repoStatus = "rate-limited"
+		}
 		return remoteMsg{
 			toolName:   t.Name,
 			latest:     d.Latest,
-			repoStatus: d.RepoStatus,
+			repoStatus: repoStatus,
 			card: version.RepoCard{
 				About:       d.About,
 				Stars:       d.Stars,
@@ -1438,7 +1480,20 @@ func fetchRemoteCmd(t loader.Tool) tea.Cmd {
 				Body:        d.Body,
 				RepoStatus:  d.RepoStatus,
 			},
+			rate: version.Rate(),
+			err:  d.Err,
 		}
+	}
+}
+
+// fetchRateCmd queries GET /rate_limit, which reports the current quota without
+// spending it, and emits a rateMsg. Fired on startup to seed the status-bar
+// signal even on warm-cache starts (where remote fetches make no request) and
+// on demand from the API-status overlay.
+func fetchRateCmd() tea.Cmd {
+	return func() tea.Msg {
+		rate, err := version.FetchRate()
+		return rateMsg{rate: rate, err: err}
 	}
 }
 

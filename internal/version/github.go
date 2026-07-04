@@ -247,6 +247,11 @@ type RepoData struct {
 	Body        string
 	HtmlUrl     string
 	PublishedAt string
+	// Err carries a classified fetch error (currently only ErrRateLimited) so
+	// callers can degrade gracefully via errors.Is. It is set when a release or
+	// repo-info fetch was rejected for rate limiting; the returned data may still
+	// hold stale values from the cache.
+	Err error
 }
 
 func repoDataFromEntry(e CacheEntry) RepoData {
@@ -293,13 +298,23 @@ func GetRepoData(githubField string) RepoData {
 	repoStatus, about, stars, infoErr := fetchRepoInfo(repo)
 	langs, _ := fetchLanguages(repo)
 
+	// Surface a rate-limit classification so the UI can render "rate limited"
+	// instead of a bare failure. The data itself may still carry stale cache
+	// values; the error is advisory.
+	var rlErr error
+	if errors.Is(relErr, ErrRateLimited) || errors.Is(infoErr, ErrRateLimited) {
+		rlErr = ErrRateLimited
+	}
+
 	// Total fetch failure (offline / rate-limited): both the release and the repo
 	// info endpoints failed. Do not write a fresh-but-empty entry — since freshness
 	// is decided on CheckedAt alone, that would read back as a valid cache hit and
 	// suppress any retry for the full TTL. Return the stale entry (zero value if the
 	// cache was cold) so the next start retries.
 	if relErr != nil && infoErr != nil {
-		return repoDataFromEntry(entry)
+		d := repoDataFromEntry(entry)
+		d.Err = rlErr
+		return d
 	}
 
 	var stored CacheEntry
@@ -323,7 +338,9 @@ func GetRepoData(githubField string) RepoData {
 		stored = e
 		return e
 	})
-	return repoDataFromEntry(stored)
+	d := repoDataFromEntry(stored)
+	d.Err = rlErr
+	return d
 }
 
 // GetLatest returns the latest release tag for a tool's github field.

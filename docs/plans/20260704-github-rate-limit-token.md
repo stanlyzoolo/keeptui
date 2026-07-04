@@ -166,13 +166,13 @@ var (
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/*_test.go` (message/handler tests)
 
-- [ ] add `rate version.RateLimit` field to `remoteMsg`; set it from `version.Rate()` in `fetchRemoteCmd` after the network call
-- [ ] set `remoteMsg.repoStatus` hint (e.g. `"rate-limited"`) when `errors.Is(err, version.ErrRateLimited)` and no cached card — gives `ErrRateLimited` a real consumer; card renders "rate limited — press [L]"
-- [ ] add `rateMsg{rate version.RateLimit; err error}` and `fetchRateCmd()` calling `version.FetchRate()`
-- [ ] fire `fetchRateCmd()` from `Init()` so the status-bar signal is populated on warm-cache starts (cache-hit `remoteMsg`s carry `Known==false`; this seeds `m.rate` once)
-- [ ] add `m.rate version.RateLimit`; in the `remoteMsg`/`rateMsg` handlers **merge** — a `Known==false` snapshot must NOT overwrite a previously-known `m.rate`
-- [ ] write tests: `remoteMsg` handler stores a `Known` rate and does not clobber a known `m.rate` with `Known==false`; `rateMsg` handler stores `rate` and surfaces error; `ErrRateLimited` sets the status hint
-- [ ] run tests — must pass before task 5
+- [x] add `rate version.RateLimit` field to `remoteMsg`; set it from `version.Rate()` in `fetchRemoteCmd` after the network call
+- [x] set `remoteMsg.repoStatus` hint (e.g. `"rate-limited"`) when `errors.Is(err, version.ErrRateLimited)` and no cached card — gives `ErrRateLimited` a real consumer; card renders "rate limited — press [L]"
+- [x] add `rateMsg{rate version.RateLimit; err error}` and `fetchRateCmd()` calling `version.FetchRate()`
+- [x] fire `fetchRateCmd()` from `Init()` so the status-bar signal is populated on warm-cache starts (cache-hit `remoteMsg`s carry `Known==false`; this seeds `m.rate` once)
+- [x] add `m.rate version.RateLimit`; in the `remoteMsg`/`rateMsg` handlers **merge** — a `Known==false` snapshot must NOT overwrite a previously-known `m.rate`
+- [x] write tests: `remoteMsg` handler stores a `Known` rate and does not clobber a known `m.rate` with `Known==false`; `rateMsg` handler stores `rate` and surfaces error; `ErrRateLimited` sets the status hint
+- [x] run tests — must pass before task 5
 
 ### Task 5: Status-bar rate-limit signal
 

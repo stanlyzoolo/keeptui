@@ -897,3 +897,77 @@ func TestUpdateInstalledAndRemoteMsgPopulateCaches(t *testing.T) {
 }
 
 var errBoom = errors.New("boom")
+
+func newRateModel() Model {
+	m := Model{
+		meta:          []loader.ToolMeta{{Name: "gh", GitHub: "cli/cli"}},
+		metaSelected:  0,
+		versions:      map[string]VersionInfo{},
+		repoStatus:    map[string]string{},
+		repoCards:     map[string]version.RepoCard{},
+		changelogData: map[string]changelogMsg{},
+	}
+	m.tools = loader.ToolsFromMeta(m.meta)
+	return m
+}
+
+// TestRemoteMsgRateMerge verifies the non-clobber merge: a Known snapshot is
+// stored, and a later Known==false snapshot (a cache-hit remote fetch) does not
+// wipe it.
+func TestRemoteMsgRateMerge(t *testing.T) {
+	known := version.RateLimit{Limit: 5000, Remaining: 4999, Known: true}
+	m := newRateModel()
+	updated, _ := m.Update(remoteMsg{toolName: "gh", latest: "2.0", rate: known})
+	nm := updated.(Model)
+	if nm.rate != known {
+		t.Fatalf("m.rate = %+v, want %+v", nm.rate, known)
+	}
+
+	// A Known==false snapshot must not overwrite the known value.
+	updated, _ = nm.Update(remoteMsg{toolName: "gh", latest: "2.1", rate: version.RateLimit{}})
+	nm = updated.(Model)
+	if nm.rate != known {
+		t.Errorf("Known==false remoteMsg clobbered m.rate: got %+v, want %+v", nm.rate, known)
+	}
+}
+
+// TestRateMsgHandler verifies rateMsg stores a Known snapshot and that an error
+// (or Known==false) leaves a previously known m.rate untouched.
+func TestRateMsgHandler(t *testing.T) {
+	known := version.RateLimit{Limit: 5000, Remaining: 100, Known: true}
+	m := newRateModel()
+	updated, _ := m.Update(rateMsg{rate: known})
+	nm := updated.(Model)
+	if nm.rate != known {
+		t.Fatalf("after rateMsg m.rate = %+v, want %+v", nm.rate, known)
+	}
+
+	// An error snapshot must not clobber the known value.
+	updated, _ = nm.Update(rateMsg{rate: version.RateLimit{Limit: 60, Known: true}, err: errBoom})
+	nm = updated.(Model)
+	if nm.rate != known {
+		t.Errorf("errored rateMsg clobbered m.rate: got %+v, want %+v", nm.rate, known)
+	}
+}
+
+// TestRemoteMsgRateLimitedHint verifies that a rate-limited remoteMsg with no
+// card sets the "rate-limited" repoStatus so the card can render a hint.
+func TestRemoteMsgRateLimitedHint(t *testing.T) {
+	m := newRateModel()
+	updated, _ := m.Update(remoteMsg{
+		toolName:   "gh",
+		repoStatus: "rate-limited",
+		rate:       version.RateLimit{Limit: 60, Remaining: 0, Known: true},
+		err:        version.ErrRateLimited,
+	})
+	nm := updated.(Model)
+	if got := nm.repoStatus["gh"]; got != "rate-limited" {
+		t.Errorf("repoStatus[gh] = %q, want rate-limited", got)
+	}
+	if _, ok := nm.repoCards["gh"]; ok {
+		t.Errorf("repoCards populated despite rate-limited error")
+	}
+	if !nm.rate.Known || nm.rate.Remaining != 0 {
+		t.Errorf("m.rate = %+v, want Known with Remaining 0", nm.rate)
+	}
+}

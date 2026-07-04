@@ -576,6 +576,9 @@ func TestGetRepoDataInvalidField(t *testing.T) {
 // remaining>0 (genuine access denial) returns a generic error. The check reads
 // the response header, not the global rl snapshot.
 func TestClassifyStatusRateLimited(t *testing.T) {
+	// Restore the shared snapshot afterwards so this test's dirty write doesn't
+	// leak into order-dependent tests reading Rate().
+	resetRate(t)
 	// Seed global rl with a "healthy" remaining to prove classifyStatus ignores it.
 	rlMu.Lock()
 	rl = RateLimit{Limit: 5000, Remaining: 5000, Known: true}

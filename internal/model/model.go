@@ -1426,6 +1426,9 @@ func (m Model) renderCard() string {
 		sb.WriteString(m.sectionDivider("info"))
 		if t.GitHub != "" {
 			sb.WriteString(ui.GithubStyle.Render("repo: "+t.GitHub) + "\n")
+			if !hasCard && m.repoStatus[t.Name] == "rate-limited" {
+				sb.WriteString(ui.WarnStyle.Render("rate limited — press [L]") + "\n")
+			}
 		}
 		if hasCard {
 			if card.Stars > 0 {

@@ -1021,6 +1021,10 @@ func TestRemoteMsgRateLimitedHint(t *testing.T) {
 	if !nm.rate.Known || nm.rate.Remaining != 0 {
 		t.Errorf("m.rate = %+v, want Known with Remaining 0", nm.rate)
 	}
+	// The card must actually render the hint, not just set the internal map.
+	if card := stripANSI(nm.renderCard()); !strings.Contains(card, "rate limited — press [L]") {
+		t.Errorf("renderCard() missing rate-limit hint; got:\n%s", card)
+	}
 }
 
 func TestMaskToken(t *testing.T) {

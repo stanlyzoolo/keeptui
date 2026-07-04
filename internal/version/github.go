@@ -93,6 +93,8 @@ type Cache map[string]CacheEntry
 // rate-limited release does not wipe a previously known tag or card. Freshness
 // is decided on CheckedAt alone: a failed languages fetch leaves Languages nil
 // but must not force a full three-endpoint re-fetch on every subsequent start.
+// A total failure (both release and repo info fail) is not written at all, so a
+// cold-cache outage does not poison the entry as fresh-but-empty for the TTL.
 func GetRepoData(githubField string) RepoData {
 	if githubField == "" {
 		return RepoData{}
@@ -111,6 +113,15 @@ func GetRepoData(githubField string) RepoData {
 	info, relErr := fetchRelease(repo)
 	repoStatus, about, stars, infoErr := fetchRepoInfo(repo)
 	langs, _ := fetchLanguages(repo)
+
+	// Total fetch failure (offline / rate-limited): both the release and the repo
+	// info endpoints failed. Do not write a fresh-but-empty entry — since freshness
+	// is decided on CheckedAt alone, that would read back as a valid cache hit and
+	// suppress any retry for the full TTL. Return the stale entry (zero value if the
+	// cache was cold) so the next start retries.
+	if relErr != nil && infoErr != nil {
+		return repoDataFromEntry(entry)
+	}
 
 	var stored CacheEntry
 	updateCacheEntry(repo, func(existing CacheEntry) CacheEntry {

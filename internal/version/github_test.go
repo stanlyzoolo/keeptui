@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"sync"
 	"testing"
+	"time"
 )
 
 // TestConcurrentFetch verifies that parallel FetchAndCache calls for multiple
@@ -425,6 +426,134 @@ func TestGetRepoDataLanguagesFailureStillCaches(t *testing.T) {
 	}
 	if d2.Latest != "v1.0.0" {
 		t.Errorf("cache-hit Latest = %q, want v1.0.0", d2.Latest)
+	}
+}
+
+// TestGetRepoDataTotalFailureDoesNotPoisonCache verifies that when both the
+// release and repo-info endpoints fail on a cold cache, GetRepoData does NOT
+// write a fresh-but-empty entry. A subsequent call must retry over the network
+// (not be served an empty cache hit) once the endpoints recover.
+func TestGetRepoDataTotalFailureDoesNotPoisonCache(t *testing.T) {
+	var mu sync.Mutex
+	requests := 0
+	fail := true
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests++
+		failing := fail
+		mu.Unlock()
+		if failing {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case len(r.URL.Path) >= 10 && r.URL.Path[len(r.URL.Path)-10:] == "/languages":
+			json.NewEncoder(w).Encode(map[string]int{"Go": 1000})
+		case len(r.URL.Path) >= 7 && r.URL.Path[len(r.URL.Path)-7:] == "/latest":
+			json.NewEncoder(w).Encode(map[string]string{"tag_name": "v2.0.0"})
+		default:
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"archived": false, "description": "test tool", "stargazers_count": 9,
+			})
+		}
+	}))
+	origAPIBase := testAPIBase
+	origCacheDir := testCacheDir
+	testAPIBase = srv.URL
+	testCacheDir = t.TempDir()
+	defer func() {
+		srv.Close()
+		testAPIBase = origAPIBase
+		testCacheDir = origCacheDir
+	}()
+
+	d := GetRepoData("github.com/owner/repo")
+	if d.Latest != "" || d.RepoStatus != "" {
+		t.Errorf("first (failing) GetRepoData = %+v, want zero RepoData", d)
+	}
+
+	// Endpoints recover; a second call must retry (no poisoned cache hit).
+	mu.Lock()
+	fail = false
+	afterFirst := requests
+	mu.Unlock()
+
+	d2 := GetRepoData("github.com/owner/repo")
+	mu.Lock()
+	afterSecond := requests
+	mu.Unlock()
+	if afterSecond == afterFirst {
+		t.Fatal("second GetRepoData made no requests, cache was poisoned by total failure")
+	}
+	if d2.Latest != "v2.0.0" {
+		t.Errorf("recovered Latest = %q, want v2.0.0", d2.Latest)
+	}
+}
+
+// TestGetRepoDataStaleFallbackOnReleaseFailure verifies that when only the
+// release endpoint fails on a re-fetch (repo info still succeeds), the failed
+// field keeps its stale cached value while the successful fields refresh. This
+// exercises the field-by-field stale fallback inside the updateCacheEntry mutate.
+func TestGetRepoDataStaleFallbackOnReleaseFailure(t *testing.T) {
+	var mu sync.Mutex
+	failRelease := false
+	stars := 11
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		fr := failRelease
+		curStars := stars
+		mu.Unlock()
+		switch {
+		case len(r.URL.Path) >= 10 && r.URL.Path[len(r.URL.Path)-10:] == "/languages":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]int{"Go": 500})
+		case len(r.URL.Path) >= 7 && r.URL.Path[len(r.URL.Path)-7:] == "/latest":
+			if fr {
+				w.WriteHeader(http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"tag_name": "v1.2.3"})
+		default:
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"archived": false, "description": "good tool", "stargazers_count": curStars,
+			})
+		}
+	}))
+	origAPIBase := testAPIBase
+	origCacheDir := testCacheDir
+	testAPIBase = srv.URL
+	testCacheDir = t.TempDir()
+	defer func() {
+		srv.Close()
+		testAPIBase = origAPIBase
+		testCacheDir = origCacheDir
+	}()
+
+	// Populate a good entry.
+	if d := GetRepoData("github.com/owner/repo"); d.Latest != "v1.2.3" {
+		t.Fatalf("setup: Latest = %q, want v1.2.3", d.Latest)
+	}
+
+	// Expire the cached entry so the next call re-fetches, fail only the release
+	// endpoint, and change stars so we can confirm the repo-info fields refreshed.
+	updateCacheEntry("owner/repo", func(e CacheEntry) CacheEntry {
+		e.CheckedAt = time.Now().Add(-2 * cacheTTL)
+		return e
+	})
+	mu.Lock()
+	failRelease = true
+	stars = 22
+	mu.Unlock()
+
+	d := GetRepoData("github.com/owner/repo")
+	if d.Latest != "v1.2.3" {
+		t.Errorf("stale fallback Latest = %q, want v1.2.3 preserved", d.Latest)
+	}
+	if d.Stars != 22 {
+		t.Errorf("refreshed Stars = %d, want 22 (repo info succeeded)", d.Stars)
 	}
 }
 

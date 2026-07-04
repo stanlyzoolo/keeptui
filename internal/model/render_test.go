@@ -1027,6 +1027,31 @@ func TestRemoteMsgRateLimitedHint(t *testing.T) {
 	}
 }
 
+// TestRemoteMsgRateLimitedKeepsStaleData verifies that a rate-limit error
+// accompanied by usable stale/partial cache data still populates the caches
+// (known tags and cards must survive a rate-limited outage), rather than being
+// dropped in favour of the empty "rate limited" hint.
+func TestRemoteMsgRateLimitedKeepsStaleData(t *testing.T) {
+	m := newRateModel()
+	updated, _ := m.Update(remoteMsg{
+		toolName:   "gh",
+		latest:     "2.0",
+		repoStatus: "active",
+		card:       version.RepoCard{About: "stale about", Latest: "2.0"},
+		err:        version.ErrRateLimited,
+	})
+	nm := updated.(Model)
+	if got := nm.versions["gh"]; got.Latest != "2.0" {
+		t.Errorf("versions[gh].Latest = %q, want 2.0 (stale data dropped)", got.Latest)
+	}
+	if got := nm.repoStatus["gh"]; got != "active" {
+		t.Errorf("repoStatus[gh] = %q, want active", got)
+	}
+	if got, ok := nm.repoCards["gh"]; !ok || got.About != "stale about" {
+		t.Errorf("repoCards[gh] = %+v (ok=%v), want About:stale about", got, ok)
+	}
+}
+
 func TestMaskToken(t *testing.T) {
 	tests := []struct {
 		in   string

@@ -253,7 +253,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.rate.Known {
 			m.rate = msg.rate
 		}
-		if msg.err == nil {
+		// Data is displayable when the fetch succeeded, or when a rate-limit error
+		// still carried usable cache values: a fresh tag from a partial fetch, or
+		// the stale card kept on a total failure. In those cases render the data so
+		// known tags/cards survive the outage. Only a rate-limit failure with
+		// nothing to show falls back to the "rate limited — press [L]" hint. A
+		// generic error carries no data and must not touch the caches.
+		hasData := msg.latest != "" || msg.card.About != ""
+		switch {
+		case msg.err == nil, errors.Is(msg.err, version.ErrRateLimited) && hasData:
 			info := m.versions[msg.toolName]
 			info.Latest = msg.latest
 			m.versions[msg.toolName] = info
@@ -263,7 +271,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.repoCards[msg.toolName] = msg.card
 			m.toolsViewport.SetContent(m.renderLeftContent())
 			m.briefViewport.SetContent(m.renderCard())
-		} else if msg.repoStatus == "rate-limited" {
+		case msg.repoStatus == "rate-limited":
 			// Rate-limited with no card to show: mark the tool so the card can
 			// render "rate limited — press [L]" instead of a bare failure.
 			m.repoStatus[msg.toolName] = "rate-limited"

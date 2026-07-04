@@ -151,14 +151,14 @@ var (
 - Modify: `internal/version/github.go`
 - Modify: `internal/version/github_test.go`
 
-- [ ] add `var ErrRateLimited = errors.New(...)` and `classifyStatus(resp) error` — 403/429 → `ErrRateLimited` **only when `resp.Header`'s `X-RateLimit-Remaining==0`** (read from this response, NOT global `rl`); other non-2xx → generic `HTTP %d`
-- [ ] use `classifyStatus` in the 3 fetchers, replacing the ad-hoc rate-limit string in `fetchRelease` and the bare `HTTP 403` in `fetchRepoInfo`/`fetchLanguages` (preserve `404 → no releases`)
-- [ ] add `FetchRate() (RateLimit, error)` hitting `/rate_limit`, decoding `resources.core`, updating `rl`
-- [ ] add `FetchRateWithToken(token string) (RateLimit, error)` — same request but with an explicit `Authorization` header, **without** touching global `tokenMem`/file; 401 → distinct validation error (used by Task 7 to validate before persisting)
-- [ ] confirm `GetRepoData` still keeps known tag/card on total failure (no behavior change)
-- [ ] write tests: `FetchRate` parses `resources.core` (mock `/rate_limit`); `FetchRateWithToken` sends the given token and returns validation error on 401, and does NOT mutate `tokenMem`
-- [ ] write tests: `classifyStatus` — 403 with header `Remaining==0` → `errors.Is(err, ErrRateLimited)`; 403 with header `Remaining>0` → generic error (assert classification uses the response header, not global state)
-- [ ] run tests — must pass before task 4
+- [x] add `var ErrRateLimited = errors.New(...)` and `classifyStatus(resp) error` — 403/429 → `ErrRateLimited` **only when `resp.Header`'s `X-RateLimit-Remaining==0`** (read from this response, NOT global `rl`); other non-2xx → generic `HTTP %d`
+- [x] use `classifyStatus` in the 3 fetchers, replacing the ad-hoc rate-limit string in `fetchRelease` and the bare `HTTP 403` in `fetchRepoInfo`/`fetchLanguages` (preserve `404 → no releases`)
+- [x] add `FetchRate() (RateLimit, error)` hitting `/rate_limit`, decoding `resources.core`, updating `rl`
+- [x] add `FetchRateWithToken(token string) (RateLimit, error)` — same request but with an explicit `Authorization` header, **without** touching global `tokenMem`/file; 401 → distinct validation error (used by Task 7 to validate before persisting)
+- [x] confirm `GetRepoData` still keeps known tag/card on total failure (no behavior change)
+- [x] write tests: `FetchRate` parses `resources.core` (mock `/rate_limit`); `FetchRateWithToken` sends the given token and returns validation error on 401, and does NOT mutate `tokenMem`
+- [x] write tests: `classifyStatus` — 403 with header `Remaining==0` → `errors.Is(err, ErrRateLimited)`; 403 with header `Remaining>0` → generic error (assert classification uses the response header, not global state)
+- [x] run tests — must pass before task 4
 
 ### Task 4: Carry RateLimit into the model via messages
 

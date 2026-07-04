@@ -226,10 +226,10 @@ var (
 
 ### Task 9: Update documentation
 
-- [ ] update `CLAUDE.md` GitHub API section (limits 60/5000, `doGH`, hybrid rate read, `FetchRate`, `ErrRateLimited`, `L` overlay, token entry)
-- [ ] update `CLAUDE.md` File storage table (add `~/.config/keys/token`, `0600`) and TUI state-machine section (`L` opens API-status overlay)
-- [ ] update `README.md` if it documents `GITHUB_TOKEN` setup
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update `CLAUDE.md` GitHub API section (limits 60/5000, `doGH`, hybrid rate read, `FetchRate`, `ErrRateLimited`, `L` overlay, token entry)
+- [x] update `CLAUDE.md` File storage table (add `~/.config/keys/token`, `0600`) and TUI state-machine section (`L` opens API-status overlay)
+- [x] update `README.md` if it documents `GITHUB_TOKEN` setup (README did not document it; added a GitHub API / token section, `L` key, and token storage row)
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 

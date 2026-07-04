@@ -181,11 +181,11 @@ var (
 - Modify: `internal/ui` (add `⚠`/`✕` warning/danger styles if none fit)
 - Modify: `internal/model/render_test.go`
 
-- [ ] add `const rateLowThreshold = 10`
-- [ ] in `renderStatusBar()` read `m.rate`: normal (quiet or `GH R/L`), warning `Remaining<=threshold` (yellow `⚠ GH R/L · [L] details`), exhausted `Remaining==0` (red `✕ GH limit exhausted · [L]`); render nothing when `!Known` (note: on warm starts this is seeded by the `Init()` `fetchRateCmd` from Task 4)
-- [ ] add Lip Gloss warn/danger styles in `internal/ui` if not already present
-- [ ] write tests: status bar renders no signal when `!Known`, warning icon at threshold, danger icon at zero
-- [ ] run tests — must pass before task 6
+- [x] add `const rateLowThreshold = 10`
+- [x] in `renderStatusBar()` read `m.rate`: normal (quiet or `GH R/L`), warning `Remaining<=threshold` (yellow `⚠ GH R/L · [L] details`), exhausted `Remaining==0` (red `✕ GH limit exhausted · [L]`); render nothing when `!Known` (note: on warm starts this is seeded by the `Init()` `fetchRateCmd` from Task 4)
+- [x] add Lip Gloss warn/danger styles in `internal/ui` if not already present
+- [x] write tests: status bar renders no signal when `!Known`, warning icon at threshold, danger icon at zero
+- [x] run tests — must pass before task 6
 
 ### Task 6: API-status overlay (read-only view + refresh)
 

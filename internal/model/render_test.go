@@ -254,6 +254,57 @@ func TestRenderStatusBarFocusBrief(t *testing.T) {
 	}
 }
 
+func TestRenderStatusBarRateSignal(t *testing.T) {
+	t.Run("unknown renders no signal", func(t *testing.T) {
+		m := Model{width: 80, focus: focusTools}
+		m.rate = version.RateLimit{Known: false, Remaining: 0, Limit: 60}
+		got := m.renderStatusBar()
+		for _, absent := range []string{"GH", "⚠", "✕"} {
+			if strings.Contains(got, absent) {
+				t.Errorf("unknown rate status bar = %q, should not contain %q", got, absent)
+			}
+		}
+	})
+
+	t.Run("normal renders quiet count", func(t *testing.T) {
+		m := Model{width: 80, focus: focusTools}
+		m.rate = version.RateLimit{Known: true, Remaining: 4800, Limit: 5000}
+		got := m.renderStatusBar()
+		if !strings.Contains(got, "GH 4800/5000") {
+			t.Errorf("normal rate status bar = %q, missing count", got)
+		}
+		for _, absent := range []string{"⚠", "✕"} {
+			if strings.Contains(got, absent) {
+				t.Errorf("normal rate status bar = %q, should not contain %q", got, absent)
+			}
+		}
+	})
+
+	t.Run("warning icon at threshold", func(t *testing.T) {
+		m := Model{width: 80, focus: focusTools}
+		m.rate = version.RateLimit{Known: true, Remaining: rateLowThreshold, Limit: 60}
+		got := m.renderStatusBar()
+		if !strings.Contains(got, "⚠") {
+			t.Errorf("warning rate status bar = %q, missing warn icon", got)
+		}
+		if !strings.Contains(got, "[L]") {
+			t.Errorf("warning rate status bar = %q, missing [L] hint", got)
+		}
+	})
+
+	t.Run("danger icon at zero", func(t *testing.T) {
+		m := Model{width: 80, focus: focusTools}
+		m.rate = version.RateLimit{Known: true, Remaining: 0, Limit: 60}
+		got := m.renderStatusBar()
+		if !strings.Contains(got, "✕") {
+			t.Errorf("danger rate status bar = %q, missing danger icon", got)
+		}
+		if !strings.Contains(got, "[L]") {
+			t.Errorf("danger rate status bar = %q, missing [L] hint", got)
+		}
+	})
+}
+
 func TestRenderStatusBarTracking(t *testing.T) {
 	m := Model{width: 80, tracking: true, trackInput: textinput.New()}
 	got := m.renderStatusBar()

@@ -965,23 +965,53 @@ func (m Model) renderStatusBar() string {
 	}
 	if m.focus == focusBrief {
 		hints := keyHint("o") + " open repo  " + keyHint("c") + " changelog  " + keyHint("s") + " status  " + keyHint("e") + " note  " + keyHint("t") + " tags  " + keyHint("q") + " quit"
-		return style.Render(hints)
+		return style.Render(m.withRateSignal(hints))
 	}
 	if m.focus == focusHelp {
 		hints := keyHint("↑↓") + " scroll  " + keyHint("h") + " --help  " + keyHint("m") + " man  " + keyHint("/") + " search  " + keyHint("←") + " back  " + keyHint("q") + " quit"
-		return style.Render(hints)
+		return style.Render(m.withRateSignal(hints))
 	}
-	return style.Render(
+	return style.Render(m.withRateSignal(
 		keyHint("/") + " search  " +
 			keyHint("t") + " track  " +
 			keyHint("u") + " untrack  " +
 			keyHint("r") + " rename  " +
 			keyHint("q") + " quit",
-	)
+	))
+}
+
+// withRateSignal appends the rate-limit signal to a hint bar when there is one.
+func (m Model) withRateSignal(hints string) string {
+	if sig := m.rateSignal(); sig != "" {
+		return hints + "   " + sig
+	}
+	return hints
 }
 
 func keyHint(k string) string {
 	return ui.SearchPromptStyle.Render("[" + k + "]")
+}
+
+// rateLowThreshold is the number of remaining GitHub API requests at or below
+// which the status bar (and API-status overlay) flags rate-limit pressure.
+const rateLowThreshold = 10
+
+// rateSignal returns the status-bar rate-limit indicator for the current
+// snapshot, or "" when nothing should be shown (no observation yet). It is the
+// single source of truth for the status-bar signal; the overlay reuses the
+// same thresholds via rateIcon.
+func (m Model) rateSignal() string {
+	if !m.rate.Known {
+		return ""
+	}
+	switch {
+	case m.rate.Remaining == 0:
+		return ui.DangerStyle.Render("✕ GH limit exhausted") + " · " + keyHint("L")
+	case m.rate.Remaining <= rateLowThreshold:
+		return ui.WarnStyle.Render(fmt.Sprintf("⚠ GH %d/%d", m.rate.Remaining, m.rate.Limit)) + " · " + keyHint("L") + " details"
+	default:
+		return ui.GithubStyle.Render(fmt.Sprintf("GH %d/%d", m.rate.Remaining, m.rate.Limit))
+	}
 }
 
 func (m Model) calcVpHeight() int {

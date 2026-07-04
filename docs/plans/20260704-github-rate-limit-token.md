@@ -208,13 +208,13 @@ var (
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] `[e]` enters token-input mode using `textinput` with masked echo (reuse note/tag editing pattern)
-- [ ] on submit: validate via `version.FetchRateWithToken(candidate)` — **without persisting**; 401 → inline "token invalid" message, discard (nothing written), stay in overlay
-- [ ] on valid (200): call `version.SetToken` (this is the first and only write to disk), then trigger `autoFetchCmdsForSelected()` to backfill cards; refresh overlay numbers
-- [ ] `[d]` (config source only): `version.ClearToken()`, refresh overlay
-- [ ] handle the token-input mode in `renderStatusBar()` (mirror editing-input pattern)
-- [ ] write tests: valid token → stored + backfill cmd fired; invalid token (401) → NOT stored (assert token file absent/unchanged) + error shown; `[d]` clears token
-- [ ] run tests — must pass before task 8
+- [x] `[e]` enters token-input mode using `textinput` with masked echo (reuse note/tag editing pattern)
+- [x] on submit: validate via `version.FetchRateWithToken(candidate)` — **without persisting**; 401 → inline "token invalid" message, discard (nothing written), stay in overlay
+- [x] on valid (200): call `version.SetToken` (this is the first and only write to disk), then trigger `autoFetchCmdsForSelected()` to backfill cards; refresh overlay numbers
+- [x] `[d]` (config source only): `version.ClearToken()`, refresh overlay
+- [x] handle the token-input mode in `renderStatusBar()` (mirror editing-input pattern)
+- [x] write tests: valid token → stored + backfill cmd fired; invalid token (401) → NOT stored (assert token file absent/unchanged) + error shown; `[d]` clears token
+- [x] run tests — must pass before task 8
 
 ### Task 8: Verify acceptance criteria
 

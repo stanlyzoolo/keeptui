@@ -137,6 +137,12 @@ type Model struct {
 	// showingAPIStatus toggles the L-triggered API-status overlay, which shows
 	// the token source, current rate limits, and reset time.
 	showingAPIStatus bool
+
+	// enteringToken is the overlay's token-input sub-mode ([e]); tokenInput is
+	// the masked field and tokenError holds the inline "token invalid" message.
+	enteringToken bool
+	tokenInput    textinput.Model
+	tokenError    string
 }
 
 func New(meta []loader.ToolMeta) Model {
@@ -164,6 +170,12 @@ func New(meta []loader.ToolMeta) Model {
 	nmi.Placeholder = "new name..."
 	nmi.CharLimit = 256
 
+	tki := textinput.New()
+	tki.Placeholder = "ghp_..."
+	tki.CharLimit = 256
+	tki.EchoMode = textinput.EchoPassword
+	tki.EchoCharacter = '•'
+
 	m := Model{
 		tools:         loader.ToolsFromMeta(meta),
 		versions:      make(map[string]VersionInfo),
@@ -177,6 +189,7 @@ func New(meta []loader.ToolMeta) Model {
 		helpSearch:    hsi,
 		trackInput:    tri,
 		nameInput:     nmi,
+		tokenInput:    tki,
 		meta:          meta,
 	}
 
@@ -264,6 +277,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.rate = msg.rate
 		}
 		return m, nil
+
+	case tokenValidatedMsg:
+		// Validation result for a candidate token entered in the overlay. On
+		// failure nothing is written to disk; the inline message stays visible
+		// and the input remains open for a retry.
+		if msg.err != nil {
+			m.tokenError = "token invalid"
+			return m, nil
+		}
+		if err := version.SetToken(msg.token); err != nil {
+			m.tokenError = "could not save token"
+			return m, nil
+		}
+		m.enteringToken = false
+		m.tokenInput.Blur()
+		m.tokenInput.SetValue("")
+		m.tokenError = ""
+		if msg.rate.Known {
+			m.rate = msg.rate
+		}
+		// Backfill cards now that the higher limit is available.
+		return m, m.autoFetchCmdsForSelected()
 
 	case openURLMsg:
 		if msg.err != nil {
@@ -636,6 +671,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// (GET /rate_limit does not spend quota). Reached only when no other
 			// input/modal mode is active — those branches return earlier.
 			m.showingAPIStatus = true
+			m.enteringToken = false
+			m.tokenError = ""
 			return m, fetchRateCmd()
 		}
 
@@ -977,6 +1014,9 @@ func (m Model) renderStatusBar() string {
 			keyHint("esc"),
 		))
 	}
+	if m.showingAPIStatus && m.enteringToken {
+		return style.Render(keyHint("enter") + " validate & save  " + keyHint("esc") + " cancel")
+	}
 	if m.showingAPIStatus {
 		return style.Render(keyHint("r") + " refresh  " + keyHint("esc") + " close")
 	}
@@ -1061,18 +1101,73 @@ func maskToken(t string) string {
 	return t[:4] + strings.Repeat("•", 8) + t[len(t)-4:]
 }
 
-// updateAPIStatus handles keys while the API-status overlay is open: [r]
-// refreshes the numbers, [esc] closes. Token entry/removal ([e]/[d]) is wired
-// in a later task.
+// updateAPIStatus handles keys while the API-status overlay is open: [e] opens
+// the masked token-input sub-mode, [d] removes a config-sourced token, [r]
+// refreshes the numbers, [esc] closes. While entering a token, submit validates
+// via version.FetchRateWithToken before anything is persisted.
 func (m Model) updateAPIStatus(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.enteringToken {
+		switch msg.String() {
+		case "enter":
+			candidate := strings.TrimSpace(m.tokenInput.Value())
+			if candidate == "" {
+				m.enteringToken = false
+				m.tokenInput.Blur()
+				m.tokenError = ""
+				return m, nil
+			}
+			// Validate the candidate against /rate_limit; SetToken runs only
+			// after a 200 in the tokenValidatedMsg handler.
+			return m, validateTokenCmd(candidate)
+		case "esc":
+			m.enteringToken = false
+			m.tokenInput.Blur()
+			m.tokenInput.SetValue("")
+			m.tokenError = ""
+			return m, nil
+		default:
+			var cmd tea.Cmd
+			m.tokenInput, cmd = m.tokenInput.Update(msg)
+			return m, cmd
+		}
+	}
 	switch msg.String() {
 	case "esc", "q":
 		m.showingAPIStatus = false
+		m.tokenError = ""
 		return m, nil
 	case "r":
 		return m, fetchRateCmd()
+	case "e":
+		m.enteringToken = true
+		m.tokenError = ""
+		m.tokenInput.SetValue("")
+		m.tokenInput.Focus()
+		return m, textinput.Blink
+	case "d":
+		if version.TokenSource() == "config" {
+			version.ClearToken() //nolint:errcheck
+			return m, fetchRateCmd()
+		}
 	}
 	return m, nil
+}
+
+// tokenValidatedMsg carries the result of validating a candidate token against
+// GET /rate_limit. token is the candidate to persist on success.
+type tokenValidatedMsg struct {
+	token string
+	rate  version.RateLimit
+	err   error
+}
+
+// validateTokenCmd checks a candidate token against /rate_limit without touching
+// package token state; the handler persists it only on success.
+func validateTokenCmd(token string) tea.Cmd {
+	return func() tea.Msg {
+		rate, err := version.FetchRateWithToken(token)
+		return tokenValidatedMsg{token: token, rate: rate, err: err}
+	}
 }
 
 // renderAPIStatus builds the API-status overlay body: token source (masked),
@@ -1107,12 +1202,24 @@ func (m Model) renderAPIStatus() string {
 		b.WriteString(ui.InfoStyle.Render("Limit: unknown") + "\n")
 	}
 
-	b.WriteString("\n")
-	hints := keyHint("e") + " set token  "
-	if source == "config" {
-		hints += keyHint("d") + " remove token  "
+	if m.enteringToken {
+		b.WriteString("\n" + ui.SearchPromptStyle.Render("token: ") + m.tokenInput.View() + "\n")
 	}
-	hints += keyHint("r") + " refresh  " + keyHint("esc") + " close"
+	if m.tokenError != "" {
+		b.WriteString(ui.DangerStyle.Render(m.tokenError) + "\n")
+	}
+
+	b.WriteString("\n")
+	var hints string
+	if m.enteringToken {
+		hints = keyHint("enter") + " validate & save  " + keyHint("esc") + " cancel"
+	} else {
+		hints = keyHint("e") + " set token  "
+		if source == "config" {
+			hints += keyHint("d") + " remove token  "
+		}
+		hints += keyHint("r") + " refresh  " + keyHint("esc") + " close"
+	}
 	b.WriteString(ui.MetaNoteStyle.Render(hints))
 
 	return ui.OverlayBorder.Render(b.String())

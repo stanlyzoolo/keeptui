@@ -1085,3 +1085,127 @@ func TestAPIStatusOverlayToggle(t *testing.T) {
 		t.Errorf("esc did not close the API-status overlay")
 	}
 }
+
+// TestUpdateAPIStatusOpensTokenEntry verifies [e] switches the overlay into the
+// masked token-input sub-mode.
+func TestUpdateAPIStatusOpensTokenEntry(t *testing.T) {
+	m := Model{width: 80, height: 24, showingAPIStatus: true, tokenInput: textinput.New()}
+	updated, cmd := m.updateAPIStatus(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
+	nm := updated.(Model)
+	if !nm.enteringToken {
+		t.Fatal("pressing e did not enter token-input mode")
+	}
+	if cmd == nil {
+		t.Error("expected a blink cmd when entering token mode")
+	}
+}
+
+// TestTokenValidatedMsgInvalid verifies a 401 result shows the inline error,
+// keeps the input open, and never persists a token.
+func TestTokenValidatedMsgInvalid(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	version.ClearToken() //nolint:errcheck
+
+	m := Model{width: 80, height: 24, showingAPIStatus: true, enteringToken: true, tokenInput: textinput.New()}
+	updated, _ := m.Update(tokenValidatedMsg{token: "ghp_bad", err: version.ErrTokenInvalid})
+	nm := updated.(Model)
+	if nm.tokenError != "token invalid" {
+		t.Errorf("tokenError = %q, want %q", nm.tokenError, "token invalid")
+	}
+	if !nm.enteringToken {
+		t.Error("invalid token should keep the input open for a retry")
+	}
+	if src := version.TokenSource(); src != "none" {
+		t.Errorf("invalid token must not be stored, TokenSource() = %q", src)
+	}
+}
+
+// TestTokenValidatedMsgValid verifies a 200 result persists the token, exits the
+// input, updates the rate snapshot, and fires the card-backfill cmd.
+func TestTokenValidatedMsgValid(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	version.ClearToken() //nolint:errcheck
+	t.Cleanup(func() { version.ClearToken() }) //nolint:errcheck
+
+	name := "git"
+	m := Model{
+		width: 80, height: 24, showingAPIStatus: true, enteringToken: true,
+		tokenInput:    textinput.New(),
+		tokenError:    "token invalid",
+		meta:          []loader.ToolMeta{{Name: name, GitHub: "cli/cli"}},
+		tools:         []loader.Tool{{Name: name, GitHub: "cli/cli"}},
+		changelogData: map[string]changelogMsg{name: {}},
+		helpCache:     map[string][2]string{name: {helpModeHelp: "cached"}},
+		versions:      map[string]VersionInfo{},
+		repoCards:     map[string]version.RepoCard{},
+	}
+	rate := version.RateLimit{Known: true, Remaining: 4999, Limit: 5000}
+	updated, cmd := m.Update(tokenValidatedMsg{token: "ghp_goodtoken1234", rate: rate})
+	nm := updated.(Model)
+	if version.TokenSource() != "config" {
+		t.Fatalf("valid token was not stored, TokenSource() = %q", version.TokenSource())
+	}
+	if nm.enteringToken {
+		t.Error("valid token should exit the token-input mode")
+	}
+	if nm.tokenError != "" {
+		t.Errorf("tokenError should be cleared, got %q", nm.tokenError)
+	}
+	if nm.rate.Limit != 5000 {
+		t.Errorf("m.rate not updated from the validated snapshot, got %+v", nm.rate)
+	}
+	if cmd == nil {
+		t.Error("valid token should fire the backfill cmd")
+	}
+}
+
+// TestUpdateAPIStatusRemoveToken verifies [d] clears a config-sourced token.
+func TestUpdateAPIStatusRemoveToken(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	if err := version.SetToken("ghp_config1234567"); err != nil {
+		t.Fatalf("SetToken: %v", err)
+	}
+	t.Cleanup(func() { version.ClearToken() }) //nolint:errcheck
+	if version.TokenSource() != "config" {
+		t.Fatalf("precondition: TokenSource() = %q, want config", version.TokenSource())
+	}
+
+	m := Model{width: 80, height: 24, showingAPIStatus: true, tokenInput: textinput.New()}
+	m.updateAPIStatus(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	if src := version.TokenSource(); src != "none" {
+		t.Errorf("[d] did not clear the token, TokenSource() = %q", src)
+	}
+}
+
+// TestRenderStatusBarTokenInput verifies the status bar reflects the token-input
+// sub-mode.
+func TestRenderStatusBarTokenInput(t *testing.T) {
+	m := Model{width: 80, height: 24, showingAPIStatus: true, enteringToken: true, tokenInput: textinput.New()}
+	got := m.renderStatusBar()
+	if !strings.Contains(got, "validate & save") {
+		t.Errorf("status bar = %q, missing token-input hint", got)
+	}
+}
+
+// TestRenderAPIStatusTokenEntry verifies the overlay shows the masked input and
+// the inline error while entering a token.
+func TestRenderAPIStatusTokenEntry(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	m := Model{width: 80, height: 24, showingAPIStatus: true, enteringToken: true, tokenInput: textinput.New()}
+	m.tokenError = "token invalid"
+	got := m.renderAPIStatus()
+	for _, want := range []string{"token:", "token invalid", "validate & save"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("overlay = %q, missing %q", got, want)
+		}
+	}
+}

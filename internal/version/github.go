@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -14,6 +15,75 @@ import (
 )
 
 const cacheTTL = 24 * time.Hour
+
+// ghClient is the shared HTTP client for all GitHub API calls.
+var ghClient = &http.Client{Timeout: 5 * time.Second}
+
+// RateLimit is a snapshot of the GitHub REST API rate-limit state. Limit is 60
+// for unauthenticated requests and 5000 with a token. Known reports whether any
+// successful observation has been made yet.
+type RateLimit struct {
+	Limit     int
+	Remaining int
+	Reset     time.Time
+	Known     bool
+}
+
+// rate state, guarded by rlMu.
+var (
+	rlMu sync.RWMutex
+	rl   RateLimit
+)
+
+// Rate returns the current rate-limit snapshot.
+func Rate() RateLimit {
+	rlMu.RLock()
+	defer rlMu.RUnlock()
+	return rl
+}
+
+// updateRateFromHeaders parses the X-RateLimit-* response headers into the
+// shared rl snapshot. Missing or malformed headers are ignored (the previous
+// snapshot is left untouched); Known is set true only when values parse.
+func updateRateFromHeaders(h http.Header) {
+	limitStr := h.Get("X-RateLimit-Limit")
+	remainingStr := h.Get("X-RateLimit-Remaining")
+	resetStr := h.Get("X-RateLimit-Reset")
+	if limitStr == "" && remainingStr == "" && resetStr == "" {
+		return
+	}
+	limit, errL := strconv.Atoi(limitStr)
+	remaining, errR := strconv.Atoi(remainingStr)
+	resetUnix, errT := strconv.ParseInt(resetStr, 10, 64)
+	if errL != nil || errR != nil || errT != nil {
+		return
+	}
+	rlMu.Lock()
+	rl = RateLimit{
+		Limit:     limit,
+		Remaining: remaining,
+		Reset:     time.Unix(resetUnix, 0),
+		Known:     true,
+	}
+	rlMu.Unlock()
+}
+
+// doGH performs a GitHub API request with the shared client. It sets the Accept
+// header and, when a token resolves, an Authorization header, then accounts for
+// the rate-limit headers on the response. This is the single auth + accounting
+// point for all GitHub calls; callers keep their own status-code handling.
+func doGH(req *http.Request) (*http.Response, error) {
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	if token := resolveToken(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := ghClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	updateRateFromHeaders(resp.Header)
+	return resp, nil
+}
 
 var cacheMu sync.Mutex
 
@@ -243,12 +313,7 @@ func fetchRepoInfo(repo string) (status, about string, stars int, err error) {
 	if reqErr != nil {
 		return "", "", 0, reqErr
 	}
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, doErr := client.Do(req)
+	resp, doErr := doGH(req)
 	if doErr != nil {
 		return "", "", 0, doErr
 	}
@@ -280,12 +345,7 @@ func fetchLanguages(repo string) (map[string]int, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := doGH(req)
 	if err != nil {
 		return nil, err
 	}
@@ -311,13 +371,7 @@ func fetchRelease(repo string) (ReleaseInfo, error) {
 	if err != nil {
 		return ReleaseInfo{}, err
 	}
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := doGH(req)
 	if err != nil {
 		return ReleaseInfo{}, err
 	}

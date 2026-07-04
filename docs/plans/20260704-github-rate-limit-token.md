@@ -137,13 +137,13 @@ var (
 - Modify: `internal/version/github.go`
 - Create/Modify: `internal/version/github_test.go`
 
-- [ ] add `RateLimit` struct, `rlMu`/`rl` state, `Rate() RateLimit` snapshot accessor
-- [ ] add `updateRateFromHeaders(http.Header)` parsing `X-RateLimit-*` (unix Reset), tolerant of missing/malformed values
-- [ ] add `doGH(req) (*http.Response, error)` setting `Accept` + optional `Authorization` (via `resolveToken()`), doing the request with the 5s client, calling `updateRateFromHeaders`
-- [ ] refactor `fetchRelease`/`fetchRepoInfo`/`fetchLanguages` to build the request then call `doGH` (drop duplicated header/client code)
-- [ ] write tests: `updateRateFromHeaders` valid headers, missing headers (state untouched), malformed values
-- [ ] write tests: `doGH` sends `Authorization` when token set and omits it when empty (assert on `httptest` server); confirm the 3 fetchers still parse correctly via `testAPIBase`
-- [ ] run tests — must pass before task 3
+- [x] add `RateLimit` struct, `rlMu`/`rl` state, `Rate() RateLimit` snapshot accessor
+- [x] add `updateRateFromHeaders(http.Header)` parsing `X-RateLimit-*` (unix Reset), tolerant of missing/malformed values
+- [x] add `doGH(req) (*http.Response, error)` setting `Accept` + optional `Authorization` (via `resolveToken()`), doing the request with the 5s client, calling `updateRateFromHeaders`
+- [x] refactor `fetchRelease`/`fetchRepoInfo`/`fetchLanguages` to build the request then call `doGH` (drop duplicated header/client code)
+- [x] write tests: `updateRateFromHeaders` valid headers, missing headers (state untouched), malformed values
+- [x] write tests: `doGH` sends `Authorization` when token set and omits it when empty (assert on `httptest` server); confirm the 3 fetchers still parse correctly via `testAPIBase`
+- [x] run tests — must pass before task 3
 
 ### Task 3: FetchRate and ErrRateLimited classifier
 

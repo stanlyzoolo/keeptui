@@ -759,3 +759,49 @@ func TestExtractRepo(t *testing.T) {
 		}
 	}
 }
+
+// TestFetchRateMalformedBody verifies a 200 /rate_limit response with a body
+// that is not valid JSON surfaces a decode error and leaves the shared snapshot
+// untouched (never a bogus Known snapshot).
+func TestFetchRateMalformedBody(t *testing.T) {
+	resetRate(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("{not json"))
+	}))
+	origAPIBase := testAPIBase
+	testAPIBase = srv.URL
+	defer func() {
+		srv.Close()
+		testAPIBase = origAPIBase
+	}()
+
+	if _, err := FetchRate(); err == nil {
+		t.Fatal("FetchRate on malformed body = nil error, want decode error")
+	}
+	if got := Rate(); got.Known {
+		t.Errorf("shared snapshot became Known after malformed body: %+v", got)
+	}
+}
+
+// TestFetchRateNon200 verifies a non-200 /rate_limit status is surfaced as an
+// error via classifyStatus rather than decoded as a valid snapshot.
+func TestFetchRateNon200(t *testing.T) {
+	resetRate(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	origAPIBase := testAPIBase
+	testAPIBase = srv.URL
+	defer func() {
+		srv.Close()
+		testAPIBase = origAPIBase
+	}()
+
+	if _, err := FetchRate(); err == nil {
+		t.Fatal("FetchRate on 500 = nil error, want error")
+	}
+	if got := Rate(); got.Known {
+		t.Errorf("shared snapshot became Known after 500: %+v", got)
+	}
+}

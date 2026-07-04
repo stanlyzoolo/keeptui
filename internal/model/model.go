@@ -1064,35 +1064,55 @@ func keyHint(k string) string {
 // which the status bar (and API-status overlay) flags rate-limit pressure.
 const rateLowThreshold = 10
 
-// rateSignal returns the status-bar rate-limit indicator for the current
-// snapshot, or "" when nothing should be shown (no observation yet). It is the
-// single source of truth for the status-bar signal; the overlay reuses the
-// same thresholds via rateIcon.
-func (m Model) rateSignal() string {
-	if !m.rate.Known {
-		return ""
+// rateLevel classifies a rate snapshot's pressure so the status-bar signal and
+// the overlay icon share one decision. It is the single source of truth for the
+// none/warn/exhausted thresholds.
+type rateLevel int
+
+const (
+	rateUnknown rateLevel = iota
+	rateOK
+	rateWarn
+	rateExhausted
+)
+
+func classifyRate(r version.RateLimit) rateLevel {
+	if !r.Known {
+		return rateUnknown
 	}
 	switch {
-	case m.rate.Remaining == 0:
-		return ui.DangerStyle.Render("✕ GH limit exhausted") + " · " + keyHint("L")
-	case m.rate.Remaining <= rateLowThreshold:
-		return ui.WarnStyle.Render(fmt.Sprintf("⚠ GH %d/%d", m.rate.Remaining, m.rate.Limit)) + " · " + keyHint("L") + " details"
+	case r.Remaining == 0:
+		return rateExhausted
+	case r.Remaining <= rateLowThreshold:
+		return rateWarn
 	default:
+		return rateOK
+	}
+}
+
+// rateSignal returns the status-bar rate-limit indicator for the current
+// snapshot, or "" when nothing should be shown (no observation yet).
+func (m Model) rateSignal() string {
+	switch classifyRate(m.rate) {
+	case rateExhausted:
+		return ui.DangerStyle.Render("✕ GH limit exhausted") + " · " + keyHint("L")
+	case rateWarn:
+		return ui.WarnStyle.Render(fmt.Sprintf("⚠ GH %d/%d", m.rate.Remaining, m.rate.Limit)) + " · " + keyHint("L") + " details"
+	case rateOK:
 		return ui.GithubStyle.Render(fmt.Sprintf("GH %d/%d", m.rate.Remaining, m.rate.Limit))
+	default:
+		return ""
 	}
 }
 
 // rateIcon returns the styled indicator (none / ⚠ / ✕) for a rate snapshot,
-// sharing rateLowThreshold with the status-bar signal so the overlay and the
-// bar never disagree. Returns "" when nothing should flag.
+// sharing classifyRate with the status-bar signal so the overlay and the bar
+// never disagree. Returns "" when nothing should flag.
 func rateIcon(rate version.RateLimit) string {
-	if !rate.Known {
-		return ""
-	}
-	switch {
-	case rate.Remaining == 0:
+	switch classifyRate(rate) {
+	case rateExhausted:
 		return ui.DangerStyle.Render("✕")
-	case rate.Remaining <= rateLowThreshold:
+	case rateWarn:
 		return ui.WarnStyle.Render("⚠")
 	default:
 		return ""
@@ -1893,10 +1913,8 @@ func stripMarkdown(s string) string {
 	return strings.TrimSpace(sb.String())
 }
 
-var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
-
 func stripANSI(s string) string {
-	return ansiRe.ReplaceAllString(s, "")
+	return ui.StripANSI(s)
 }
 
 // cleanTerminalOutput strips ANSI escapes, carriage returns, and backspace

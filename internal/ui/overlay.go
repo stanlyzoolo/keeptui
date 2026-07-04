@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -56,12 +57,12 @@ func overlayLine(bg, fg string, x int) string {
 // truncateVisible returns the prefix of s spanning the first w visible columns,
 // dropping ANSI styling (best-effort; overlay content sits above it anyway).
 func truncateVisible(s string, w int) string {
-	return runewidth.Truncate(stripANSI(s), w, "")
+	return runewidth.Truncate(StripANSI(s), w, "")
 }
 
 // dropVisible returns s with its first w visible columns removed.
 func dropVisible(s string, w int) string {
-	plain := stripANSI(s)
+	plain := StripANSI(s)
 	total := runewidth.StringWidth(plain)
 	if w >= total {
 		return ""
@@ -85,22 +86,10 @@ func dropVisible(s string, w int) string {
 	return b.String()
 }
 
-// stripANSI removes ANSI escape sequences from s.
-func stripANSI(s string) string {
-	var b strings.Builder
-	inEsc := false
-	for _, r := range s {
-		if inEsc {
-			if r == 'm' {
-				inEsc = false
-			}
-			continue
-		}
-		if r == '\x1b' {
-			inEsc = true
-			continue
-		}
-		b.WriteRune(r)
-	}
-	return b.String()
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+// StripANSI removes ANSI escape sequences from s. It is the single ANSI-strip
+// helper shared across packages (the model layer delegates to it).
+func StripANSI(s string) string {
+	return ansiRe.ReplaceAllString(s, "")
 }

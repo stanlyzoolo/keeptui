@@ -123,13 +123,13 @@ var (
 
 > Note: the 3 inline `os.Getenv("GITHUB_TOKEN")` header sites in `github.go` are **not** touched here — they are removed in Task 2 when `doGH` becomes the single auth point (avoids editing the same lines twice).
 
-- [ ] add `tokenMu` (`sync.RWMutex`) + `tokenMem` state and `resolveToken()` (env precedence, then `tokenMem`)
-- [ ] add `tokenFilePath()` via `os.UserConfigDir()` + `keys/token`
-- [ ] add `SetToken(t)` (update `tokenMem` under lock, write file `0600`, `MkdirAll` for dir), `ClearToken()`, `TokenSource() string`
-- [ ] add `loadTokenFromFile()` invoked via a package `sync.Once` on the first `resolveToken()` so env-empty startup picks up the file exactly once and `-race` clean (all `tokenMem` access through `tokenMu`)
-- [ ] write tests: `resolveToken` env-over-config precedence + empty cases (`t.Setenv`, `t.TempDir` for config dir)
-- [ ] write tests: `SetToken` writes file with `FileMode 0600` (assert `Stat().Mode().Perm()`), `ClearToken` removes it, `TokenSource` returns env/config/none
-- [ ] run tests (add `-race`) — must pass before task 2
+- [x] add `tokenMu` (`sync.RWMutex`) + `tokenMem` state and `resolveToken()` (env precedence, then `tokenMem`)
+- [x] add `tokenFilePath()` via `os.UserConfigDir()` + `keys/token`
+- [x] add `SetToken(t)` (update `tokenMem` under lock, write file `0600`, `MkdirAll` for dir), `ClearToken()`, `TokenSource() string`
+- [x] add `loadTokenFromFile()` invoked via a package `sync.Once` on the first `resolveToken()` so env-empty startup picks up the file exactly once and `-race` clean (all `tokenMem` access through `tokenMu`)
+- [x] write tests: `resolveToken` env-over-config precedence + empty cases (`t.Setenv`, `t.TempDir` for config dir)
+- [x] write tests: `SetToken` writes file with `FileMode 0600` (assert `Stat().Mode().Perm()`), `ClearToken` removes it, `TokenSource` returns env/config/none
+- [x] run tests (add `-race`) — must pass before task 2
 
 ### Task 2: RateLimit state, doGH helper, and header accounting
 

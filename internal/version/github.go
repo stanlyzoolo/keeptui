@@ -290,6 +290,21 @@ type Cache map[string]CacheEntry
 // advance CheckedAt, so the entry stays stale and the next start retries to
 // fill the missing field instead of serving it blank for the whole TTL.
 func GetRepoData(githubField string) RepoData {
+	return getRepoData(githubField, false)
+}
+
+// RefreshRepoData force-refreshes a tool's repo data, bypassing the cache TTL.
+// It makes the same single network pass as GetRepoData and writes through the
+// same updateCacheEntry merge — including the conclusive-CheckedAt guard — so a
+// forced refresh that hits a rate limit on repo-info does not poison the entry.
+func RefreshRepoData(githubField string) RepoData {
+	return getRepoData(githubField, true)
+}
+
+// getRepoData is the shared implementation. force skips only the freshness
+// short-circuit; the fetch, merge and conclusive-CheckedAt logic are identical
+// on both paths.
+func getRepoData(githubField string, force bool) RepoData {
 	if githubField == "" {
 		return RepoData{}
 	}
@@ -300,7 +315,7 @@ func GetRepoData(githubField string) RepoData {
 
 	cache := LoadCache()
 	entry, cached := cache[repo]
-	if cached && time.Since(entry.CheckedAt) < cacheTTL {
+	if !force && cached && time.Since(entry.CheckedAt) < cacheTTL {
 		return repoDataFromEntry(entry)
 	}
 
@@ -411,6 +426,18 @@ func FetchAndCache(githubField string) (string, error) {
 // GetChangelog returns full release info for a tool's github field.
 // Uses cache when fresh and body is present; fetches otherwise.
 func GetChangelog(githubField string) (ReleaseInfo, error) {
+	return getChangelog(githubField, false)
+}
+
+// RefreshChangelog force-refreshes a tool's release notes, bypassing the cache
+// TTL. On fetch error it still falls back to the cached body when present.
+func RefreshChangelog(githubField string) (ReleaseInfo, error) {
+	return getChangelog(githubField, true)
+}
+
+// getChangelog is the shared implementation. force skips only the freshness
+// short-circuit; the fetch and cached-fallback logic are identical on both paths.
+func getChangelog(githubField string, force bool) (ReleaseInfo, error) {
 	if githubField == "" {
 		return ReleaseInfo{}, fmt.Errorf("no github field")
 	}
@@ -422,7 +449,7 @@ func GetChangelog(githubField string) (ReleaseInfo, error) {
 	cache := LoadCache()
 	entry, cached := cache[repo]
 
-	if cached && time.Since(entry.CheckedAt) < cacheTTL && entry.Body != "" {
+	if !force && cached && time.Since(entry.CheckedAt) < cacheTTL && entry.Body != "" {
 		return ReleaseInfo{Tag: entry.Latest, Body: entry.Body, HtmlUrl: entry.HtmlUrl, PublishedAt: entry.PublishedAt}, nil
 	}
 

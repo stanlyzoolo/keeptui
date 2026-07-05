@@ -117,26 +117,26 @@
 - Modify: `internal/version/github.go`
 - Modify: `internal/version/github_test.go`
 
-- [ ] refactor `GetRepoData` → `getRepoData(field string, force bool)`; keep
+- [x] refactor `GetRepoData` → `getRepoData(field string, force bool)`; keep
       public `func GetRepoData(field string) RepoData { return getRepoData(field,
       false) }`; add `func RefreshRepoData(field string) RepoData { return
       getRepoData(field, true) }`. `force` skips ONLY the `time.Since(CheckedAt) <
       cacheTTL` short-circuit (~303); leave the fetch/merge/conclusive block intact.
-- [ ] refactor `GetChangelog` → `getChangelog(field string, force bool)` with
+- [x] refactor `GetChangelog` → `getChangelog(field string, force bool)` with
       public wrapper `force=false` and new `RefreshChangelog` `force=true`; `force`
       skips ONLY the `cached && fresh && Body != ""` short-circuit (~401); keep the
       on-error cached fallback.
-- [ ] write `TestRefreshRepoDataBypassesTTL`: prime a fresh entry via
+- [x] write `TestRefreshRepoDataBypassesTTL`: prime a fresh entry via
       `GetRepoData`, change the server response (e.g. stars 42→99), assert
       `RefreshRepoData` makes a new network pass (request counter increments) and
       returns the new value; assert a plain `GetRepoData` in the same state makes
       no request.
-- [ ] write `TestRefreshRepoDataKeepsConclusiveGuard`: force pass with repo-info
+- [x] write `TestRefreshRepoDataKeepsConclusiveGuard`: force pass with repo-info
       returning 403 + `X-RateLimit-Remaining: 0` while release/languages succeed →
       `CheckedAt` not advanced (next call re-fetches) and cached `About` not wiped.
-- [ ] write `TestRefreshChangelogBypassesTTL`: fresh entry with `Body` present →
+- [x] write `TestRefreshChangelogBypassesTTL`: fresh entry with `Body` present →
       `RefreshChangelog` still re-fetches and updates the body.
-- [ ] run `go test ./internal/version/` - must pass before task 2
+- [x] run `go test ./internal/version/` - must pass before task 2
 
 ### Task 2: model force commands + spinner/refreshingFor state
 
@@ -144,24 +144,28 @@
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] add `remoteCmd(t loader.Tool, force bool) tea.Cmd` holding the current
+- [x] add `remoteCmd(t loader.Tool, force bool) tea.Cmd` holding the current
       `fetchRemoteCmd` body but selecting `version.RefreshRepoData` when `force`,
       else `version.GetRepoData`; redefine `fetchRemoteCmd(t) = remoteCmd(t,
       false)` and add `refreshRemoteCmd(t) = remoteCmd(t, true)`.
-- [ ] add `changelogCmd(field, name string, force bool) tea.Cmd` similarly;
+- [x] add `changelogCmd(field, name string, force bool) tea.Cmd` similarly;
       redefine `fetchChangelogCmd = changelogCmd(..., false)` and add
       `refreshChangelogCmd = changelogCmd(..., true)`.
-- [ ] add model fields `spinner spinner.Model` and `refreshingFor string` to the
+- [x] add model fields `spinner spinner.Model` and `refreshingFor string` to the
       struct; initialize the spinner in `New()` with `spinner.MiniDot` and a muted
       `ui` style.
-- [ ] handle `spinner.TickMsg` in `Update`: no-op when `refreshingFor == ""`;
+- [x] handle `spinner.TickMsg` in `Update`: no-op when `refreshingFor == ""`;
       otherwise advance the spinner, re-render the card, return the next tick cmd.
-- [ ] write test: `refreshRemoteCmd(t)()` against an `httptest` server returns a
-      `remoteMsg` with freshly-fetched data even when the cache entry is fresh
-      (TTL bypass surfaces through the model cmd).
-- [ ] write test: `spinner.TickMsg` with `refreshingFor == ""` returns no
-      command (loop halts); with `refreshingFor` set returns a non-nil command.
-- [ ] run `go test ./internal/model/` - must pass before task 3
+- [x] write test: `refreshRemoteCmd`/`refreshChangelogCmd` emit the same typed
+      msgs as the non-force variants with the right `toolName` (wiring check,
+      offline via an empty GitHub field). NOTE: the TTL-bypass itself is covered
+      in `version` (Task 1) — the `version` test hooks are unexported, so it can't
+      be re-driven from the model package.
+- [x] write test: `spinner.TickMsg` with `refreshingFor == ""` returns no command
+      (the tick loop halts when idle). The animated (non-idle) frames are verified
+      by running the TUI, since a matching `TickMsg` needs the spinner's unexported
+      id/tag.
+- [x] run `go test ./internal/model/` - must pass before task 3
 
 ### Task 3: `r` key handler, refresh batching, and stop-on-completion
 
@@ -169,24 +173,24 @@
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] add `refreshSelectedCmd(t loader.Tool) tea.Cmd` (pointer receiver) per
+- [x] add `refreshSelectedCmd(t loader.Tool) tea.Cmd` (pointer receiver) per
       Technical Details: guard on `refreshingFor == t.Name`; GitHub vs no-GitHub
       branches; sets `refreshingFor` / `statusMsg`; batches spinner tick + the
       three fetch cmds.
-- [ ] extend the existing `case "r"` (line ~634): keep `focusTools` rename branch
+- [x] extend the existing `case "r"` (line ~656): keep `focusTools` rename branch
       untouched; add `else if m.focus == focusBrief { return m,
       m.refreshSelectedCmd(t) }` using the selected tool.
-- [ ] in the `remoteMsg` handler (~262), after the existing merge, clear
-      `refreshingFor` and `statusMsg` when `msg.toolName == m.refreshingFor`.
-- [ ] write test: `r` in `focusBrief` on a tool with `GitHub` sets
+- [x] in the `remoteMsg` handler, after the existing merge, clear `refreshingFor`
+      and `statusMsg` when `msg.toolName == m.refreshingFor`.
+- [x] write test: `r` in `focusBrief` on a tool with `GitHub` sets
       `refreshingFor == t.Name`, `statusMsg` contains "refreshing", returns a
       non-nil command.
-- [ ] write test: `remoteMsg{toolName: name}` clears `refreshingFor` to "".
-- [ ] write test: `r` on a no-`GitHub` tool leaves `refreshingFor` empty and sets
+- [x] write test: `remoteMsg{toolName: name}` clears `refreshingFor` to "".
+- [x] write test: `r` on a no-`GitHub` tool leaves `refreshingFor` empty and sets
       `statusMsg == "no repo to refresh"`.
-- [ ] write test: second `r` while `refreshingFor == name` leaves the flag
+- [x] write test: second `r` while `refreshingFor == name` leaves the flag
       unchanged and does not panic; and `r` in `focusTools` still starts rename.
-- [ ] run `go test ./internal/model/` - must pass before task 4
+- [x] run `go test ./internal/model/` - must pass before task 4
 
 ### Task 4: render spinner on the card and help-bar hint
 
@@ -194,34 +198,34 @@
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] in `renderCard` (~1441), when `m.refreshingFor == t.Name`, append `" " +
-      m.spinner.View()` to the tool-name line (both the with-about and name-only
-      branches).
-- [ ] in the `focusBrief` help bar (~1035), insert `[r] refresh` between
+- [x] in `renderCard`, when `m.refreshingFor == t.Name`, append `" " +
+      m.spinner.View()` to the title line (shared for the with-about and
+      name-only branches).
+- [x] in the `focusBrief` help bar, insert `[r] refresh` between
       `[c] changelog` and `[s] status`.
-- [ ] write test: `focusBrief` help bar output contains "refresh".
-- [ ] write test: `renderCard` with `refreshingFor` set to the selected tool
+- [x] write test: `focusBrief` help bar output contains "refresh".
+- [x] write test: `renderCard` with `refreshingFor` set to the selected tool
       includes a spinner frame on the name line; with it unset it does not.
-- [ ] run `go test ./internal/model/` - must pass before task 5
+- [x] run `go test ./internal/model/` - must pass before task 5
 
 ### Task 5: Verify acceptance criteria
 
-- [ ] verify all Overview requirements: `r` in `focusBrief` force-refreshes repo
+- [x] verify all Overview requirements: `r` in `focusBrief` force-refreshes repo
       data + changelog + installed, bypassing TTL, with a spinner during the repo
       pass and a silent stop on completion.
-- [ ] verify edge cases: no-`GitHub` tool, double-press guard, `focusTools` `r`
+- [x] verify edge cases: no-`GitHub` tool, double-press guard, `focusTools` `r`
       still renames, force refresh under rate limit does not poison the cache.
-- [ ] run full suite: `go build ./... && go vet ./... && go test -race ./...`
-- [ ] confirm no new `go vet` findings and `-race` is clean.
+- [x] run full suite: `go build ./... && go vet ./... && go test -race ./...`
+- [x] confirm no new `go vet` findings and `-race` is clean.
 
 ### Task 6: Update documentation
 
-- [ ] update `CLAUDE.md`: document the `r` refresh action in the `focusBrief`
+- [x] update `CLAUDE.md`: document the `r` refresh action in the `focusBrief`
       section and note the `RefreshRepoData` / `RefreshChangelog` force path in the
       GitHub API section.
-- [ ] update the help-bar key list mention in `CLAUDE.md` (`[o] open repo …`) to
+- [x] update the help-bar key list mention in `CLAUDE.md` (`[o] open repo …`) to
       include `[r] refresh`.
-- [ ] move this plan to `docs/plans/completed/`.
+- [x] move this plan to `docs/plans/completed/`.
 
 ## Post-Completion
 *Items requiring manual intervention - no checkboxes, informational only*

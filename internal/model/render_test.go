@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -1236,5 +1237,198 @@ func TestRenderAPIStatusTokenEntry(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("overlay = %q, missing %q", got, want)
 		}
+	}
+}
+
+// TestRefreshCmdsEmitTypedMsgs verifies the force-refresh commands emit the same
+// message types as their non-force variants, carrying the tool name. Uses an
+// empty GitHub field so the version layer returns without any network call.
+func TestRefreshCmdsEmitTypedMsgs(t *testing.T) {
+	t.Run("remote", func(t *testing.T) {
+		msg := refreshRemoteCmd(loader.Tool{Name: "tool"})()
+		rm, ok := msg.(remoteMsg)
+		if !ok {
+			t.Fatalf("refreshRemoteCmd emitted %T, want remoteMsg", msg)
+		}
+		if rm.toolName != "tool" {
+			t.Errorf("remoteMsg.toolName = %q, want tool", rm.toolName)
+		}
+	})
+	t.Run("changelog", func(t *testing.T) {
+		msg := refreshChangelogCmd("", "tool")()
+		cm, ok := msg.(changelogMsg)
+		if !ok {
+			t.Fatalf("refreshChangelogCmd emitted %T, want changelogMsg", msg)
+		}
+		if cm.toolName != "tool" {
+			t.Errorf("changelogMsg.toolName = %q, want tool", cm.toolName)
+		}
+	})
+}
+
+// TestSpinnerTickGateWhenIdle verifies a spinner tick is a no-op (no rescheduled
+// command) when no refresh is in flight, so the animation loop halts when idle.
+func TestSpinnerTickGateWhenIdle(t *testing.T) {
+	m := Model{width: 80, focus: focusBrief}
+	_, cmd := m.Update(spinner.TickMsg{})
+	if cmd != nil {
+		t.Errorf("idle spinner tick returned a command %v, want nil (loop should halt)", cmd)
+	}
+}
+
+// TestUpdateBriefRefresh covers the [r] refresh action in the brief panel: it
+// starts a refresh (sets refreshingFor + status) for a repo-backed tool, the
+// remoteMsg completion clears it, a no-repo tool only reports status, a repeat
+// press is a no-op guard, and [r] in the tool list still starts a rename.
+func TestUpdateBriefRefresh(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	keyR := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")}
+
+	t.Run("repo tool starts refresh", func(t *testing.T) {
+		m := Model{
+			meta:         []loader.ToolMeta{{Name: "tool-x", GitHub: "github.com/owner/tool-x"}},
+			metaSelected: 0,
+			focus:        focusBrief,
+		}
+		m.tools = loader.ToolsFromMeta(m.meta)
+
+		updated, cmd := m.Update(keyR)
+		nm := updated.(Model)
+
+		if nm.refreshingFor != "tool-x" {
+			t.Errorf("refreshingFor = %q, want tool-x", nm.refreshingFor)
+		}
+		// The status bar is not taken over — the "refreshing" hint lives in the
+		// card title, not the status bar.
+		if nm.statusMsg != "" {
+			t.Errorf("statusMsg = %q, want empty (no status-bar takeover)", nm.statusMsg)
+		}
+		if cmd == nil {
+			t.Error("cmd = nil, want a non-nil refresh batch")
+		}
+	})
+
+	t.Run("remoteMsg completion clears refresh state", func(t *testing.T) {
+		m := Model{
+			meta:          []loader.ToolMeta{{Name: "tool-x", GitHub: "github.com/owner/tool-x"}},
+			metaSelected:  0,
+			focus:         focusBrief,
+			refreshingFor: "tool-x",
+			versions:      map[string]VersionInfo{},
+			repoStatus:    map[string]string{},
+			repoCards:     map[string]version.RepoCard{},
+		}
+		m.tools = loader.ToolsFromMeta(m.meta)
+
+		updated, _ := m.Update(remoteMsg{toolName: "tool-x", latest: "v1.0.0"})
+		nm := updated.(Model)
+
+		if nm.refreshingFor != "" {
+			t.Errorf("refreshingFor = %q, want cleared after remoteMsg", nm.refreshingFor)
+		}
+	})
+
+	t.Run("no-repo tool reports status without refresh state", func(t *testing.T) {
+		m := Model{
+			meta:         []loader.ToolMeta{{Name: "tool-x"}},
+			metaSelected: 0,
+			focus:        focusBrief,
+		}
+		m.tools = loader.ToolsFromMeta(m.meta)
+
+		updated, _ := m.Update(keyR)
+		nm := updated.(Model)
+
+		if nm.refreshingFor != "" {
+			t.Errorf("refreshingFor = %q, want empty for no-repo tool", nm.refreshingFor)
+		}
+		if nm.statusMsg != "no repo to refresh" {
+			t.Errorf("statusMsg = %q, want \"no repo to refresh\"", nm.statusMsg)
+		}
+	})
+
+	t.Run("repeat press while refreshing is a no-op guard", func(t *testing.T) {
+		m := Model{
+			meta:          []loader.ToolMeta{{Name: "tool-x", GitHub: "github.com/owner/tool-x"}},
+			metaSelected:  0,
+			focus:         focusBrief,
+			refreshingFor: "tool-x",
+		}
+		m.tools = loader.ToolsFromMeta(m.meta)
+
+		updated, cmd := m.Update(keyR)
+		nm := updated.(Model)
+
+		if nm.refreshingFor != "tool-x" {
+			t.Errorf("refreshingFor = %q, want tool-x unchanged", nm.refreshingFor)
+		}
+		if cmd != nil {
+			t.Errorf("cmd = %v, want nil (guarded second press)", cmd)
+		}
+	})
+
+	t.Run("r in tool list still starts rename", func(t *testing.T) {
+		m := Model{
+			meta:         []loader.ToolMeta{{Name: "tool-x"}},
+			metaSelected: 0,
+			focus:        focusTools,
+			nameInput:    textinput.New(),
+		}
+		m.tools = loader.ToolsFromMeta(m.meta)
+
+		updated, _ := m.Update(keyR)
+		nm := updated.(Model)
+
+		if !nm.renaming {
+			t.Error("renaming = false, want true (r in focusTools opens rename)")
+		}
+		if nm.refreshingFor != "" {
+			t.Errorf("refreshingFor = %q, want empty in focusTools", nm.refreshingFor)
+		}
+	})
+}
+
+// TestBriefHelpBarHasRefresh verifies the focusBrief help bar advertises [r] refresh.
+func TestBriefHelpBarHasRefresh(t *testing.T) {
+	m := Model{width: 120, focus: focusBrief}
+	bar := m.renderStatusBar()
+	if !strings.Contains(bar, "refresh") {
+		t.Errorf("focusBrief help bar = %q, want it to mention \"refresh\"", bar)
+	}
+}
+
+// TestRenderCardSpinner verifies that while a tool is refreshing the card title
+// becomes "refreshing <name> data <spinner>" (hiding the about), and reverts to
+// name + about when idle.
+func TestRenderCardSpinner(t *testing.T) {
+	m := Model{
+		meta:         []loader.ToolMeta{{Name: "tool-x", GitHub: "github.com/owner/tool-x"}},
+		metaSelected: 0,
+		briefW:       80,
+		repoCards:    map[string]version.RepoCard{"tool-x": {About: "a fine tool"}},
+	}
+	m.tools = loader.ToolsFromMeta(m.meta)
+	m.spinner = spinner.New()
+	m.spinner.Spinner = spinner.MiniDot
+	frame := m.spinner.View()
+
+	m.refreshingFor = "tool-x"
+	withSpin := m.renderCard()
+	for _, want := range []string{"refreshing ", "tool-x", " data ", frame} {
+		if !strings.Contains(withSpin, want) {
+			t.Errorf("refreshing card = %q, want it to contain %q", withSpin, want)
+		}
+	}
+	if strings.Contains(withSpin, "a fine tool") {
+		t.Errorf("refreshing card = %q, want the about hidden while refreshing", withSpin)
+	}
+
+	m.refreshingFor = ""
+	noSpin := m.renderCard()
+	if strings.Contains(noSpin, frame) {
+		t.Errorf("idle card = %q, want no spinner frame %q", noSpin, frame)
+	}
+	if !strings.Contains(noSpin, "a fine tool") {
+		t.Errorf("idle card = %q, want the about shown when not refreshing", noSpin)
 	}
 }

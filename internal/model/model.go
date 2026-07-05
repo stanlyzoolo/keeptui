@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -114,6 +115,12 @@ type Model struct {
 	renaming  bool
 	nameInput textinput.Model
 
+	// spinner animates while a force refresh ([r]) is in flight; refreshingFor
+	// holds the name of the tool being refreshed (empty = idle). refreshingFor
+	// doubles as the double-press guard and as the tick-loop / render gate.
+	spinner       spinner.Model
+	refreshingFor string
+
 	meta         []loader.ToolMeta
 	metaSelected int
 
@@ -176,6 +183,10 @@ func New(meta []loader.ToolMeta) Model {
 	tki.EchoMode = textinput.EchoPassword
 	tki.EchoCharacter = '•'
 
+	sp := spinner.New()
+	sp.Spinner = spinner.MiniDot
+	sp.Style = lipgloss.NewStyle().Foreground(ui.ColorPrimary)
+
 	m := Model{
 		tools:         loader.ToolsFromMeta(meta),
 		versions:      make(map[string]VersionInfo),
@@ -190,6 +201,7 @@ func New(meta []loader.ToolMeta) Model {
 		trackInput:    tri,
 		nameInput:     nmi,
 		tokenInput:    tki,
+		spinner:       sp,
 		meta:          meta,
 	}
 
@@ -277,6 +289,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.repoStatus[msg.toolName] = "rate-limited"
 			m.briefViewport.SetContent(m.renderCard())
 		}
+		// A refresh's repo pass has landed (success or error): clear the flag so
+		// the card title drops the "refreshing … data" status back to name+about.
+		// This also halts the tick loop.
+		if msg.toolName == m.refreshingFor {
+			m.refreshingFor = ""
+			m.briefViewport.SetContent(m.renderCard())
+		}
 		return m, nil
 
 	case rateMsg:
@@ -285,6 +304,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.rate = msg.rate
 		}
 		return m, nil
+
+	case spinner.TickMsg:
+		// Animate only while a refresh is in flight; once refreshingFor is
+		// cleared (by the remoteMsg handler) the loop stops rescheduling itself.
+		if m.refreshingFor == "" {
+			return m, nil
+		}
+		m.spinner, cmd = m.spinner.Update(msg)
+		m.briefViewport.SetContent(m.renderCard())
+		return m, cmd
 
 	case tokenValidatedMsg:
 		// Validation result for a candidate token entered in the overlay. On
@@ -638,6 +667,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.nameInput.SetValue(mt.Name)
 					m.nameInput.Focus()
 					return m, textinput.Blink
+				}
+			} else if m.focus == focusBrief {
+				if t, ok := m.selectedTool(); ok {
+					return m, m.refreshSelectedCmd(t)
 				}
 			}
 
@@ -1032,7 +1065,7 @@ func (m Model) renderStatusBar() string {
 		return style.Render(ui.SearchPromptStyle.Render(m.statusMsg))
 	}
 	if m.focus == focusBrief {
-		hints := keyHint("o") + " open repo  " + keyHint("c") + " changelog  " + keyHint("s") + " status  " + keyHint("e") + " note  " + keyHint("t") + " tags  " + keyHint("q") + " quit"
+		hints := keyHint("o") + " open repo  " + keyHint("c") + " changelog  " + keyHint("r") + " refresh  " + keyHint("s") + " status  " + keyHint("e") + " note  " + keyHint("t") + " tags  " + keyHint("q") + " quit"
 		return style.Render(m.withRateSignal(hints))
 	}
 	if m.focus == focusHelp {
@@ -1439,13 +1472,22 @@ func (m Model) renderCard() string {
 		name = name[:maxNameLen-3] + "..."
 	}
 	nameRendered := lipgloss.NewStyle().Bold(true).Foreground(ui.ColorOrange).Render(name)
-	if hasCard && card.About != "" {
-		aboutWidth := max(inner-utf8.RuneCountInString(name)-3, 20)
-		aboutWrapped := wrapText(card.About, aboutWidth)
-		sb.WriteString(nameRendered + " — " + ui.MetaNoteStyle.Render(aboutWrapped) + "\n")
+	var title string
+	if m.refreshingFor == t.Name {
+		// While a force refresh is in flight, the title line becomes a status
+		// line: "refreshing <name> data <spinner>" (name keeps its bold style,
+		// spinner frames advance on spinner.TickMsg). The about is hidden until
+		// the refreshed card lands.
+		title = ui.InfoStyle.Render("refreshing ") + nameRendered + ui.InfoStyle.Render(" data ") + m.spinner.View()
 	} else {
-		sb.WriteString(nameRendered + "\n")
+		title = nameRendered
+		if hasCard && card.About != "" {
+			aboutWidth := max(inner-utf8.RuneCountInString(name)-3, 20)
+			aboutWrapped := wrapText(card.About, aboutWidth)
+			title += " — " + ui.MetaNoteStyle.Render(aboutWrapped)
+		}
 	}
+	sb.WriteString(title + "\n")
 
 	// [info] section: repo / stars / latest / languages / repo status.
 	hasInfo := t.GitHub != "" ||
@@ -1729,9 +1771,20 @@ func fetchInstalledCmd(t loader.Tool) tea.Cmd {
 // fetchRemoteCmd returns a Cmd that makes a single network pass over t's
 // repository via version.GetRepoData (release + repo info + languages) and emits
 // a remoteMsg carrying the latest tag, repo status and repo card together.
-func fetchRemoteCmd(t loader.Tool) tea.Cmd {
+func fetchRemoteCmd(t loader.Tool) tea.Cmd { return remoteCmd(t, false) }
+
+// refreshRemoteCmd is the force variant of fetchRemoteCmd: it bypasses the cache
+// TTL via version.RefreshRepoData. Emits the same remoteMsg.
+func refreshRemoteCmd(t loader.Tool) tea.Cmd { return remoteCmd(t, true) }
+
+func remoteCmd(t loader.Tool, force bool) tea.Cmd {
 	return func() tea.Msg {
-		d := version.GetRepoData(t.GitHub)
+		var d version.RepoData
+		if force {
+			d = version.RefreshRepoData(t.GitHub)
+		} else {
+			d = version.GetRepoData(t.GitHub)
+		}
 		repoStatus := d.RepoStatus
 		// Rate-limited and no data came back: signal the card to render a
 		// "rate limited" hint. This gives ErrRateLimited a real runtime consumer.
@@ -1770,8 +1823,26 @@ func fetchRateCmd() tea.Cmd {
 }
 
 func fetchChangelogCmd(githubField, toolName string) tea.Cmd {
+	return changelogCmd(githubField, toolName, false)
+}
+
+// refreshChangelogCmd is the force variant of fetchChangelogCmd: it bypasses the
+// cache TTL via version.RefreshChangelog. Emits the same changelogMsg.
+func refreshChangelogCmd(githubField, toolName string) tea.Cmd {
+	return changelogCmd(githubField, toolName, true)
+}
+
+func changelogCmd(githubField, toolName string, force bool) tea.Cmd {
 	return func() tea.Msg {
-		info, err := version.GetChangelog(githubField)
+		var (
+			info version.ReleaseInfo
+			err  error
+		)
+		if force {
+			info, err = version.RefreshChangelog(githubField)
+		} else {
+			info, err = version.GetChangelog(githubField)
+		}
 		return changelogMsg{
 			toolName:    toolName,
 			tag:         info.Tag,
@@ -1803,6 +1874,31 @@ func (m *Model) needsRemote(t loader.Tool) bool {
 	}
 	info := m.versions[t.Name]
 	return info.Latest == ""
+}
+
+// refreshSelectedCmd force-refreshes t's data, bypassing the cache TTL: the repo
+// pass (release + repo info + languages) and the changelog are re-fetched and the
+// installed version is re-detected locally. While the repo pass is in flight
+// refreshingFor drives the card spinner; the remoteMsg handler clears it on
+// completion, which halts the tick loop. A second press while the same tool is
+// already refreshing is ignored. A tool with no GitHub ref only re-detects the
+// installed version (no spinner, nothing to clear).
+func (m *Model) refreshSelectedCmd(t loader.Tool) tea.Cmd {
+	if m.refreshingFor == t.Name {
+		return nil
+	}
+	if t.GitHub == "" {
+		m.statusMsg = "no repo to refresh"
+		return fetchInstalledCmd(t)
+	}
+	m.refreshingFor = t.Name
+	m.briefViewport.SetContent(m.renderCard())
+	return tea.Batch(
+		m.spinner.Tick,
+		fetchInstalledCmd(t),
+		refreshRemoteCmd(t),
+		refreshChangelogCmd(t.GitHub, t.Name),
+	)
 }
 
 // autoFetchCmdsForSelected returns a batched Cmd that auto-fetches changelog

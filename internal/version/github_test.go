@@ -888,3 +888,198 @@ func TestFetchRateNon200(t *testing.T) {
 		t.Errorf("shared snapshot became Known after 500: %+v", got)
 	}
 }
+
+// TestRefreshRepoDataBypassesTTL verifies RefreshRepoData re-fetches and updates
+// a cache entry that is still within TTL, while plain GetRepoData in the same
+// state serves the cache without a request.
+func TestRefreshRepoDataBypassesTTL(t *testing.T) {
+	var mu sync.Mutex
+	requests := 0
+	stars := 42
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests++
+		curStars := stars
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case len(r.URL.Path) >= 10 && r.URL.Path[len(r.URL.Path)-10:] == "/languages":
+			json.NewEncoder(w).Encode(map[string]int{"Go": 1000})
+		case len(r.URL.Path) >= 7 && r.URL.Path[len(r.URL.Path)-7:] == "/latest":
+			json.NewEncoder(w).Encode(map[string]string{"tag_name": "v1.0.0"})
+		default:
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"archived": false, "description": "tool", "stargazers_count": curStars,
+			})
+		}
+	}))
+	origAPIBase := testAPIBase
+	origCacheDir := testCacheDir
+	testAPIBase = srv.URL
+	testCacheDir = t.TempDir()
+	defer func() {
+		srv.Close()
+		testAPIBase = origAPIBase
+		testCacheDir = origCacheDir
+	}()
+
+	// Prime a fresh entry.
+	if d := GetRepoData("github.com/owner/repo"); d.Stars != 42 {
+		t.Fatalf("setup: Stars = %d, want 42", d.Stars)
+	}
+	mu.Lock()
+	afterPrime := requests
+	mu.Unlock()
+
+	// A plain GetRepoData is a cache hit: no new requests.
+	GetRepoData("github.com/owner/repo")
+	mu.Lock()
+	afterHit := requests
+	mu.Unlock()
+	if afterHit != afterPrime {
+		t.Errorf("GetRepoData made %d extra requests on a fresh entry, want 0", afterHit-afterPrime)
+	}
+
+	// Change the server, then force a refresh: it must re-fetch and update.
+	mu.Lock()
+	stars = 99
+	mu.Unlock()
+	d := RefreshRepoData("github.com/owner/repo")
+	mu.Lock()
+	afterRefresh := requests
+	mu.Unlock()
+	if afterRefresh == afterHit {
+		t.Fatal("RefreshRepoData made no requests, want a forced network pass")
+	}
+	if d.Stars != 99 {
+		t.Errorf("RefreshRepoData Stars = %d, want 99 (fresh value)", d.Stars)
+	}
+}
+
+// TestRefreshRepoDataKeepsConclusiveGuard verifies a forced refresh reuses the
+// conclusive-CheckedAt guard: when repo-info is rate-limited while release and
+// languages succeed, the entry is not marked fresh and the cached About is not
+// wiped.
+func TestRefreshRepoDataKeepsConclusiveGuard(t *testing.T) {
+	var mu sync.Mutex
+	failInfo := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		fi := failInfo
+		mu.Unlock()
+		switch {
+		case len(r.URL.Path) >= 10 && r.URL.Path[len(r.URL.Path)-10:] == "/languages":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]int{"Go": 1000})
+		case len(r.URL.Path) >= 7 && r.URL.Path[len(r.URL.Path)-7:] == "/latest":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"tag_name": "v1.0.0"})
+		default:
+			if fi {
+				w.Header().Set("X-RateLimit-Remaining", "0")
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"archived": false, "description": "good tool", "stargazers_count": 5,
+			})
+		}
+	}))
+	origAPIBase := testAPIBase
+	origCacheDir := testCacheDir
+	testAPIBase = srv.URL
+	testCacheDir = t.TempDir()
+	defer func() {
+		srv.Close()
+		testAPIBase = origAPIBase
+		testCacheDir = origCacheDir
+	}()
+
+	// Prime a good entry with a known About.
+	if d := GetRepoData("github.com/owner/repo"); d.About != "good tool" {
+		t.Fatalf("setup: About = %q, want good tool", d.About)
+	}
+
+	// Force a refresh while repo-info is rate-limited.
+	mu.Lock()
+	failInfo = true
+	mu.Unlock()
+	d := RefreshRepoData("github.com/owner/repo")
+	if d.About != "good tool" {
+		t.Errorf("About = %q, want good tool preserved (repo-info failed)", d.About)
+	}
+
+	// The entry must not have been marked fresh: repo-info recovers, and the next
+	// call re-fetches instead of serving a poisoned entry.
+	mu.Lock()
+	failInfo = false
+	mu.Unlock()
+	if d2 := GetRepoData("github.com/owner/repo"); d2.About != "good tool" {
+		t.Errorf("post-recovery About = %q, want good tool (re-fetched, not poisoned)", d2.About)
+	}
+}
+
+// TestRefreshChangelogBypassesTTL verifies RefreshChangelog re-fetches release
+// notes even when a fresh cache entry already carries a body.
+func TestRefreshChangelogBypassesTTL(t *testing.T) {
+	var mu sync.Mutex
+	requests := 0
+	body := "old notes"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests++
+		curBody := body
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if len(r.URL.Path) >= 7 && r.URL.Path[len(r.URL.Path)-7:] == "/latest" {
+			json.NewEncoder(w).Encode(map[string]string{"tag_name": "v1.0.0", "body": curBody})
+			return
+		}
+		json.NewEncoder(w).Encode(map[string]interface{}{"archived": false, "description": "tool"})
+	}))
+	origAPIBase := testAPIBase
+	origCacheDir := testCacheDir
+	testAPIBase = srv.URL
+	testCacheDir = t.TempDir()
+	defer func() {
+		srv.Close()
+		testAPIBase = origAPIBase
+		testCacheDir = origCacheDir
+	}()
+
+	// Prime a fresh entry with a body.
+	if info, err := GetChangelog("github.com/owner/repo"); err != nil || info.Body != "old notes" {
+		t.Fatalf("setup: info = %+v, err = %v", info, err)
+	}
+	mu.Lock()
+	afterPrime := requests
+	mu.Unlock()
+
+	// Plain GetChangelog is a cache hit (fresh + body present): no new request.
+	GetChangelog("github.com/owner/repo")
+	mu.Lock()
+	afterHit := requests
+	mu.Unlock()
+	if afterHit != afterPrime {
+		t.Errorf("GetChangelog made %d extra requests on a fresh body entry, want 0", afterHit-afterPrime)
+	}
+
+	// Force refresh: must re-fetch and pick up the new body.
+	mu.Lock()
+	body = "new notes"
+	mu.Unlock()
+	info, err := RefreshChangelog("github.com/owner/repo")
+	if err != nil {
+		t.Fatalf("RefreshChangelog: %v", err)
+	}
+	mu.Lock()
+	afterRefresh := requests
+	mu.Unlock()
+	if afterRefresh == afterHit {
+		t.Fatal("RefreshChangelog made no requests, want a forced network pass")
+	}
+	if info.Body != "new notes" {
+		t.Errorf("RefreshChangelog Body = %q, want new notes", info.Body)
+	}
+}

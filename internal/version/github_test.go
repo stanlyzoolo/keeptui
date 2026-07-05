@@ -558,6 +558,89 @@ func TestGetRepoDataStaleFallbackOnReleaseFailure(t *testing.T) {
 	}
 }
 
+// TestGetRepoDataInfoFailureDoesNotPoisonCache verifies that when repo-info is
+// rate-limited on a cold cache while release and languages succeed, the entry is
+// NOT marked fresh: the About/stars gap must be retried on the next start rather
+// than served blank for the whole TTL. This is the regression behind "About
+// stopped loading and the info section is missing fields" for a tool tracked
+// during a rate-limited cold start.
+func TestGetRepoDataInfoFailureDoesNotPoisonCache(t *testing.T) {
+	var mu sync.Mutex
+	failInfo := true
+	requests := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		requests++
+		fi := failInfo
+		mu.Unlock()
+		switch {
+		case len(r.URL.Path) >= 10 && r.URL.Path[len(r.URL.Path)-10:] == "/languages":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]int{"Rust": 500})
+		case len(r.URL.Path) >= 7 && r.URL.Path[len(r.URL.Path)-7:] == "/latest":
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"tag_name": "v0.1.3"})
+		default:
+			if fi {
+				// Rate-limited repo-info: 403 with the quota exhausted.
+				w.Header().Set("X-RateLimit-Remaining", "0")
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"archived": false, "description": "hacker news tui", "stargazers_count": 9,
+			})
+		}
+	}))
+	origAPIBase := testAPIBase
+	origCacheDir := testCacheDir
+	testAPIBase = srv.URL
+	testCacheDir = t.TempDir()
+	defer func() {
+		srv.Close()
+		testAPIBase = origAPIBase
+		testCacheDir = origCacheDir
+	}()
+
+	// First pass: release + languages succeed, repo-info rate-limited. The
+	// successful fields must persist, but About stays blank.
+	d := GetRepoData("github.com/owner/repo")
+	if d.Latest != "v0.1.3" {
+		t.Errorf("Latest = %q, want v0.1.3 (release succeeded)", d.Latest)
+	}
+	if d.About != "" {
+		t.Errorf("About = %q, want empty (repo-info failed)", d.About)
+	}
+
+	mu.Lock()
+	afterFirst := requests
+	mu.Unlock()
+
+	// Repo-info recovers. Because the partial failure must NOT have marked the
+	// entry fresh, the next call re-fetches and fills About/stars.
+	mu.Lock()
+	failInfo = false
+	mu.Unlock()
+
+	d2 := GetRepoData("github.com/owner/repo")
+	mu.Lock()
+	afterSecond := requests
+	mu.Unlock()
+	if afterSecond == afterFirst {
+		t.Fatal("second GetRepoData made no requests: cache was poisoned fresh-but-blank by the repo-info failure")
+	}
+	if d2.About != "hacker news tui" {
+		t.Errorf("About = %q, want \"hacker news tui\" after repo-info recovered", d2.About)
+	}
+	if d2.Stars != 9 {
+		t.Errorf("Stars = %d, want 9 after repo-info recovered", d2.Stars)
+	}
+	if d2.Latest != "v0.1.3" {
+		t.Errorf("Latest = %q, want v0.1.3 preserved", d2.Latest)
+	}
+}
+
 // TestGetRepoDataInvalidField verifies empty and unparseable github fields
 // return a zero RepoData without panicking or hitting the network.
 func TestGetRepoDataInvalidField(t *testing.T) {

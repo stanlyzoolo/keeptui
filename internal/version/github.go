@@ -95,6 +95,12 @@ var ErrRateLimited = errors.New("github api rate limit exceeded")
 // GET /rate_limit (HTTP 401). Used by FetchRateWithToken before persistence.
 var ErrTokenInvalid = errors.New("github token invalid")
 
+// errNoReleases signals that a repo's /releases/latest returned 404 — the repo
+// simply has no releases. This is a conclusive answer (not a transient outage),
+// so it must not block a cache entry from being marked fresh; otherwise a repo
+// without releases would re-fetch all three endpoints on every start.
+var errNoReleases = errors.New("no releases found")
+
 // classifyStatus maps a non-2xx GitHub response to an error. A 403 or 429 whose
 // own X-RateLimit-Remaining header reads 0 is rate-limit exhaustion and returns
 // ErrRateLimited; a 403 with remaining>0 is a genuine access denial and returns a
@@ -279,6 +285,10 @@ type Cache map[string]CacheEntry
 // but must not force a full three-endpoint re-fetch on every subsequent start.
 // A total failure (both release and repo info fail) is not written at all, so a
 // cold-cache outage does not poison the entry as fresh-but-empty for the TTL.
+// A partial failure — one core endpoint succeeds, the other fails transiently
+// (rate limit / network / 5xx) — still merges the successful field but does NOT
+// advance CheckedAt, so the entry stays stale and the next start retries to
+// fill the missing field instead of serving it blank for the whole TTL.
 func GetRepoData(githubField string) RepoData {
 	if githubField == "" {
 		return RepoData{}
@@ -317,10 +327,24 @@ func GetRepoData(githubField string) RepoData {
 		return d
 	}
 
+	// Only a conclusive pass may advance CheckedAt (mark the entry fresh). A
+	// core fetch is conclusive when it either succeeded or returned a definitive
+	// negative (a repo with no releases). A transient failure — rate limit,
+	// network, 5xx — on either core endpoint must leave CheckedAt stale so the
+	// next start retries and fills the gap. Otherwise a partial write (e.g.
+	// release + languages succeed but repo-info is rate-limited) would stamp the
+	// entry fresh for the full TTL with About/stars/maintenance permanently
+	// blank until the cache expires.
+	relConclusive := relErr == nil || errors.Is(relErr, errNoReleases)
+	infoConclusive := infoErr == nil
+	conclusive := relConclusive && infoConclusive
+
 	var stored CacheEntry
 	updateCacheEntry(repo, func(existing CacheEntry) CacheEntry {
 		e := existing
-		e.CheckedAt = time.Now()
+		if conclusive {
+			e.CheckedAt = time.Now()
+		}
 		if relErr == nil {
 			e.Latest = info.Tag
 			e.Body = info.Body
@@ -504,7 +528,7 @@ func fetchRelease(repo string) (ReleaseInfo, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode == http.StatusNotFound {
-		return ReleaseInfo{}, fmt.Errorf("no releases found")
+		return ReleaseInfo{}, errNoReleases
 	}
 	if resp.StatusCode != http.StatusOK {
 		return ReleaseInfo{}, classifyStatus(resp)

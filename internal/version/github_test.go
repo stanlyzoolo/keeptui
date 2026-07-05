@@ -2,6 +2,7 @@ package version
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -570,6 +571,176 @@ func TestGetRepoDataInvalidField(t *testing.T) {
 	}
 }
 
+// TestClassifyStatusRateLimited verifies a 403 whose own header reads
+// X-RateLimit-Remaining==0 classifies as ErrRateLimited, while a 403 with
+// remaining>0 (genuine access denial) returns a generic error. The check reads
+// the response header, not the global rl snapshot.
+func TestClassifyStatusRateLimited(t *testing.T) {
+	// Restore the shared snapshot afterwards so this test's dirty write doesn't
+	// leak into order-dependent tests reading Rate().
+	resetRate(t)
+	// Seed global rl with a "healthy" remaining to prove classifyStatus ignores it.
+	rlMu.Lock()
+	rl = RateLimit{Limit: 5000, Remaining: 5000, Known: true}
+	rlMu.Unlock()
+
+	exhausted := &http.Response{StatusCode: http.StatusForbidden, Header: http.Header{}}
+	exhausted.Header.Set("X-RateLimit-Remaining", "0")
+	if err := classifyStatus(exhausted); !errors.Is(err, ErrRateLimited) {
+		t.Errorf("classifyStatus(403, remaining=0) = %v, want ErrRateLimited", err)
+	}
+
+	tooMany := &http.Response{StatusCode: http.StatusTooManyRequests, Header: http.Header{}}
+	tooMany.Header.Set("X-RateLimit-Remaining", "0")
+	if err := classifyStatus(tooMany); !errors.Is(err, ErrRateLimited) {
+		t.Errorf("classifyStatus(429, remaining=0) = %v, want ErrRateLimited", err)
+	}
+
+	denied := &http.Response{StatusCode: http.StatusForbidden, Header: http.Header{}}
+	denied.Header.Set("X-RateLimit-Remaining", "37")
+	if err := classifyStatus(denied); err == nil || errors.Is(err, ErrRateLimited) {
+		t.Errorf("classifyStatus(403, remaining=37) = %v, want generic HTTP error", err)
+	}
+
+	// No rate-limit header at all → generic error even though status is 403.
+	bare := &http.Response{StatusCode: http.StatusForbidden, Header: http.Header{}}
+	if err := classifyStatus(bare); err == nil || errors.Is(err, ErrRateLimited) {
+		t.Errorf("classifyStatus(403, no header) = %v, want generic HTTP error", err)
+	}
+}
+
+// TestFetchRateParsesCore verifies FetchRate decodes resources.core from the
+// /rate_limit endpoint and updates the shared snapshot.
+func TestFetchRateParsesCore(t *testing.T) {
+	reset := time.Now().Add(30 * time.Minute).Unix()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rate_limit" {
+			t.Errorf("unexpected path %q, want /rate_limit", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"resources": map[string]interface{}{
+				"core": map[string]interface{}{
+					"limit":     5000,
+					"remaining": 4321,
+					"reset":     reset,
+				},
+			},
+		})
+	}))
+	origAPIBase := testAPIBase
+	testAPIBase = srv.URL
+	defer func() {
+		srv.Close()
+		testAPIBase = origAPIBase
+	}()
+
+	snap, err := FetchRate()
+	if err != nil {
+		t.Fatalf("FetchRate: %v", err)
+	}
+	if snap.Limit != 5000 || snap.Remaining != 4321 || !snap.Known {
+		t.Errorf("FetchRate snapshot = %+v, want Limit=5000 Remaining=4321 Known=true", snap)
+	}
+	if snap.Reset.Unix() != reset {
+		t.Errorf("FetchRate Reset = %d, want %d", snap.Reset.Unix(), reset)
+	}
+	if got := Rate(); got.Remaining != 4321 {
+		t.Errorf("global Rate() Remaining = %d, want 4321", got.Remaining)
+	}
+}
+
+// TestFetchRateWithTokenValid verifies FetchRateWithToken sends the candidate
+// token and does not mutate global tokenMem.
+func TestFetchRateWithTokenValid(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"resources": map[string]interface{}{
+				"core": map[string]interface{}{"limit": 5000, "remaining": 5000, "reset": 0},
+			},
+		})
+	}))
+	origAPIBase := testAPIBase
+	testAPIBase = srv.URL
+	defer func() {
+		srv.Close()
+		testAPIBase = origAPIBase
+	}()
+
+	tokenMu.RLock()
+	before := tokenMem
+	tokenMu.RUnlock()
+
+	snap, err := FetchRateWithToken("ghp_candidate123")
+	if err != nil {
+		t.Fatalf("FetchRateWithToken: %v", err)
+	}
+	if snap.Limit != 5000 {
+		t.Errorf("snapshot Limit = %d, want 5000", snap.Limit)
+	}
+	if gotAuth != "Bearer ghp_candidate123" {
+		t.Errorf("Authorization = %q, want Bearer ghp_candidate123", gotAuth)
+	}
+	tokenMu.RLock()
+	after := tokenMem
+	tokenMu.RUnlock()
+	if after != before {
+		t.Errorf("tokenMem mutated by FetchRateWithToken: %q -> %q", before, after)
+	}
+}
+
+// TestFetchRateWithTokenInvalid verifies a 401 returns ErrTokenInvalid and does
+// not mutate global tokenMem.
+func TestFetchRateWithTokenInvalid(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnauthorized)
+	}))
+	origAPIBase := testAPIBase
+	testAPIBase = srv.URL
+	defer func() {
+		srv.Close()
+		testAPIBase = origAPIBase
+	}()
+
+	tokenMu.RLock()
+	before := tokenMem
+	tokenMu.RUnlock()
+
+	_, err := FetchRateWithToken("bad-token")
+	if !errors.Is(err, ErrTokenInvalid) {
+		t.Errorf("FetchRateWithToken(bad) = %v, want ErrTokenInvalid", err)
+	}
+	tokenMu.RLock()
+	after := tokenMem
+	tokenMu.RUnlock()
+	if after != before {
+		t.Errorf("tokenMem mutated on invalid token: %q -> %q", before, after)
+	}
+}
+
+// TestFetchReleaseRateLimited verifies fetchRelease surfaces ErrRateLimited when
+// the endpoint returns 403 with X-RateLimit-Remaining==0.
+func TestFetchReleaseRateLimited(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-RateLimit-Remaining", "0")
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	origAPIBase := testAPIBase
+	testAPIBase = srv.URL
+	defer func() {
+		srv.Close()
+		testAPIBase = origAPIBase
+	}()
+
+	_, err := fetchRelease("owner/repo")
+	if !errors.Is(err, ErrRateLimited) {
+		t.Errorf("fetchRelease on 403/remaining=0 = %v, want ErrRateLimited", err)
+	}
+}
+
 // TestExtractRepo guards the delegation to loader.NormalizeRepo so a stored
 // github field is normalized to "owner/repo" before it reaches the GitHub API.
 func TestExtractRepo(t *testing.T) {
@@ -586,5 +757,51 @@ func TestExtractRepo(t *testing.T) {
 		if got := extractRepo(tt.field); got != tt.want {
 			t.Errorf("extractRepo(%q) = %q, want %q", tt.field, got, tt.want)
 		}
+	}
+}
+
+// TestFetchRateMalformedBody verifies a 200 /rate_limit response with a body
+// that is not valid JSON surfaces a decode error and leaves the shared snapshot
+// untouched (never a bogus Known snapshot).
+func TestFetchRateMalformedBody(t *testing.T) {
+	resetRate(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("{not json"))
+	}))
+	origAPIBase := testAPIBase
+	testAPIBase = srv.URL
+	defer func() {
+		srv.Close()
+		testAPIBase = origAPIBase
+	}()
+
+	if _, err := FetchRate(); err == nil {
+		t.Fatal("FetchRate on malformed body = nil error, want decode error")
+	}
+	if got := Rate(); got.Known {
+		t.Errorf("shared snapshot became Known after malformed body: %+v", got)
+	}
+}
+
+// TestFetchRateNon200 verifies a non-200 /rate_limit status is surfaced as an
+// error via classifyStatus rather than decoded as a valid snapshot.
+func TestFetchRateNon200(t *testing.T) {
+	resetRate(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	origAPIBase := testAPIBase
+	testAPIBase = srv.URL
+	defer func() {
+		srv.Close()
+		testAPIBase = origAPIBase
+	}()
+
+	if _, err := FetchRate(); err == nil {
+		t.Fatal("FetchRate on 500 = nil error, want error")
+	}
+	if got := Rate(); got.Known {
+		t.Errorf("shared snapshot became Known after 500: %+v", got)
 	}
 }

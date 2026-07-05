@@ -2,6 +2,7 @@ package model
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -48,7 +49,16 @@ type remoteMsg struct {
 	latest     string
 	repoStatus string
 	card       version.RepoCard
+	rate       version.RateLimit
 	err        error
+}
+
+// rateMsg carries a rate-limit snapshot fetched from GET /rate_limit, which
+// does not spend core quota. It seeds/refreshes m.rate independently of any
+// per-tool remote fetch (e.g. on startup and on the API-status overlay refresh).
+type rateMsg struct {
+	rate version.RateLimit
+	err  error
 }
 
 type changelogMsg struct {
@@ -118,6 +128,21 @@ type Model struct {
 	toolsW int
 	briefW int
 	helpW  int
+
+	// rate is the latest GitHub rate-limit snapshot, seeded on startup by
+	// fetchRateCmd and refreshed by remote fetches. A Known==false snapshot
+	// never overwrites a previously-known value.
+	rate version.RateLimit
+
+	// showingAPIStatus toggles the L-triggered API-status overlay, which shows
+	// the token source, current rate limits, and reset time.
+	showingAPIStatus bool
+
+	// enteringToken is the overlay's token-input sub-mode ([e]); tokenInput is
+	// the masked field and tokenError holds the inline "token invalid" message.
+	enteringToken bool
+	tokenInput    textinput.Model
+	tokenError    string
 }
 
 func New(meta []loader.ToolMeta) Model {
@@ -145,6 +170,12 @@ func New(meta []loader.ToolMeta) Model {
 	nmi.Placeholder = "new name..."
 	nmi.CharLimit = 256
 
+	tki := textinput.New()
+	tki.Placeholder = "ghp_..."
+	tki.CharLimit = 256
+	tki.EchoMode = textinput.EchoPassword
+	tki.EchoCharacter = '•'
+
 	m := Model{
 		tools:         loader.ToolsFromMeta(meta),
 		versions:      make(map[string]VersionInfo),
@@ -158,6 +189,7 @@ func New(meta []loader.ToolMeta) Model {
 		helpSearch:    hsi,
 		trackInput:    tri,
 		nameInput:     nmi,
+		tokenInput:    tki,
 		meta:          meta,
 	}
 
@@ -165,7 +197,10 @@ func New(meta []loader.ToolMeta) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	cmds := make([]tea.Cmd, 0, len(m.tools)*2)
+	cmds := make([]tea.Cmd, 0, len(m.tools)*2+1)
+	// Seed the rate-limit signal up front; on warm-cache starts remote fetches
+	// make no request, so this is the only observation that populates m.rate.
+	cmds = append(cmds, fetchRateCmd())
 	for _, t := range m.tools {
 		cmds = append(cmds, fetchInstalledCmd(t))
 		if t.GitHub != "" {
@@ -212,7 +247,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case remoteMsg:
-		if msg.err == nil {
+		// Merge the rate snapshot without clobbering a known value with an
+		// unknown one (cache-hit remote fetches make no request, so carry
+		// Known==false).
+		if msg.rate.Known {
+			m.rate = msg.rate
+		}
+		// Data is displayable when the fetch succeeded, or when a rate-limit error
+		// still carried usable cache values: a fresh tag from a partial fetch, or
+		// the stale card kept on a total failure. In those cases render the data so
+		// known tags/cards survive the outage. Only a rate-limit failure with
+		// nothing to show falls back to the "rate limited — press [L]" hint. A
+		// generic error carries no data and must not touch the caches.
+		hasData := msg.latest != "" || msg.card.About != ""
+		switch {
+		case msg.err == nil, errors.Is(msg.err, version.ErrRateLimited) && hasData:
 			info := m.versions[msg.toolName]
 			info.Latest = msg.latest
 			m.versions[msg.toolName] = info
@@ -222,8 +271,42 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.repoCards[msg.toolName] = msg.card
 			m.toolsViewport.SetContent(m.renderLeftContent())
 			m.briefViewport.SetContent(m.renderCard())
+		case msg.repoStatus == "rate-limited":
+			// Rate-limited with no card to show: mark the tool so the card can
+			// render "rate limited — press [L]" instead of a bare failure.
+			m.repoStatus[msg.toolName] = "rate-limited"
+			m.briefViewport.SetContent(m.renderCard())
 		}
 		return m, nil
+
+	case rateMsg:
+		// Non-clobber merge: only a successful, Known snapshot updates m.rate.
+		if msg.err == nil && msg.rate.Known {
+			m.rate = msg.rate
+		}
+		return m, nil
+
+	case tokenValidatedMsg:
+		// Validation result for a candidate token entered in the overlay. On
+		// failure nothing is written to disk; the inline message stays visible
+		// and the input remains open for a retry.
+		if msg.err != nil {
+			m.tokenError = "token invalid"
+			return m, nil
+		}
+		if err := version.SetToken(msg.token); err != nil {
+			m.tokenError = "could not save token"
+			return m, nil
+		}
+		m.enteringToken = false
+		m.tokenInput.Blur()
+		m.tokenInput.SetValue("")
+		m.tokenError = ""
+		if msg.rate.Known {
+			m.rate = msg.rate
+		}
+		// Backfill cards now that the higher limit is available.
+		return m, m.autoFetchCmdsForSelected()
 
 	case openURLMsg:
 		if msg.err != nil {
@@ -291,6 +374,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.renaming {
 			return m.updateRenameInput(msg)
+		}
+		if m.showingAPIStatus {
+			return m.updateAPIStatus(msg)
 		}
 
 		if m.helpSearching {
@@ -587,6 +673,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 			}
+
+		case "L":
+			// Open the API-status overlay and refresh the rate numbers on demand
+			// (GET /rate_limit does not spend quota). Reached only when no other
+			// input/modal mode is active — those branches return earlier.
+			m.showingAPIStatus = true
+			m.enteringToken = false
+			m.tokenError = ""
+			return m, fetchRateCmd()
 		}
 
 		if m.focus == focusBrief {
@@ -862,6 +957,9 @@ func (m Model) View() string {
 	right := m.renderHelp()
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, middle, right)
 	layout := lipgloss.JoinVertical(lipgloss.Left, body, m.renderStatusBar())
+	if m.showingAPIStatus {
+		layout = ui.PlaceOverlay(layout, m.renderAPIStatus())
+	}
 	// Vertical margin only; no horizontal margin so panels/status bar reach the
 	// terminal edges.
 	return lipgloss.NewStyle().Margin(1, 0).Render(layout)
@@ -924,28 +1022,235 @@ func (m Model) renderStatusBar() string {
 			keyHint("esc"),
 		))
 	}
+	if m.showingAPIStatus && m.enteringToken {
+		return style.Render(keyHint("enter") + " validate & save  " + keyHint("esc") + " cancel")
+	}
+	if m.showingAPIStatus {
+		return style.Render(keyHint("r") + " refresh  " + keyHint("esc") + " close")
+	}
 	if m.statusMsg != "" {
 		return style.Render(ui.SearchPromptStyle.Render(m.statusMsg))
 	}
 	if m.focus == focusBrief {
 		hints := keyHint("o") + " open repo  " + keyHint("c") + " changelog  " + keyHint("s") + " status  " + keyHint("e") + " note  " + keyHint("t") + " tags  " + keyHint("q") + " quit"
-		return style.Render(hints)
+		return style.Render(m.withRateSignal(hints))
 	}
 	if m.focus == focusHelp {
 		hints := keyHint("↑↓") + " scroll  " + keyHint("h") + " --help  " + keyHint("m") + " man  " + keyHint("/") + " search  " + keyHint("←") + " back  " + keyHint("q") + " quit"
-		return style.Render(hints)
+		return style.Render(m.withRateSignal(hints))
 	}
-	return style.Render(
+	return style.Render(m.withRateSignal(
 		keyHint("/") + " search  " +
 			keyHint("t") + " track  " +
 			keyHint("u") + " untrack  " +
 			keyHint("r") + " rename  " +
 			keyHint("q") + " quit",
-	)
+	))
+}
+
+// withRateSignal appends the rate-limit signal to a hint bar when there is one.
+func (m Model) withRateSignal(hints string) string {
+	if sig := m.rateSignal(); sig != "" {
+		return hints + "   " + sig
+	}
+	return hints
 }
 
 func keyHint(k string) string {
 	return ui.SearchPromptStyle.Render("[" + k + "]")
+}
+
+// rateLowThreshold is the number of remaining GitHub API requests at or below
+// which the status bar (and API-status overlay) flags rate-limit pressure.
+const rateLowThreshold = 10
+
+// rateLevel classifies a rate snapshot's pressure so the status-bar signal and
+// the overlay icon share one decision. It is the single source of truth for the
+// none/warn/exhausted thresholds.
+type rateLevel int
+
+const (
+	rateUnknown rateLevel = iota
+	rateOK
+	rateWarn
+	rateExhausted
+)
+
+func classifyRate(r version.RateLimit) rateLevel {
+	if !r.Known {
+		return rateUnknown
+	}
+	switch {
+	case r.Remaining == 0:
+		return rateExhausted
+	case r.Remaining <= rateLowThreshold:
+		return rateWarn
+	default:
+		return rateOK
+	}
+}
+
+// rateSignal returns the status-bar rate-limit indicator for the current
+// snapshot, or "" when nothing should be shown (no observation yet).
+func (m Model) rateSignal() string {
+	switch classifyRate(m.rate) {
+	case rateExhausted:
+		return ui.DangerStyle.Render("✕ GH limit exhausted") + " · " + keyHint("L")
+	case rateWarn:
+		return ui.WarnStyle.Render(fmt.Sprintf("⚠ GH %d/%d", m.rate.Remaining, m.rate.Limit)) + " · " + keyHint("L") + " details"
+	case rateOK:
+		return ui.GithubStyle.Render(fmt.Sprintf("GH %d/%d", m.rate.Remaining, m.rate.Limit))
+	default:
+		return ""
+	}
+}
+
+// rateIcon returns the styled indicator (none / ⚠ / ✕) for a rate snapshot,
+// sharing classifyRate with the status-bar signal so the overlay and the bar
+// never disagree. Returns "" when nothing should flag.
+func rateIcon(rate version.RateLimit) string {
+	switch classifyRate(rate) {
+	case rateExhausted:
+		return ui.DangerStyle.Render("✕")
+	case rateWarn:
+		return ui.WarnStyle.Render("⚠")
+	default:
+		return ""
+	}
+}
+
+// maskToken renders a token as its first 4 and last 4 characters joined by
+// bullets (e.g. "ghp_••••••••3f2a"), never exposing the middle. Short tokens
+// are fully masked.
+func maskToken(t string) string {
+	if len(t) <= 8 {
+		return strings.Repeat("•", len(t))
+	}
+	return t[:4] + strings.Repeat("•", 8) + t[len(t)-4:]
+}
+
+// updateAPIStatus handles keys while the API-status overlay is open: [e] opens
+// the masked token-input sub-mode, [d] removes a config-sourced token, [r]
+// refreshes the numbers, [esc] closes. While entering a token, submit validates
+// via version.FetchRateWithToken before anything is persisted.
+func (m Model) updateAPIStatus(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.enteringToken {
+		switch msg.String() {
+		case "enter":
+			candidate := strings.TrimSpace(m.tokenInput.Value())
+			if candidate == "" {
+				m.enteringToken = false
+				m.tokenInput.Blur()
+				m.tokenError = ""
+				return m, nil
+			}
+			// Validate the candidate against /rate_limit; SetToken runs only
+			// after a 200 in the tokenValidatedMsg handler.
+			return m, validateTokenCmd(candidate)
+		case "esc":
+			m.enteringToken = false
+			m.tokenInput.Blur()
+			m.tokenInput.SetValue("")
+			m.tokenError = ""
+			return m, nil
+		default:
+			var cmd tea.Cmd
+			m.tokenInput, cmd = m.tokenInput.Update(msg)
+			return m, cmd
+		}
+	}
+	switch msg.String() {
+	case "esc", "q":
+		m.showingAPIStatus = false
+		m.tokenError = ""
+		return m, nil
+	case "r":
+		return m, fetchRateCmd()
+	case "e":
+		m.enteringToken = true
+		m.tokenError = ""
+		m.tokenInput.SetValue("")
+		m.tokenInput.Focus()
+		return m, textinput.Blink
+	case "d":
+		if version.TokenSource() == "config" {
+			version.ClearToken() //nolint:errcheck
+			return m, fetchRateCmd()
+		}
+	}
+	return m, nil
+}
+
+// tokenValidatedMsg carries the result of validating a candidate token against
+// GET /rate_limit. token is the candidate to persist on success.
+type tokenValidatedMsg struct {
+	token string
+	rate  version.RateLimit
+	err   error
+}
+
+// validateTokenCmd checks a candidate token against /rate_limit without touching
+// package token state; the handler persists it only on success.
+func validateTokenCmd(token string) tea.Cmd {
+	return func() tea.Msg {
+		rate, err := version.FetchRateWithToken(token)
+		return tokenValidatedMsg{token: token, rate: rate, err: err}
+	}
+}
+
+// renderAPIStatus builds the API-status overlay body: token source (masked),
+// current limits with the shared icon, and the reset time.
+func (m Model) renderAPIStatus() string {
+	var b strings.Builder
+	b.WriteString(ui.SectionLabelStyle.Render("GitHub API status") + "\n\n")
+
+	source := version.TokenSource()
+	tokenLine := "Token: " + source
+	if tok := version.Token(); tok != "" {
+		tokenLine += " (" + maskToken(tok) + ")"
+	}
+	b.WriteString(ui.InfoStyle.Render(tokenLine) + "\n")
+
+	if m.rate.Known {
+		icon := rateIcon(m.rate)
+		limitLine := fmt.Sprintf("Limit: %d / %d", m.rate.Remaining, m.rate.Limit)
+		if icon != "" {
+			limitLine = icon + " " + limitLine
+		}
+		b.WriteString(ui.InfoStyle.Render(limitLine) + "\n")
+		if !m.rate.Reset.IsZero() {
+			mins := int(time.Until(m.rate.Reset).Minutes())
+			if mins < 0 {
+				mins = 0
+			}
+			b.WriteString(ui.InfoStyle.Render(fmt.Sprintf(
+				"Reset: in %d min (%s)", mins, m.rate.Reset.Format("15:04"))) + "\n")
+		}
+	} else {
+		b.WriteString(ui.InfoStyle.Render("Limit: unknown") + "\n")
+	}
+
+	if m.enteringToken {
+		b.WriteString("\n" + ui.SearchPromptStyle.Render("token: ") + m.tokenInput.View() + "\n")
+	}
+	if m.tokenError != "" {
+		b.WriteString(ui.DangerStyle.Render(m.tokenError) + "\n")
+	}
+
+	b.WriteString("\n")
+	var hints string
+	if m.enteringToken {
+		hints = keyHint("enter") + " validate & save  " + keyHint("esc") + " cancel"
+	} else {
+		hints = keyHint("e") + " set token  "
+		if source == "config" {
+			hints += keyHint("d") + " remove token  "
+		}
+		hints += keyHint("r") + " refresh  " + keyHint("esc") + " close"
+	}
+	b.WriteString(ui.MetaNoteStyle.Render(hints))
+
+	return ui.OverlayBorder.Render(b.String())
 }
 
 func (m Model) calcVpHeight() int {
@@ -1149,6 +1454,9 @@ func (m Model) renderCard() string {
 		sb.WriteString(m.sectionDivider("info"))
 		if t.GitHub != "" {
 			sb.WriteString(ui.GithubStyle.Render("repo: "+t.GitHub) + "\n")
+			if !hasCard && m.repoStatus[t.Name] == "rate-limited" {
+				sb.WriteString(ui.WarnStyle.Render("rate limited — press [L]") + "\n")
+			}
 		}
 		if hasCard {
 			if card.Stars > 0 {
@@ -1424,10 +1732,16 @@ func fetchInstalledCmd(t loader.Tool) tea.Cmd {
 func fetchRemoteCmd(t loader.Tool) tea.Cmd {
 	return func() tea.Msg {
 		d := version.GetRepoData(t.GitHub)
+		repoStatus := d.RepoStatus
+		// Rate-limited and no data came back: signal the card to render a
+		// "rate limited" hint. This gives ErrRateLimited a real runtime consumer.
+		if errors.Is(d.Err, version.ErrRateLimited) && d.Latest == "" && d.About == "" {
+			repoStatus = "rate-limited"
+		}
 		return remoteMsg{
 			toolName:   t.Name,
 			latest:     d.Latest,
-			repoStatus: d.RepoStatus,
+			repoStatus: repoStatus,
 			card: version.RepoCard{
 				About:       d.About,
 				Stars:       d.Stars,
@@ -1438,7 +1752,20 @@ func fetchRemoteCmd(t loader.Tool) tea.Cmd {
 				Body:        d.Body,
 				RepoStatus:  d.RepoStatus,
 			},
+			rate: version.Rate(),
+			err:  d.Err,
 		}
+	}
+}
+
+// fetchRateCmd queries GET /rate_limit, which reports the current quota without
+// spending it, and emits a rateMsg. Fired on startup to seed the status-bar
+// signal even on warm-cache starts (where remote fetches make no request) and
+// on demand from the API-status overlay.
+func fetchRateCmd() tea.Cmd {
+	return func() tea.Msg {
+		rate, err := version.FetchRate()
+		return rateMsg{rate: rate, err: err}
 	}
 }
 
@@ -1586,10 +1913,8 @@ func stripMarkdown(s string) string {
 	return strings.TrimSpace(sb.String())
 }
 
-var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
-
 func stripANSI(s string) string {
-	return ansiRe.ReplaceAllString(s, "")
+	return ui.StripANSI(s)
 }
 
 // cleanTerminalOutput strips ANSI escapes, carriage returns, and backspace

@@ -2,11 +2,13 @@ package version
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -14,6 +16,183 @@ import (
 )
 
 const cacheTTL = 24 * time.Hour
+
+// ghClient is the shared HTTP client for all GitHub API calls.
+var ghClient = &http.Client{Timeout: 5 * time.Second}
+
+// RateLimit is a snapshot of the GitHub REST API rate-limit state. Limit is 60
+// for unauthenticated requests and 5000 with a token. Known reports whether any
+// successful observation has been made yet.
+type RateLimit struct {
+	Limit     int
+	Remaining int
+	Reset     time.Time
+	Known     bool
+}
+
+// rate state, guarded by rlMu.
+var (
+	rlMu sync.RWMutex
+	rl   RateLimit
+)
+
+// Rate returns the current rate-limit snapshot.
+func Rate() RateLimit {
+	rlMu.RLock()
+	defer rlMu.RUnlock()
+	return rl
+}
+
+// updateRateFromHeaders parses the X-RateLimit-* response headers into the
+// shared rl snapshot. Missing or malformed headers are ignored (the previous
+// snapshot is left untouched); Known is set true only when values parse.
+func updateRateFromHeaders(h http.Header) {
+	limitStr := h.Get("X-RateLimit-Limit")
+	remainingStr := h.Get("X-RateLimit-Remaining")
+	resetStr := h.Get("X-RateLimit-Reset")
+	if limitStr == "" && remainingStr == "" && resetStr == "" {
+		return
+	}
+	limit, errL := strconv.Atoi(limitStr)
+	remaining, errR := strconv.Atoi(remainingStr)
+	resetUnix, errT := strconv.ParseInt(resetStr, 10, 64)
+	if errL != nil || errR != nil || errT != nil {
+		return
+	}
+	rlMu.Lock()
+	rl = RateLimit{
+		Limit:     limit,
+		Remaining: remaining,
+		Reset:     time.Unix(resetUnix, 0),
+		Known:     true,
+	}
+	rlMu.Unlock()
+}
+
+// doGH performs a GitHub API request with the shared client. It sets the Accept
+// header and, when a token resolves, an Authorization header, then accounts for
+// the rate-limit headers on the response. This is the single auth + accounting
+// point for all GitHub calls; callers keep their own status-code handling.
+func doGH(req *http.Request) (*http.Response, error) {
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	if token := resolveToken(); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := ghClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	updateRateFromHeaders(resp.Header)
+	return resp, nil
+}
+
+// ErrRateLimited signals that a GitHub request was rejected because the API
+// rate limit is exhausted (403/429 with X-RateLimit-Remaining == 0). Callers
+// use errors.Is to degrade gracefully instead of showing a raw HTTP error.
+var ErrRateLimited = errors.New("github api rate limit exceeded")
+
+// ErrTokenInvalid signals that a candidate token failed validation against
+// GET /rate_limit (HTTP 401). Used by FetchRateWithToken before persistence.
+var ErrTokenInvalid = errors.New("github token invalid")
+
+// classifyStatus maps a non-2xx GitHub response to an error. A 403 or 429 whose
+// own X-RateLimit-Remaining header reads 0 is rate-limit exhaustion and returns
+// ErrRateLimited; a 403 with remaining>0 is a genuine access denial and returns a
+// generic HTTP error. Remaining is read from this response's own headers, never
+// from the global rl snapshot, because a concurrent request may overwrite rl
+// between this request's accounting and its classification.
+func classifyStatus(resp *http.Response) error {
+	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
+		if resp.Header.Get("X-RateLimit-Remaining") == "0" {
+			return ErrRateLimited
+		}
+	}
+	return fmt.Errorf("GitHub API: HTTP %d", resp.StatusCode)
+}
+
+// rateLimitResponse decodes the subset of GET /rate_limit we consume.
+type rateLimitResponse struct {
+	Resources struct {
+		Core struct {
+			Limit     int   `json:"limit"`
+			Remaining int   `json:"remaining"`
+			Reset     int64 `json:"reset"`
+		} `json:"core"`
+	} `json:"resources"`
+}
+
+// decodeCoreRate reads a /rate_limit response body into a RateLimit snapshot.
+func decodeCoreRate(body io.Reader) (RateLimit, error) {
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return RateLimit{}, err
+	}
+	var rr rateLimitResponse
+	if err := json.Unmarshal(data, &rr); err != nil {
+		return RateLimit{}, err
+	}
+	return RateLimit{
+		Limit:     rr.Resources.Core.Limit,
+		Remaining: rr.Resources.Core.Remaining,
+		Reset:     time.Unix(rr.Resources.Core.Reset, 0),
+		Known:     true,
+	}, nil
+}
+
+// FetchRate queries GET /rate_limit for the current core rate-limit state and
+// updates the shared snapshot. The rate_limit endpoint does not consume core
+// quota, so it is safe to call on demand (overlay open, refresh, startup seed).
+// It uses the resolved token via doGH.
+func FetchRate() (RateLimit, error) {
+	req, err := http.NewRequest("GET", apiBase()+"/rate_limit", nil)
+	if err != nil {
+		return RateLimit{}, err
+	}
+	resp, err := doGH(req)
+	if err != nil {
+		return RateLimit{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return RateLimit{}, classifyStatus(resp)
+	}
+	snap, err := decodeCoreRate(resp.Body)
+	if err != nil {
+		return RateLimit{}, err
+	}
+	rlMu.Lock()
+	rl = snap
+	rlMu.Unlock()
+	return snap, nil
+}
+
+// FetchRateWithToken validates a candidate token by issuing GET /rate_limit with
+// an explicit Authorization header. It does NOT touch tokenMem, the token file,
+// or the global rl snapshot, so an unpersisted token never leaks into shared
+// state. A 401 returns ErrTokenInvalid; callers persist via SetToken only after a
+// successful (200) result.
+func FetchRateWithToken(token string) (RateLimit, error) {
+	req, err := http.NewRequest("GET", apiBase()+"/rate_limit", nil)
+	if err != nil {
+		return RateLimit{}, err
+	}
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := ghClient.Do(req)
+	if err != nil {
+		return RateLimit{}, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return RateLimit{}, ErrTokenInvalid
+	}
+	if resp.StatusCode != http.StatusOK {
+		return RateLimit{}, classifyStatus(resp)
+	}
+	return decodeCoreRate(resp.Body)
+}
 
 var cacheMu sync.Mutex
 
@@ -68,6 +247,11 @@ type RepoData struct {
 	Body        string
 	HtmlUrl     string
 	PublishedAt string
+	// Err carries a classified fetch error (currently only ErrRateLimited) so
+	// callers can degrade gracefully via errors.Is. It is set when a release or
+	// repo-info fetch was rejected for rate limiting; the returned data may still
+	// hold stale values from the cache.
+	Err error
 }
 
 func repoDataFromEntry(e CacheEntry) RepoData {
@@ -114,13 +298,23 @@ func GetRepoData(githubField string) RepoData {
 	repoStatus, about, stars, infoErr := fetchRepoInfo(repo)
 	langs, _ := fetchLanguages(repo)
 
+	// Surface a rate-limit classification so the UI can render "rate limited"
+	// instead of a bare failure. The data itself may still carry stale cache
+	// values; the error is advisory.
+	var rlErr error
+	if errors.Is(relErr, ErrRateLimited) || errors.Is(infoErr, ErrRateLimited) {
+		rlErr = ErrRateLimited
+	}
+
 	// Total fetch failure (offline / rate-limited): both the release and the repo
 	// info endpoints failed. Do not write a fresh-but-empty entry — since freshness
 	// is decided on CheckedAt alone, that would read back as a valid cache hit and
 	// suppress any retry for the full TTL. Return the stale entry (zero value if the
 	// cache was cold) so the next start retries.
 	if relErr != nil && infoErr != nil {
-		return repoDataFromEntry(entry)
+		d := repoDataFromEntry(entry)
+		d.Err = rlErr
+		return d
 	}
 
 	var stored CacheEntry
@@ -144,7 +338,9 @@ func GetRepoData(githubField string) RepoData {
 		stored = e
 		return e
 	})
-	return repoDataFromEntry(stored)
+	d := repoDataFromEntry(stored)
+	d.Err = rlErr
+	return d
 }
 
 // GetLatest returns the latest release tag for a tool's github field.
@@ -243,18 +439,13 @@ func fetchRepoInfo(repo string) (status, about string, stars int, err error) {
 	if reqErr != nil {
 		return "", "", 0, reqErr
 	}
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, doErr := client.Do(req)
+	resp, doErr := doGH(req)
 	if doErr != nil {
 		return "", "", 0, doErr
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return "", "", 0, fmt.Errorf("GitHub API: HTTP %d", resp.StatusCode)
+		return "", "", 0, classifyStatus(resp)
 	}
 	data, readErr := io.ReadAll(resp.Body)
 	if readErr != nil {
@@ -280,18 +471,13 @@ func fetchLanguages(repo string) (map[string]int, error) {
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := doGH(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GitHub API: HTTP %d", resp.StatusCode)
+		return nil, classifyStatus(resp)
 	}
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -311,26 +497,17 @@ func fetchRelease(repo string) (ReleaseInfo, error) {
 	if err != nil {
 		return ReleaseInfo{}, err
 	}
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
-	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := doGH(req)
 	if err != nil {
 		return ReleaseInfo{}, err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
-		return ReleaseInfo{}, fmt.Errorf("GitHub API rate limit exceeded (set GITHUB_TOKEN to increase quota)")
-	}
 	if resp.StatusCode == http.StatusNotFound {
 		return ReleaseInfo{}, fmt.Errorf("no releases found")
 	}
 	if resp.StatusCode != http.StatusOK {
-		return ReleaseInfo{}, fmt.Errorf("GitHub API: HTTP %d", resp.StatusCode)
+		return ReleaseInfo{}, classifyStatus(resp)
 	}
 
 	data, err := io.ReadAll(resp.Body)

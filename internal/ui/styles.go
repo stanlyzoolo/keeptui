@@ -15,6 +15,7 @@ var (
 	ColorText     = lipgloss.Color("#E8E8E8")
 	ColorCategory = lipgloss.Color("#E8A87C")
 	ColorKey      = lipgloss.Color("#C8A97E")
+	ColorDanger   = lipgloss.Color("#D06060")
 
 	PanelBorder = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -46,6 +47,16 @@ var (
 
 	GithubStyle = lipgloss.NewStyle().
 			Foreground(ColorMuted)
+
+	// WarnStyle / DangerStyle flag GitHub API rate-limit pressure in the
+	// status bar and API-status overlay.
+	WarnStyle = lipgloss.NewStyle().
+			Foreground(ColorOrange).
+			Bold(true)
+
+	DangerStyle = lipgloss.NewStyle().
+			Foreground(ColorDanger).
+			Bold(true)
 
 	UpdateAvailableStyle = lipgloss.NewStyle().
 				Foreground(ColorOrange).

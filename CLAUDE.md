@@ -52,7 +52,8 @@ The model is a three-panel layout with focus cycling via `→/←` between `focu
 - **Central panel actions (`focusBrief`)** operate on the data the card already shows: `o` opens the repo in the browser, `c` opens the changelog/releases page, `s` cycles the status (`loader.NextStatus`), `e` edits the note, `t` edits the tags. `o`/`c` go through `openURLCmd` (resolved per-`GOOS` by `browserCommand`); a tool with no `GitHub` sets `m.statusMsg` instead of launching. `s`/`e`/`t` mutate `m.meta` via `loader.UpsertMeta`, persist with `loader.SaveMeta`, then refresh the card with `m.briefViewport.SetContent(m.renderCard())`.
 - **Tracking is managed from `focusTools`**: `t` track (add by GitHub URL or plain name), `u` untrack (with confirmation), `r` rename (fix the binary name when the repo name differs). Each is a mode flag (`tracking`/`confirmingUntrack`/`renaming`) handled by an early branch in `Update()` and a matching branch in `renderStatusBar()`, mirroring the `editingNote`/`editingTags` input pattern. Mutations go through `loader.UpsertMeta`/`RemoveMeta`, persist via `loader.SaveMeta`, then rebuild `m.tools = loader.ToolsFromMeta(m.meta)` and refresh the viewport.
 - **Help bar** (`renderStatusBar()`) is per-focus; the `focusBrief` bar shows the action keys `[o] open repo  [c] changelog  [s] status  [e] note  [t] tags  [q] quit`.
-- **Search** (`/`) and overlays such as the changelog popup are rendered via `ui.PlaceOverlay`.
+- **API-status overlay (`L`)**: opens a read-only view of the GitHub rate limit and token (source, masked value, remaining/limit with threshold icon, reset time) with token entry/removal/refresh. It is a modal (`showingAPIStatus`, plus a token-input sub-mode) handled by an early branch in `Update()` and a matching `renderStatusBar()` branch; `L` is guarded to fire only when no other input/modal mode is active. See the GitHub API section for the data flow.
+- **Search** (`/`), the changelog popup, and the API-status overlay are rendered via `ui.PlaceOverlay` (a centered fg-over-bg compositor introduced with the rate-limit work).
 
 ### Adding a new built-in tool
 
@@ -66,9 +67,24 @@ Add `internal/loader/data/tools/<toolname>/config.yaml`. Required fields: `name`
 | User tool configs | `~/.config/keys/tools/<tool>/config.yaml` |
 | Tracker metadata | `~/.config/keys/meta.yaml` |
 | Version cache (24h TTL) | `~/.config/keys/cache.json` |
+| GitHub token (`0600`) | `~/.config/keys/token` |
 
 ### GitHub API
 
-`GITHUB_TOKEN` env var increases rate limits when fetching latest versions. The `version` package caches responses in `cache.json`; `FetchAndCache` bypasses the TTL for forced refresh. URL→`owner/repo` normalization lives in `loader.NormalizeRepo`; `version.extractRepo` delegates to it (the `loader` package owns GitHub-ref parsing to avoid an import cycle).
+Unauthenticated the REST API allows **60 requests/hour** per IP; with a token it is **5000/hour**. Each tool with a `GitHub` field costs 3 requests (`fetchRelease` + `fetchRepoInfo` + `fetchLanguages` inside `GetRepoData`), so a cold start with many tools and no token can exhaust the quota. A token raises the limit and is resolved with **env precedence**: `GITHUB_TOKEN` env var always wins, otherwise the config-file token (`~/.config/keys/token`, `0600`, loaded lazily once via `sync.Once`).
+
+**Token (`token.go`):** `resolveToken()` returns env token else `tokenMem` (all `tokenMem` access under `tokenMu`, `-race` clean). `SetToken(t)` writes the `0600` file (`MkdirAll` for the dir) and updates memory; `ClearToken()` removes both; `TokenSource()` reports `"env"|"config"|"none"`; `Token()` returns the effective token (env precedence) for the overlay's masked preview. Env source never persists — the config file only holds a TUI-entered token.
+
+**`doGH(req)`** is the single auth point: it sets `Accept` + `Authorization: Bearer <resolveToken()>` (only when non-empty), runs the request with the 5s-timeout client, and calls `updateRateFromHeaders(resp.Header)`. The 3 fetchers build a request then call `doGH` — no more duplicated header/client code or `os.Getenv` copies.
+
+**Hybrid rate read:** response headers (`X-RateLimit-Limit`/`-Remaining`/`-Reset`) update the shared `RateLimit` snapshot (`rlMu`-guarded) in the background for free but only when a request happens; `FetchRate()` hits `GET /rate_limit` (decodes `resources.core`) for on-demand truth **without spending core quota** — used on overlay open, refresh, and startup seeding. `Rate()` returns the snapshot. Warm-cache starts make no request, so `Init()` fires one `fetchRateCmd` to seed the status-bar signal; snapshots with `Known==false` must never overwrite a known `m.rate` (non-clobber merge).
+
+**`ErrRateLimited`** (typed) is returned by `classifyStatus(resp)` for 403/429 **only when the response's own `X-RateLimit-Remaining == 0`** (read from the per-response header, never global `rl`, since concurrent goroutines race on `rl`); a 403 with remaining>0 is a generic `HTTP %d`. `fetchRemoteCmd` maps `errors.Is(err, ErrRateLimited)` + no cached card to a `"rate-limited"` `repoStatus` so the card renders "rate limited — press [L]" instead of a bare error; known tags/cards survive a total failure.
+
+**Token validation before persistence:** `FetchRateWithToken(token)` issues `/rate_limit` with an explicit `Authorization` header **without touching `tokenMem`/the file**; 401 → `ErrTokenInvalid`. `SetToken` runs only after a 200, so an invalid token is never written to disk.
+
+**API-status overlay (`L`):** opens via `ui.PlaceOverlay`, shows token source (masked), limit line with the shared `rateLowThreshold` icon (none / `⚠` / `✕`), and reset time; `[e]` enters a masked `textinput` to set a token (validated via `FetchRateWithToken`, then `SetToken` + `autoFetchCmdsForSelected()` backfill), `[d]` removes it (config source only), `[r]` refreshes, `[esc]` closes. `L` is guarded — ignored while any input/modal mode is active.
+
+The `version` package caches responses in `cache.json`; `FetchAndCache` bypasses the TTL for forced refresh. URL→`owner/repo` normalization lives in `loader.NormalizeRepo`; `version.extractRepo` delegates to it (the `loader` package owns GitHub-ref parsing to avoid an import cycle).
 
 **Cache writes must go through `updateCacheEntry`**. Every read-modify-write of `cache.json` (`GetLatest`, `GetRepoCard`, `GetChangelog`, `GetRepoData`, `FetchAndCache`) uses `updateCacheEntry(repo, mutate)`, which under `cacheMu` re-reads the current cache from disk, applies `mutate` to that single entry, and writes back. This makes each entry's update atomic and merge-on-write: `mutate` takes missing fields from the freshly-read `existing` entry, so parallel startup goroutines writing different repos no longer clobber each other (the old "last writer wins on a stale whole-file snapshot" bug that forced a full refetch every start). Never write the cache by hand with `LoadCache`/`SaveCache` outside this helper. `GetRepoData` is the single network pass (release + repo info + languages); `GetLatest`/`GetRepoCard` are thin wrappers over it to avoid a duplicate `fetchRepoInfo`.

@@ -254,6 +254,57 @@ func TestRenderStatusBarFocusBrief(t *testing.T) {
 	}
 }
 
+func TestRenderStatusBarRateSignal(t *testing.T) {
+	t.Run("unknown renders no signal", func(t *testing.T) {
+		m := Model{width: 80, focus: focusTools}
+		m.rate = version.RateLimit{Known: false, Remaining: 0, Limit: 60}
+		got := m.renderStatusBar()
+		for _, absent := range []string{"GH", "⚠", "✕"} {
+			if strings.Contains(got, absent) {
+				t.Errorf("unknown rate status bar = %q, should not contain %q", got, absent)
+			}
+		}
+	})
+
+	t.Run("normal renders quiet count", func(t *testing.T) {
+		m := Model{width: 80, focus: focusTools}
+		m.rate = version.RateLimit{Known: true, Remaining: 4800, Limit: 5000}
+		got := m.renderStatusBar()
+		if !strings.Contains(got, "GH 4800/5000") {
+			t.Errorf("normal rate status bar = %q, missing count", got)
+		}
+		for _, absent := range []string{"⚠", "✕"} {
+			if strings.Contains(got, absent) {
+				t.Errorf("normal rate status bar = %q, should not contain %q", got, absent)
+			}
+		}
+	})
+
+	t.Run("warning icon at threshold", func(t *testing.T) {
+		m := Model{width: 80, focus: focusTools}
+		m.rate = version.RateLimit{Known: true, Remaining: rateLowThreshold, Limit: 60}
+		got := m.renderStatusBar()
+		if !strings.Contains(got, "⚠") {
+			t.Errorf("warning rate status bar = %q, missing warn icon", got)
+		}
+		if !strings.Contains(got, "[L]") {
+			t.Errorf("warning rate status bar = %q, missing [L] hint", got)
+		}
+	})
+
+	t.Run("danger icon at zero", func(t *testing.T) {
+		m := Model{width: 80, focus: focusTools}
+		m.rate = version.RateLimit{Known: true, Remaining: 0, Limit: 60}
+		got := m.renderStatusBar()
+		if !strings.Contains(got, "✕") {
+			t.Errorf("danger rate status bar = %q, missing danger icon", got)
+		}
+		if !strings.Contains(got, "[L]") {
+			t.Errorf("danger rate status bar = %q, missing [L] hint", got)
+		}
+	})
+}
+
 func TestRenderStatusBarTracking(t *testing.T) {
 	m := Model{width: 80, tracking: true, trackInput: textinput.New()}
 	got := m.renderStatusBar()
@@ -897,3 +948,293 @@ func TestUpdateInstalledAndRemoteMsgPopulateCaches(t *testing.T) {
 }
 
 var errBoom = errors.New("boom")
+
+func newRateModel() Model {
+	m := Model{
+		meta:          []loader.ToolMeta{{Name: "gh", GitHub: "cli/cli"}},
+		metaSelected:  0,
+		versions:      map[string]VersionInfo{},
+		repoStatus:    map[string]string{},
+		repoCards:     map[string]version.RepoCard{},
+		changelogData: map[string]changelogMsg{},
+	}
+	m.tools = loader.ToolsFromMeta(m.meta)
+	return m
+}
+
+// TestRemoteMsgRateMerge verifies the non-clobber merge: a Known snapshot is
+// stored, and a later Known==false snapshot (a cache-hit remote fetch) does not
+// wipe it.
+func TestRemoteMsgRateMerge(t *testing.T) {
+	known := version.RateLimit{Limit: 5000, Remaining: 4999, Known: true}
+	m := newRateModel()
+	updated, _ := m.Update(remoteMsg{toolName: "gh", latest: "2.0", rate: known})
+	nm := updated.(Model)
+	if nm.rate != known {
+		t.Fatalf("m.rate = %+v, want %+v", nm.rate, known)
+	}
+
+	// A Known==false snapshot must not overwrite the known value.
+	updated, _ = nm.Update(remoteMsg{toolName: "gh", latest: "2.1", rate: version.RateLimit{}})
+	nm = updated.(Model)
+	if nm.rate != known {
+		t.Errorf("Known==false remoteMsg clobbered m.rate: got %+v, want %+v", nm.rate, known)
+	}
+}
+
+// TestRateMsgHandler verifies rateMsg stores a Known snapshot and that an error
+// (or Known==false) leaves a previously known m.rate untouched.
+func TestRateMsgHandler(t *testing.T) {
+	known := version.RateLimit{Limit: 5000, Remaining: 100, Known: true}
+	m := newRateModel()
+	updated, _ := m.Update(rateMsg{rate: known})
+	nm := updated.(Model)
+	if nm.rate != known {
+		t.Fatalf("after rateMsg m.rate = %+v, want %+v", nm.rate, known)
+	}
+
+	// An error snapshot must not clobber the known value.
+	updated, _ = nm.Update(rateMsg{rate: version.RateLimit{Limit: 60, Known: true}, err: errBoom})
+	nm = updated.(Model)
+	if nm.rate != known {
+		t.Errorf("errored rateMsg clobbered m.rate: got %+v, want %+v", nm.rate, known)
+	}
+}
+
+// TestRemoteMsgRateLimitedHint verifies that a rate-limited remoteMsg with no
+// card sets the "rate-limited" repoStatus so the card can render a hint.
+func TestRemoteMsgRateLimitedHint(t *testing.T) {
+	m := newRateModel()
+	updated, _ := m.Update(remoteMsg{
+		toolName:   "gh",
+		repoStatus: "rate-limited",
+		rate:       version.RateLimit{Limit: 60, Remaining: 0, Known: true},
+		err:        version.ErrRateLimited,
+	})
+	nm := updated.(Model)
+	if got := nm.repoStatus["gh"]; got != "rate-limited" {
+		t.Errorf("repoStatus[gh] = %q, want rate-limited", got)
+	}
+	if _, ok := nm.repoCards["gh"]; ok {
+		t.Errorf("repoCards populated despite rate-limited error")
+	}
+	if !nm.rate.Known || nm.rate.Remaining != 0 {
+		t.Errorf("m.rate = %+v, want Known with Remaining 0", nm.rate)
+	}
+	// The card must actually render the hint, not just set the internal map.
+	if card := stripANSI(nm.renderCard()); !strings.Contains(card, "rate limited — press [L]") {
+		t.Errorf("renderCard() missing rate-limit hint; got:\n%s", card)
+	}
+}
+
+// TestRemoteMsgRateLimitedKeepsStaleData verifies that a rate-limit error
+// accompanied by usable stale/partial cache data still populates the caches
+// (known tags and cards must survive a rate-limited outage), rather than being
+// dropped in favour of the empty "rate limited" hint.
+func TestRemoteMsgRateLimitedKeepsStaleData(t *testing.T) {
+	m := newRateModel()
+	updated, _ := m.Update(remoteMsg{
+		toolName:   "gh",
+		latest:     "2.0",
+		repoStatus: "active",
+		card:       version.RepoCard{About: "stale about", Latest: "2.0"},
+		err:        version.ErrRateLimited,
+	})
+	nm := updated.(Model)
+	if got := nm.versions["gh"]; got.Latest != "2.0" {
+		t.Errorf("versions[gh].Latest = %q, want 2.0 (stale data dropped)", got.Latest)
+	}
+	if got := nm.repoStatus["gh"]; got != "active" {
+		t.Errorf("repoStatus[gh] = %q, want active", got)
+	}
+	if got, ok := nm.repoCards["gh"]; !ok || got.About != "stale about" {
+		t.Errorf("repoCards[gh] = %+v (ok=%v), want About:stale about", got, ok)
+	}
+}
+
+func TestMaskToken(t *testing.T) {
+	tests := []struct {
+		in   string
+		want string
+	}{
+		{"ghp_1234567890abcdef3f2a", "ghp_••••••••3f2a"},
+		{"12345678", "••••••••"},
+		{"abc", "•••"},
+		{"", ""},
+	}
+	for _, tt := range tests {
+		if got := maskToken(tt.in); got != tt.want {
+			t.Errorf("maskToken(%q) = %q, want %q", tt.in, got, tt.want)
+		}
+	}
+}
+
+func TestRenderAPIStatusOverlay(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "ghp_1234567890abcdef3f2a")
+
+	m := Model{width: 80, height: 24, showingAPIStatus: true}
+	m.rate = version.RateLimit{Known: true, Remaining: 0, Limit: 60}
+	got := m.renderAPIStatus()
+
+	for _, want := range []string{"GitHub API status", "env", "ghp_••••••••3f2a", "0 / 60", "✕", "[e]", "[r]", "[esc]"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("overlay = %q, missing %q", got, want)
+		}
+	}
+	// [d] remove token is hidden for the env source.
+	if strings.Contains(got, "remove token") {
+		t.Errorf("overlay = %q, should not offer remove token for env source", got)
+	}
+}
+
+func TestRenderAPIStatusWarnIcon(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+
+	m := Model{width: 80, height: 24, showingAPIStatus: true}
+	m.rate = version.RateLimit{Known: true, Remaining: rateLowThreshold, Limit: 60}
+	got := m.renderAPIStatus()
+	if !strings.Contains(got, "⚠") {
+		t.Errorf("overlay = %q, missing warn icon", got)
+	}
+}
+
+func TestAPIStatusOverlayToggle(t *testing.T) {
+	m := Model{width: 80, height: 24, focus: focusTools, ready: true}
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("L")})
+	nm := updated.(Model)
+	if !nm.showingAPIStatus {
+		t.Fatalf("pressing L did not open the API-status overlay")
+	}
+	if cmd == nil {
+		t.Errorf("pressing L should fire a rate fetch cmd")
+	}
+	// esc closes it.
+	updated2, _ := nm.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	if updated2.(Model).showingAPIStatus {
+		t.Errorf("esc did not close the API-status overlay")
+	}
+}
+
+// TestUpdateAPIStatusOpensTokenEntry verifies [e] switches the overlay into the
+// masked token-input sub-mode.
+func TestUpdateAPIStatusOpensTokenEntry(t *testing.T) {
+	m := Model{width: 80, height: 24, showingAPIStatus: true, tokenInput: textinput.New()}
+	updated, cmd := m.updateAPIStatus(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
+	nm := updated.(Model)
+	if !nm.enteringToken {
+		t.Fatal("pressing e did not enter token-input mode")
+	}
+	if cmd == nil {
+		t.Error("expected a blink cmd when entering token mode")
+	}
+}
+
+// TestTokenValidatedMsgInvalid verifies a 401 result shows the inline error,
+// keeps the input open, and never persists a token.
+func TestTokenValidatedMsgInvalid(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	version.ClearToken() //nolint:errcheck
+
+	m := Model{width: 80, height: 24, showingAPIStatus: true, enteringToken: true, tokenInput: textinput.New()}
+	updated, _ := m.Update(tokenValidatedMsg{token: "ghp_bad", err: version.ErrTokenInvalid})
+	nm := updated.(Model)
+	if nm.tokenError != "token invalid" {
+		t.Errorf("tokenError = %q, want %q", nm.tokenError, "token invalid")
+	}
+	if !nm.enteringToken {
+		t.Error("invalid token should keep the input open for a retry")
+	}
+	if src := version.TokenSource(); src != "none" {
+		t.Errorf("invalid token must not be stored, TokenSource() = %q", src)
+	}
+}
+
+// TestTokenValidatedMsgValid verifies a 200 result persists the token, exits the
+// input, updates the rate snapshot, and fires the card-backfill cmd.
+func TestTokenValidatedMsgValid(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	version.ClearToken() //nolint:errcheck
+	t.Cleanup(func() { version.ClearToken() }) //nolint:errcheck
+
+	name := "git"
+	m := Model{
+		width: 80, height: 24, showingAPIStatus: true, enteringToken: true,
+		tokenInput:    textinput.New(),
+		tokenError:    "token invalid",
+		meta:          []loader.ToolMeta{{Name: name, GitHub: "cli/cli"}},
+		tools:         []loader.Tool{{Name: name, GitHub: "cli/cli"}},
+		changelogData: map[string]changelogMsg{name: {}},
+		helpCache:     map[string][2]string{name: {helpModeHelp: "cached"}},
+		versions:      map[string]VersionInfo{},
+		repoCards:     map[string]version.RepoCard{},
+	}
+	rate := version.RateLimit{Known: true, Remaining: 4999, Limit: 5000}
+	updated, cmd := m.Update(tokenValidatedMsg{token: "ghp_goodtoken1234", rate: rate})
+	nm := updated.(Model)
+	if version.TokenSource() != "config" {
+		t.Fatalf("valid token was not stored, TokenSource() = %q", version.TokenSource())
+	}
+	if nm.enteringToken {
+		t.Error("valid token should exit the token-input mode")
+	}
+	if nm.tokenError != "" {
+		t.Errorf("tokenError should be cleared, got %q", nm.tokenError)
+	}
+	if nm.rate.Limit != 5000 {
+		t.Errorf("m.rate not updated from the validated snapshot, got %+v", nm.rate)
+	}
+	if cmd == nil {
+		t.Error("valid token should fire the backfill cmd")
+	}
+}
+
+// TestUpdateAPIStatusRemoveToken verifies [d] clears a config-sourced token.
+func TestUpdateAPIStatusRemoveToken(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	if err := version.SetToken("ghp_config1234567"); err != nil {
+		t.Fatalf("SetToken: %v", err)
+	}
+	t.Cleanup(func() { version.ClearToken() }) //nolint:errcheck
+	if version.TokenSource() != "config" {
+		t.Fatalf("precondition: TokenSource() = %q, want config", version.TokenSource())
+	}
+
+	m := Model{width: 80, height: 24, showingAPIStatus: true, tokenInput: textinput.New()}
+	m.updateAPIStatus(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
+	if src := version.TokenSource(); src != "none" {
+		t.Errorf("[d] did not clear the token, TokenSource() = %q", src)
+	}
+}
+
+// TestRenderStatusBarTokenInput verifies the status bar reflects the token-input
+// sub-mode.
+func TestRenderStatusBarTokenInput(t *testing.T) {
+	m := Model{width: 80, height: 24, showingAPIStatus: true, enteringToken: true, tokenInput: textinput.New()}
+	got := m.renderStatusBar()
+	if !strings.Contains(got, "validate & save") {
+		t.Errorf("status bar = %q, missing token-input hint", got)
+	}
+}
+
+// TestRenderAPIStatusTokenEntry verifies the overlay shows the masked input and
+// the inline error while entering a token.
+func TestRenderAPIStatusTokenEntry(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "")
+	m := Model{width: 80, height: 24, showingAPIStatus: true, enteringToken: true, tokenInput: textinput.New()}
+	m.tokenError = "token invalid"
+	got := m.renderAPIStatus()
+	for _, want := range []string{"token:", "token invalid", "validate & save"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("overlay = %q, missing %q", got, want)
+		}
+	}
+}

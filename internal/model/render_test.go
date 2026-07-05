@@ -255,55 +255,110 @@ func TestRenderStatusBarFocusBrief(t *testing.T) {
 	}
 }
 
-func TestRenderStatusBarRateSignal(t *testing.T) {
-	t.Run("unknown renders no signal", func(t *testing.T) {
-		m := Model{width: 80, focus: focusTools}
+func TestRenderStatusBarGauge(t *testing.T) {
+	known := version.RateLimit{Known: true, Remaining: 15, Limit: 60} // used 45/60
+
+	t.Run("unknown renders no gauge", func(t *testing.T) {
+		m := Model{width: 120, focus: focusTools}
 		m.rate = version.RateLimit{Known: false, Remaining: 0, Limit: 60}
 		got := m.renderStatusBar()
-		for _, absent := range []string{"GH", "⚠", "✕"} {
+		for _, absent := range []string{"GitHub API Usage", "GH ", "45/60"} {
 			if strings.Contains(got, absent) {
 				t.Errorf("unknown rate status bar = %q, should not contain %q", got, absent)
 			}
 		}
 	})
 
-	t.Run("normal renders quiet count", func(t *testing.T) {
-		m := Model{width: 80, focus: focusTools}
-		m.rate = version.RateLimit{Known: true, Remaining: 4800, Limit: 5000}
+	t.Run("wide width shows full gauge (pinned to focusTools)", func(t *testing.T) {
+		m := Model{width: 120, focus: focusTools, rate: known}
 		got := m.renderStatusBar()
-		if !strings.Contains(got, "GH 4800/5000") {
-			t.Errorf("normal rate status bar = %q, missing count", got)
-		}
-		for _, absent := range []string{"⚠", "✕"} {
-			if strings.Contains(got, absent) {
-				t.Errorf("normal rate status bar = %q, should not contain %q", got, absent)
+		for _, want := range []string{"GitHub API Usage", "45/60", "[L]", "search"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("wide status bar = %q, missing %q", got, want)
 			}
 		}
 	})
 
-	t.Run("warning icon at threshold", func(t *testing.T) {
-		m := Model{width: 80, focus: focusTools}
-		m.rate = version.RateLimit{Known: true, Remaining: rateLowThreshold, Limit: 60}
+	t.Run("medium width collapses to compact", func(t *testing.T) {
+		m := Model{width: 90, focus: focusTools, rate: known}
 		got := m.renderStatusBar()
-		if !strings.Contains(got, "⚠") {
-			t.Errorf("warning rate status bar = %q, missing warn icon", got)
+		if strings.Contains(got, "GitHub API Usage") {
+			t.Errorf("medium status bar unexpectedly full: %q", got)
 		}
-		if !strings.Contains(got, "[L]") {
-			t.Errorf("warning rate status bar = %q, missing [L] hint", got)
+		for _, want := range []string{"GH ", "45/60", "[L]"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("medium status bar = %q, missing %q", got, want)
+			}
 		}
 	})
 
-	t.Run("danger icon at zero", func(t *testing.T) {
-		m := Model{width: 80, focus: focusTools}
-		m.rate = version.RateLimit{Known: true, Remaining: 0, Limit: 60}
+	t.Run("narrow width hides gauge but keeps hints", func(t *testing.T) {
+		m := Model{width: 62, focus: focusTools, rate: known}
 		got := m.renderStatusBar()
-		if !strings.Contains(got, "✕") {
-			t.Errorf("danger rate status bar = %q, missing danger icon", got)
+		for _, absent := range []string{"GitHub API Usage", "GH ", "45/60"} {
+			if strings.Contains(got, absent) {
+				t.Errorf("narrow status bar = %q, should not contain %q", got, absent)
+			}
 		}
-		if !strings.Contains(got, "[L]") {
-			t.Errorf("danger rate status bar = %q, missing [L] hint", got)
+		for _, want := range []string{"search", "track", "quit"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("narrow status bar = %q, missing hint %q", got, want)
+			}
 		}
 	})
+
+	t.Run("focusBrief also right-aligns the gauge", func(t *testing.T) {
+		// focusBrief hints are longer than focusTools, so a wider terminal is
+		// needed for the full form — exercises the per-focus downgrade threshold.
+		m := Model{width: 160, focus: focusBrief, rate: known}
+		got := m.renderStatusBar()
+		for _, want := range []string{"GitHub API Usage", "45/60", "[L]", "open repo"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("focusBrief status bar = %q, missing %q", got, want)
+			}
+		}
+	})
+
+	t.Run("input and modal modes suppress the gauge", func(t *testing.T) {
+		for _, m := range []Model{
+			{width: 120, tracking: true, trackInput: textinput.New(), rate: known},
+			{width: 120, renaming: true, nameInput: textinput.New(), rate: known},
+			{width: 120, searching: true, search: textinput.New(), rate: known},
+			{width: 120, editingNote: true, rate: known},
+			{width: 120, editingTags: true, rate: known},
+			{width: 120, showingAPIStatus: true, rate: known},
+		} {
+			got := m.renderStatusBar()
+			if strings.Contains(got, "GitHub API Usage") || strings.Contains(got, "GH ") {
+				t.Errorf("input/modal status bar leaked gauge: %q", got)
+			}
+		}
+	})
+}
+
+func TestRenderHintsBarAlignment(t *testing.T) {
+	known := version.RateLimit{Known: true, Remaining: 15, Limit: 60} // used 45/60
+	m := Model{width: 120, rate: known}
+	hints := "abc"
+
+	// A plain (border-less) style isolates the laid-out content; the gap logic
+	// inside renderHintsBar uses m.width-2 regardless of the style passed.
+	out := m.renderHintsBar(lipgloss.NewStyle(), hints)
+	plain := ansiCSI.ReplaceAllString(out, "")
+	inner := m.width - 2
+
+	// Fills exactly to the right edge — the gauge is pinned to the corner.
+	if w := lipgloss.Width(out); w != inner {
+		t.Errorf("laid-out width = %d, want inner %d (gauge not right-aligned)", w, inner)
+	}
+	// Gauge sits at the far right (full form ends with " details").
+	if !strings.HasSuffix(plain, "details") {
+		t.Errorf("hints bar = %q, gauge not at the right end", plain)
+	}
+	// Hints stay on the left with a spacer before the gauge.
+	if !strings.HasPrefix(plain, "abc  ") {
+		t.Errorf("hints bar = %q, want hints then a spacer on the left", plain)
+	}
 }
 
 func TestRenderStatusBarTracking(t *testing.T) {
@@ -483,6 +538,124 @@ func TestUpdateUntrackConfirm(t *testing.T) {
 			t.Errorf("list should be unchanged after esc, got %v", nm.meta)
 		}
 	})
+}
+
+func TestGaugeFilled(t *testing.T) {
+	// Fixed width independent of the limit: 25% used fills the same at 60 and 5000.
+	if a, b := gaugeFilled(15, 60), gaugeFilled(1250, 5000); a != b {
+		t.Errorf("25%% fill differs by limit: 60→%d, 5000→%d", a, b)
+	}
+	tests := []struct {
+		used, limit, want int
+	}{
+		{0, 60, 0},
+		{60, 60, gaugeCells}, // exhausted → full bar
+		{30, 60, gaugeCells / 2},
+		{-5, 60, 0},          // never negative
+		{99, 60, gaugeCells}, // clamped
+		{5, 0, 0},            // no divide-by-zero
+	}
+	for _, tt := range tests {
+		if got := gaugeFilled(tt.used, tt.limit); got != tt.want {
+			t.Errorf("gaugeFilled(%d,%d) = %d, want %d", tt.used, tt.limit, got, tt.want)
+		}
+	}
+}
+
+func TestRenderRateGauge(t *testing.T) {
+	t.Run("full form shows label, used/limit and [L]", func(t *testing.T) {
+		m := Model{rate: version.RateLimit{Known: true, Remaining: 15, Limit: 60}}
+		got := m.renderRateGauge(false)
+		for _, want := range []string{"GitHub API Usage", "45/60", "[L]"} {
+			if !strings.Contains(got, want) {
+				t.Errorf("full gauge = %q, missing %q", got, want)
+			}
+		}
+	})
+
+	t.Run("compact form is shorter and shows GH used/limit [L]", func(t *testing.T) {
+		m := Model{rate: version.RateLimit{Known: true, Remaining: 15, Limit: 60}}
+		full := m.renderRateGauge(false)
+		compact := m.renderRateGauge(true)
+		if !strings.Contains(compact, "GH ") || !strings.Contains(compact, "45/60") || !strings.Contains(compact, "[L]") {
+			t.Errorf("compact gauge = %q, missing parts", compact)
+		}
+		if lipgloss.Width(compact) >= lipgloss.Width(full) {
+			t.Errorf("compact (%d) not shorter than full (%d)", lipgloss.Width(compact), lipgloss.Width(full))
+		}
+	})
+
+	t.Run("exhausted shows 60/60 with a full bar", func(t *testing.T) {
+		// Constant-yellow-at-exhaustion is structural (renderRateGauge has no
+		// pressure branch); gaugeFilled(60,60)==gaugeCells is covered separately.
+		m := Model{rate: version.RateLimit{Known: true, Remaining: 0, Limit: 60}}
+		got := m.renderRateGauge(false)
+		if !strings.Contains(got, "60/60") {
+			t.Errorf("exhausted gauge = %q, want 60/60", got)
+		}
+		// Strip ANSI (a prior test globally forces truecolor) before checking the
+		// bar is a full gaugeCells-wide block between the brackets.
+		plain := ansiCSI.ReplaceAllString(got, "")
+		if !strings.Contains(plain, "["+strings.Repeat(" ", gaugeCells)+"]") {
+			t.Errorf("exhausted gauge = %q, want a full %d-cell bar", plain, gaugeCells)
+		}
+	})
+
+	t.Run("unknown snapshot renders nothing", func(t *testing.T) {
+		m := Model{rate: version.RateLimit{Known: false, Remaining: 0, Limit: 60}}
+		if got := m.renderRateGauge(false); got != "" {
+			t.Errorf("unknown gauge = %q, want empty", got)
+		}
+	})
+}
+
+func TestListNavigationWraps(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	keyJ := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")}
+	keyK := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")}
+
+	newModel := func(meta []loader.ToolMeta, sel int) Model {
+		m := Model{width: 80, height: 24, focus: focusTools, ready: true, meta: meta, metaSelected: sel}
+		m.tools = loader.ToolsFromMeta(m.meta)
+		return m
+	}
+
+	t.Run("down from last wraps to first", func(t *testing.T) {
+		m := newModel([]loader.ToolMeta{{Name: "a"}, {Name: "b"}, {Name: "c"}}, 2)
+		nm := mustModel(m.Update(keyJ))
+		if nm.metaSelected != 0 {
+			t.Errorf("metaSelected = %d, want 0 (wrap to first)", nm.metaSelected)
+		}
+	})
+
+	t.Run("up from first wraps to last", func(t *testing.T) {
+		m := newModel([]loader.ToolMeta{{Name: "a"}, {Name: "b"}, {Name: "c"}}, 0)
+		nm := mustModel(m.Update(keyK))
+		if nm.metaSelected != 2 {
+			t.Errorf("metaSelected = %d, want 2 (wrap to last)", nm.metaSelected)
+		}
+	})
+
+	t.Run("single item stays put both directions", func(t *testing.T) {
+		m := newModel([]loader.ToolMeta{{Name: "a"}}, 0)
+		if nm := mustModel(m.Update(keyJ)); nm.metaSelected != 0 {
+			t.Errorf("down: metaSelected = %d, want 0", nm.metaSelected)
+		}
+		if nm := mustModel(m.Update(keyK)); nm.metaSelected != 0 {
+			t.Errorf("up: metaSelected = %d, want 0", nm.metaSelected)
+		}
+	})
+
+	t.Run("empty list does not panic", func(t *testing.T) {
+		m := newModel(nil, 0)
+		_ = mustModel(m.Update(keyJ))
+		_ = mustModel(m.Update(keyK))
+	})
+}
+
+func mustModel(tm tea.Model, _ tea.Cmd) Model {
+	return tm.(Model)
 }
 
 func TestRenderStatusBarRenaming(t *testing.T) {
@@ -1077,7 +1250,8 @@ func TestRenderAPIStatusOverlay(t *testing.T) {
 	m.rate = version.RateLimit{Known: true, Remaining: 0, Limit: 60}
 	got := m.renderAPIStatus()
 
-	for _, want := range []string{"GitHub API status", "env", "ghp_••••••••3f2a", "0 / 60", "✕", "[e]", "[r]", "[esc]"} {
+	// Used/limit (not remaining): Remaining 0 of 60 → "60 / 60".
+	for _, want := range []string{"GitHub API status", "env", "ghp_••••••••3f2a", "Used: 60 / 60", "✕", "[e]", "[r]", "[esc]"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("overlay = %q, missing %q", got, want)
 		}
@@ -1086,6 +1260,47 @@ func TestRenderAPIStatusOverlay(t *testing.T) {
 	if strings.Contains(got, "remove token") {
 		t.Errorf("overlay = %q, should not offer remove token for env source", got)
 	}
+	// Token hint is hidden when a token is configured (env source here).
+	if strings.Contains(got, "raise the limit") {
+		t.Errorf("overlay = %q, should not show token hint when a token exists", got)
+	}
+}
+
+func TestRenderAPIStatusUsedLimit(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "ghp_1234567890abcdef3f2a")
+	m := Model{width: 80, height: 24, showingAPIStatus: true}
+	m.rate = version.RateLimit{Known: true, Remaining: 15, Limit: 60}
+	got := m.renderAPIStatus()
+	if !strings.Contains(got, "Used: 45 / 60") {
+		t.Errorf("overlay = %q, want used/limit line 'Used: 45 / 60'", got)
+	}
+	if strings.Contains(got, "Limit: 15") {
+		t.Errorf("overlay = %q, should not show remaining as the count", got)
+	}
+}
+
+func TestRenderAPIStatusTokenHint(t *testing.T) {
+	t.Run("shown when no token", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		t.Setenv("GITHUB_TOKEN", "")
+		if version.TokenSource() != "none" {
+			t.Skipf("precondition: TokenSource() = %q, want none", version.TokenSource())
+		}
+		m := Model{width: 80, height: 24, showingAPIStatus: true}
+		m.rate = version.RateLimit{Known: true, Remaining: 30, Limit: 60}
+		if got := m.renderAPIStatus(); !strings.Contains(got, "raise the limit") {
+			t.Errorf("overlay = %q, missing token hint when no token", got)
+		}
+	})
+
+	t.Run("hidden while entering a token", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		t.Setenv("GITHUB_TOKEN", "")
+		m := Model{width: 80, height: 24, showingAPIStatus: true, enteringToken: true, tokenInput: textinput.New()}
+		if got := m.renderAPIStatus(); strings.Contains(got, "raise the limit") {
+			t.Errorf("overlay = %q, should hide token hint while entering a token", got)
+		}
+	})
 }
 
 func TestRenderAPIStatusWarnIcon(t *testing.T) {
@@ -1160,7 +1375,7 @@ func TestTokenValidatedMsgValid(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
 	t.Setenv("XDG_CONFIG_HOME", dir)
-	version.ClearToken() //nolint:errcheck
+	version.ClearToken()                       //nolint:errcheck
 	t.Cleanup(func() { version.ClearToken() }) //nolint:errcheck
 
 	name := "git"

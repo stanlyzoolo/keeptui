@@ -5,17 +5,18 @@ import "github.com/charmbracelet/lipgloss"
 var (
 	// Palette — every color used in the UI is named here; styles below build
 	// only from these (no inline hex literals).
-	ColorPrimary  = lipgloss.Color("#DA7756")
-	ColorOrange   = lipgloss.Color("#E5A040")
-	ColorGreen    = lipgloss.Color("#6AAF6A")
-	ColorMeta     = lipgloss.Color("#5588AA")
-	ColorMuted    = lipgloss.Color("#AAAAAA")
-	ColorDim      = lipgloss.Color("#888888")
-	ColorBorder   = lipgloss.Color("#555555")
-	ColorText     = lipgloss.Color("#E8E8E8")
-	ColorCategory = lipgloss.Color("#E8A87C")
-	ColorKey      = lipgloss.Color("#C8A97E")
-	ColorDanger   = lipgloss.Color("#D06060")
+	ColorPrimary   = lipgloss.Color("#DA7756")
+	ColorOrange    = lipgloss.Color("#E5A040")
+	ColorOrangeDim = lipgloss.Color("#7A5A1E") // darker yellow — the API-usage gauge's empty track
+	ColorGreen     = lipgloss.Color("#6AAF6A")
+	ColorMeta      = lipgloss.Color("#5588AA")
+	ColorMuted     = lipgloss.Color("#AAAAAA")
+	ColorDim       = lipgloss.Color("#888888")
+	ColorBorder    = lipgloss.Color("#555555")
+	ColorText      = lipgloss.Color("#E8E8E8")
+	ColorCategory  = lipgloss.Color("#E8A87C")
+	ColorKey       = lipgloss.Color("#C8A97E")
+	ColorDanger    = lipgloss.Color("#D06060")
 
 	PanelBorder = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
@@ -47,6 +48,14 @@ var (
 
 	GithubStyle = lipgloss.NewStyle().
 			Foreground(ColorMuted)
+
+	// Rate-usage gauge (status-bar right corner): yellow brackets + used-count,
+	// a filled track in the same yellow, and a darker-yellow empty track. Colors
+	// are constant — the bar never recolors on rate pressure.
+	RateBracketStyle    = lipgloss.NewStyle().Foreground(ColorOrange)
+	RateUsageNumStyle   = lipgloss.NewStyle().Foreground(ColorOrange)
+	RateGaugeFillStyle  = lipgloss.NewStyle().Background(ColorOrange)
+	RateGaugeTrackStyle = lipgloss.NewStyle().Background(ColorOrangeDim)
 
 	// WarnStyle / DangerStyle flag GitHub API rate-limit pressure in the
 	// status bar and API-status overlay.

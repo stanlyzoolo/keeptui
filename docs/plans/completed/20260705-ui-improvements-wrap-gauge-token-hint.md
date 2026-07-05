@@ -82,13 +82,13 @@ All changes are presentation-only in the Bubble Tea model + Lip Gloss styles. No
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] in `case "j","down"` (`focusTools` branch, ~model.go:502) replace the `metaSelected < len-1` clamp with `n := len(filtered); if n > 0 { m.metaSelected = (m.metaSelected + 1) % n; <shared refresh block>; return m, m.autoFetchCmdsForSelected() }`
-- [ ] in `case "k","up"` (`focusTools` branch, ~model.go:527) replace the `metaSelected > 0` clamp with `n := len(filtered); if n > 0 { m.metaSelected = (m.metaSelected - 1 + n) % n; <shared refresh block>; return m, m.autoFetchCmdsForSelected() }`
-- [ ] verify empty-list guard: `n == 0` is a no-op (no modulo, no panic); leave `focusBrief`/`focusHelp` scroll branches and `pgup/pgdn/home/end` clamps untouched
-- [ ] add test: down from last index wraps to 0
-- [ ] add test: up from index 0 wraps to last index
-- [ ] add test: empty/single-item list does not panic and stays put
-- [ ] run `go test ./...` — must pass before next task
+- [x] in `case "j","down"` (`focusTools` branch, ~model.go:502) replace the `metaSelected < len-1` clamp with `n := len(filtered); if n > 0 { m.metaSelected = (m.metaSelected + 1) % n; <shared refresh block>; return m, m.autoFetchCmdsForSelected() }`
+- [x] in `case "k","up"` (`focusTools` branch, ~model.go:527) replace the `metaSelected > 0` clamp with `n := len(filtered); if n > 0 { m.metaSelected = (m.metaSelected - 1 + n) % n; <shared refresh block>; return m, m.autoFetchCmdsForSelected() }`
+- [x] verify empty-list guard: `n == 0` is a no-op (no modulo, no panic); leave `focusBrief`/`focusHelp` scroll branches and `pgup/pgdn/home/end` clamps untouched
+- [x] add test: down from last index wraps to 0
+- [x] add test: up from index 0 wraps to last index
+- [x] add test: empty/single-item list does not panic and stays put
+- [x] run `go test ./...` — must pass before next task
 
 ### Task 2: Add `ColorOrangeDim` and the rate gauge renderer
 
@@ -97,15 +97,15 @@ All changes are presentation-only in the Bubble Tea model + Lip Gloss styles. No
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] add `ColorOrangeDim = lipgloss.Color("#7A5A1E")` to the color block in `internal/ui/styles.go`
-- [ ] add `renderRateGauge(compact bool) string` (or a form-selecting signature) in `model.go`: returns `""` when `!m.rate.Known`; computes `used/ratio/filled` (fixed 12 cells, clamped); builds the full or compact styled string per Technical Details
-- [ ] render brackets in `ColorOrange` fg, filled cells with `ColorOrange` bg, empty cells with `ColorOrangeDim` bg; number in orange, label muted; use `[L]` uppercase hint
-- [ ] add test: full form contains `GitHub API Usage`, `45/60`, `[L]`, and a 12-cell bar for `Limit:60, Remaining:15`
-- [ ] add test: fixed bar width — same filled-cell count for equal ratios at `Limit:60` and `Limit:5000` (e.g. 25% used)
-- [ ] add test: compact form is `GH <used>/<limit> [L]` and shorter than full form
-- [ ] add test: exhausted snapshot (`Remaining:0, Limit:60`) → `60/60`, full 12-cell bar, still constant yellow (no danger recolor) — locks in the conscious no-alarm decision
-- [ ] add test: `!Known` snapshot yields `""`
-- [ ] run `go test ./...` — must pass before next task
+- [x] add `ColorOrangeDim = lipgloss.Color("#7A5A1E")` to the color block in `internal/ui/styles.go`
+- [x] add `renderRateGauge(compact bool) string` in `model.go`: returns `""` when `!m.rate.Known`; computes `used/filled` via pure `gaugeFilled(used,limit)` helper (fixed 12 cells, clamped); builds full or compact styled string. Added `RateBracketStyle`/`RateUsageNumStyle`/`RateGaugeFillStyle`/`RateGaugeTrackStyle` in `ui/styles.go`
+- [x] render brackets in `ColorOrange` fg, filled cells with `ColorOrange` bg, empty cells with `ColorOrangeDim` bg; number in orange, label muted; use `[L]` uppercase hint
+- [x] add test: full form contains `GitHub API Usage`, `45/60`, `[L]` (`TestRenderRateGauge`)
+- [x] add test: fixed bar width — `gaugeFilled(15,60) == gaugeFilled(1250,5000)` (`TestGaugeFilled`)
+- [x] add test: compact form is `GH <used>/<limit> [L]` and shorter than full form
+- [x] add test: exhausted snapshot (`Remaining:0, Limit:60`) → `60/60`, full 12-cell bar; constant-yellow is structural (no pressure branch) + `gaugeFilled(60,60)==12`
+- [x] add test: `!Known` snapshot yields `""`
+- [x] run `go test ./...` — must pass before next task
 
 ### Task 3: Right-align the gauge in the status bar and wire compression
 
@@ -113,15 +113,15 @@ All changes are presentation-only in the Bubble Tea model + Lip Gloss styles. No
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] in `renderStatusBar()` (~model.go:1001) add a helper that, given the left `hints` string, appends the gauge right-aligned: compute `inner`, `gap`; downgrade full → compact → hidden based on available width; return `HelpStyle.Width(inner).Render(hints + spacer + gauge)`
-- [ ] apply it to the three normal focus branches (`focusBrief` ~1067, `focusHelp` ~1071, `focusTools` default ~1075); leave every input/modal early return unchanged
-- [ ] remove `withRateSignal()` and `rateSignal()` (inline signal); KEEP `classifyRate`, `rateIcon`, `rateLowThreshold` (used by the overlay)
-- [ ] update existing status-bar/rate tests (~render_test.go 261–311, 1077–1095, 1223) to the new gauge format; drop assertions on the removed `⚠ GH`/`✕ exhausted` inline strings
-- [ ] add test: wide width → full gauge present and right-aligned (line width ≈ `inner`) — pin to `focusTools` (its ~61-cell hints comfortably fit hints + full gauge, unlike the longer `focusBrief` line) so the assertion is deterministic
-- [ ] add test: medium width → compact `GH 45/60 [L]` present, full form absent
-- [ ] add test: narrow width → no gauge, hints intact and not truncated below the hint length
-- [ ] add test: gauge absent while `searching`/`tracking`/`renaming`/`editingNote`/`editingTags`/`showingAPIStatus` (spot-check a couple of input modes)
-- [ ] run `go build . && go vet ./... && go test ./...` — must pass before next task
+- [x] in `renderStatusBar()` add `renderHintsBar(style, hints)`: computes `inner`, `gap`; downgrades full → compact → hidden via a local `place` closure; returns `style.Render(hints + spacer + gauge)`. Added `rateGaugeMinGap = 2`
+- [x] apply it to the three normal focus branches (`focusBrief`, `focusHelp`, `focusTools` default); left every input/modal early return unchanged
+- [x] remove `withRateSignal()` and `rateSignal()` (inline signal); KEPT `classifyRate`, `rateIcon`, `rateLowThreshold` (used by the overlay)
+- [x] rewrote `TestRenderStatusBarRateSignal` → `TestRenderStatusBarGauge` for the new gauge format; dropped `⚠`/`✕` assertions (no stale refs remain, grep-verified)
+- [x] add test: wide width (120) → full gauge present, pinned to `focusTools` for determinism
+- [x] add test: medium width (90) → compact `GH 45/60 [L]` present, full form absent
+- [x] add test: narrow width (62) → no gauge, hints intact
+- [x] add test: gauge absent while `tracking`/`renaming`/`searching`
+- [x] run `go build . && go vet ./... && go test ./...` — must pass before next task
 
 ### Task 4: API-status overlay — used/limit line + token hint
 
@@ -129,26 +129,26 @@ All changes are presentation-only in the Bubble Tea model + Lip Gloss styles. No
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] in `renderAPIStatus()` (~model.go:1249) change the `Limit: <remaining> / <limit>` line to `Used: <Limit-Remaining> / <Limit>` so it agrees with the gauge's used/limit semantics; keep the `rateIcon` prefix and the `Reset:` line unchanged
-- [ ] in `renderAPIStatus()` right after the `GitHub API status` section label, conditionally write the hint line when `version.TokenSource() == "none" && !m.enteringToken`
-- [ ] render text `Add a GitHub token to raise the limit (60 → 5000/h)  [e]` in `ui.WarnStyle`, followed by a blank line before the `Token:` block
-- [ ] add test: overlay shows `Used: 45 / 60` for `Remaining:15, Limit:60` (not `15 / 60`)
-- [ ] add test: overlay contains the hint when no token is set (`TokenSource()=="none"`)
-- [ ] add test: overlay omits the hint when a token is present (config/env source) — set up via existing token test helpers
-- [ ] add test: hint omitted while `enteringToken` is true
-- [ ] run `go test ./...` — must pass before next task
+- [x] in `renderAPIStatus()` change the `Limit: <remaining> / <limit>` line to `Used: <Limit-Remaining> / <Limit>`; kept the `rateIcon` prefix and `Reset:` line unchanged
+- [x] in `renderAPIStatus()` right after the `GitHub API status` section label, conditionally write the hint line when `version.TokenSource() == "none" && !m.enteringToken`
+- [x] render text `Add a GitHub token to raise the limit (60 → 5000/h)  [e]` in `ui.WarnStyle`, followed by a blank line before the `Token:` block
+- [x] add test: overlay shows `Used: 45 / 60` for `Remaining:15, Limit:60` (`TestRenderAPIStatusUsedLimit`); updated `TestRenderAPIStatusOverlay` `0/60`→`Used: 60 / 60`
+- [x] add test: overlay contains the hint when no token is set (`TestRenderAPIStatusTokenHint`)
+- [x] add test: overlay omits the hint when a token is present (env source) — asserted in `TestRenderAPIStatusOverlay`
+- [x] add test: hint omitted while `enteringToken` is true
+- [x] run `go test ./...` — must pass before next task
 
 ### Task 5: Verify acceptance criteria
 
-- [ ] verify all three Overview features work: list wraps both directions; gauge shows used/limit right-aligned in the three focus states with fixed bar width; overlay hint appears only when no token
-- [ ] verify edge cases: empty list, unknown rate (`!Known` → no gauge), very narrow terminal (gauge hidden, no horizontal overflow)
-- [ ] run full suite: `go build . && go vet ./... && go test ./...`
-- [ ] confirm no test relies on removed `rateSignal`/`withRateSignal`
+- [x] verify all three Overview features work: list wraps both directions (`TestListNavigationWraps`); gauge shows used/limit right-aligned in the three focus states with fixed bar width (`TestRenderStatusBarGauge`, `TestGaugeFilled`); overlay hint appears only when no token (`TestRenderAPIStatusTokenHint`)
+- [x] verify edge cases: empty list (no panic), unknown rate (`!Known` → no gauge), narrow terminal (gauge hidden, hints intact) — all covered by tests
+- [x] run full suite: `go build . && go vet ./... && go test ./...` — all pass
+- [x] confirm no test relies on removed `rateSignal`/`withRateSignal` (grep-verified)
 
 ### Task 6: Update documentation
 
-- [ ] update `CLAUDE.md` if the status-bar rate description (currently "the `focusBrief` bar shows … rate signal" and the GitHub API section's status-bar signal notes) needs to reflect the new right-aligned "GitHub API Usage" gauge, used/limit semantics (bar + overlay), and the overlay token hint
-- [ ] move this plan to `docs/plans/completed/`
+- [x] updated `CLAUDE.md`: list-wrap note on the panel layout, the right-aligned "GitHub API Usage" gauge in the Help-bar bullet, and used/limit + token-nudge in both API-status overlay descriptions
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 

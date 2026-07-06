@@ -124,13 +124,13 @@ type Model struct {
 	meta         []loader.ToolMeta
 	metaSelected int
 
-	helpMode      int
+	helpMode       int
 	helpLoadingFor string
-	helpCache     map[string][2]string
-	helpSearching bool
-	helpSearch    textinput.Model
-	helpMatches   []int
-	helpMatchIdx  int
+	helpCache      map[string][2]string
+	helpSearching  bool
+	helpSearch     textinput.Model
+	helpMatches    []int
+	helpMatchIdx   int
 
 	toolsW int
 	briefW int
@@ -501,9 +501,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "j", "down":
 			if m.focus == focusTools {
-				filtered := m.filteredMeta()
-				if m.metaSelected < len(filtered)-1 {
-					m.metaSelected++
+				// Wrap around to the top when moving past the last tool.
+				if n := len(m.filteredMeta()); n > 0 {
+					m.metaSelected = (m.metaSelected + 1) % n
 					m.setToolsContent()
 					m.briefViewport.Height = m.calcVpHeight()
 					m.briefViewport.GotoTop()
@@ -526,8 +526,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "k", "up":
 			if m.focus == focusTools {
-				if m.metaSelected > 0 {
-					m.metaSelected--
+				// Wrap around to the bottom when moving above the first tool.
+				if n := len(m.filteredMeta()); n > 0 {
+					m.metaSelected = (m.metaSelected - 1 + n) % n
 					m.setToolsContent()
 					m.briefViewport.Height = m.calcVpHeight()
 					m.briefViewport.GotoTop()
@@ -1066,31 +1067,111 @@ func (m Model) renderStatusBar() string {
 	}
 	if m.focus == focusBrief {
 		hints := keyHint("o") + " open repo  " + keyHint("c") + " changelog  " + keyHint("r") + " refresh  " + keyHint("s") + " status  " + keyHint("e") + " note  " + keyHint("t") + " tags  " + keyHint("q") + " quit"
-		return style.Render(m.withRateSignal(hints))
+		return m.renderHintsBar(style, hints)
 	}
 	if m.focus == focusHelp {
 		hints := keyHint("↑↓") + " scroll  " + keyHint("h") + " --help  " + keyHint("m") + " man  " + keyHint("/") + " search  " + keyHint("←") + " back  " + keyHint("q") + " quit"
-		return style.Render(m.withRateSignal(hints))
+		return m.renderHintsBar(style, hints)
 	}
-	return style.Render(m.withRateSignal(
-		keyHint("/") + " search  " +
-			keyHint("t") + " track  " +
-			keyHint("u") + " untrack  " +
-			keyHint("r") + " rename  " +
-			keyHint("q") + " quit",
-	))
+	return m.renderHintsBar(style,
+		keyHint("/")+" search  "+
+			keyHint("t")+" track  "+
+			keyHint("u")+" untrack  "+
+			keyHint("r")+" rename  "+
+			keyHint("q")+" quit",
+	)
 }
 
-// withRateSignal appends the rate-limit signal to a hint bar when there is one.
-func (m Model) withRateSignal(hints string) string {
-	if sig := m.rateSignal(); sig != "" {
-		return hints + "   " + sig
+// rateGaugeMinGap is the minimum blank columns between the hint bar and the
+// right-aligned API-usage gauge; below it the gauge is downgraded or dropped.
+const rateGaugeMinGap = 2
+
+// renderHintsBar lays out the left-aligned hints with the API-usage gauge pinned
+// to the right corner. It downgrades full → compact → hidden as terminal width
+// shrinks so the hints are never truncated. inner is HelpStyle's content width
+// (m.width-2, the border sits outside it).
+func (m Model) renderHintsBar(style lipgloss.Style, hints string) string {
+	inner := m.width - 2
+	place := func(gauge string) (string, bool) {
+		if gauge == "" {
+			return "", false
+		}
+		gap := inner - lipgloss.Width(hints) - lipgloss.Width(gauge)
+		if gap < rateGaugeMinGap {
+			return "", false
+		}
+		return hints + strings.Repeat(" ", gap) + gauge, true
 	}
-	return hints
+	if line, ok := place(m.renderRateGauge(false)); ok {
+		return style.Render(line)
+	}
+	if line, ok := place(m.renderRateGauge(true)); ok {
+		return style.Render(line)
+	}
+	return style.Render(hints)
 }
 
 func keyHint(k string) string {
 	return ui.SearchPromptStyle.Render("[" + k + "]")
+}
+
+// gaugeCells is the fixed width of the API-usage bar, independent of whether the
+// limit is 60 (no token) or 5000 (with token) — the fill tracks the used ratio,
+// not an absolute count.
+const gaugeCells = 12
+
+// renderRateGauge builds the right-corner "GitHub API Usage" indicator for the
+// current rate snapshot, or "" when there is no known snapshot. It shows
+// used/limit (used = Limit-Remaining), matching the API-status overlay. The bar
+// is constant yellow at every pressure level — exhaustion (used==limit) simply
+// renders a full bar; the ⚠/✕ alarm lives only in the [L] overlay. compact drops
+// the label and bar, keeping "GH used/limit [L]" for narrow terminals.
+func (m Model) renderRateGauge(compact bool) string {
+	r := m.rate
+	if !r.Known || r.Limit <= 0 {
+		return ""
+	}
+	used := usedOf(r)
+	nums := ui.RateUsageNumStyle.Render(fmt.Sprintf("%d/%d", used, r.Limit))
+	if compact {
+		return ui.GithubStyle.Render("GH ") + nums + " " + keyHint("L")
+	}
+	filled := gaugeFilled(used, r.Limit)
+	bar := ui.RateGaugeFillStyle.Render(strings.Repeat(" ", filled)) +
+		ui.RateGaugeTrackStyle.Render(strings.Repeat(" ", gaugeCells-filled))
+	return ui.GithubStyle.Render("GitHub API Usage ") +
+		ui.RateBracketStyle.Render("[") + bar + ui.RateBracketStyle.Render("]") +
+		" " + nums + "  " + keyHint("L") + ui.GithubStyle.Render(" details")
+}
+
+// usedOf returns consumed requests (Limit-Remaining) clamped to [0,Limit], the
+// single source of used/limit for both the status-bar gauge and the [L] overlay.
+// GitHub always reports Remaining in [0,Limit]; the clamp is defensive against a
+// malformed snapshot.
+func usedOf(r version.RateLimit) int {
+	used := r.Limit - r.Remaining
+	if used < 0 {
+		return 0
+	}
+	if used > r.Limit {
+		return r.Limit
+	}
+	return used
+}
+
+// gaugeFilled maps used/limit onto the fixed gaugeCells-wide bar, rounding to the
+// nearest cell with integer math (no math import) and clamping to [0,gaugeCells].
+// The result depends only on the used ratio, so limit 60 and limit 5000 fill
+// identically at the same percentage.
+func gaugeFilled(used, limit int) int {
+	if limit <= 0 || used <= 0 {
+		return 0
+	}
+	filled := (used*gaugeCells + limit/2) / limit
+	if filled > gaugeCells {
+		filled = gaugeCells
+	}
+	return filled
 }
 
 // rateLowThreshold is the number of remaining GitHub API requests at or below
@@ -1120,21 +1201,6 @@ func classifyRate(r version.RateLimit) rateLevel {
 		return rateWarn
 	default:
 		return rateOK
-	}
-}
-
-// rateSignal returns the status-bar rate-limit indicator for the current
-// snapshot, or "" when nothing should be shown (no observation yet).
-func (m Model) rateSignal() string {
-	switch classifyRate(m.rate) {
-	case rateExhausted:
-		return ui.DangerStyle.Render("✕ GH limit exhausted") + " · " + keyHint("L")
-	case rateWarn:
-		return ui.WarnStyle.Render(fmt.Sprintf("⚠ GH %d/%d", m.rate.Remaining, m.rate.Limit)) + " · " + keyHint("L") + " details"
-	case rateOK:
-		return ui.GithubStyle.Render(fmt.Sprintf("GH %d/%d", m.rate.Remaining, m.rate.Limit))
-	default:
-		return ""
 	}
 }
 
@@ -1231,13 +1297,20 @@ func validateTokenCmd(token string) tea.Cmd {
 	}
 }
 
-// renderAPIStatus builds the API-status overlay body: token source (masked),
-// current limits with the shared icon, and the reset time.
+// renderAPIStatus builds the API-status overlay body: an optional add-token
+// nudge (when none is configured), the token source (masked), used/limit with
+// the shared icon, and the reset time.
 func (m Model) renderAPIStatus() string {
 	var b strings.Builder
 	b.WriteString(ui.SectionLabelStyle.Render("GitHub API status") + "\n\n")
 
 	source := version.TokenSource()
+	// Nudge the user to add a token when none is configured — it lifts the hourly
+	// limit from 60 to 5000. Hidden once a token exists or while entering one.
+	if source == "none" && !m.enteringToken {
+		b.WriteString(ui.WarnStyle.Render("Add a GitHub token to raise the limit (60 → 5000/h)  ") + keyHint("e") + "\n\n")
+	}
+
 	tokenLine := "Token: " + source
 	if tok := version.Token(); tok != "" {
 		tokenLine += " (" + maskToken(tok) + ")"
@@ -1246,11 +1319,12 @@ func (m Model) renderAPIStatus() string {
 
 	if m.rate.Known {
 		icon := rateIcon(m.rate)
-		limitLine := fmt.Sprintf("Limit: %d / %d", m.rate.Remaining, m.rate.Limit)
+		// Used/limit matches the status-bar gauge so the two surfaces agree.
+		usedLine := fmt.Sprintf("Used: %d / %d", usedOf(m.rate), m.rate.Limit)
 		if icon != "" {
-			limitLine = icon + " " + limitLine
+			usedLine = icon + " " + usedLine
 		}
-		b.WriteString(ui.InfoStyle.Render(limitLine) + "\n")
+		b.WriteString(ui.InfoStyle.Render(usedLine) + "\n")
 		if !m.rate.Reset.IsZero() {
 			mins := int(time.Until(m.rate.Reset).Minutes())
 			if mins < 0 {
@@ -1300,8 +1374,8 @@ func (m Model) calcPanelWidths() (toolsW, briefW, helpW int) {
 	// Horizontal overhead reserved here = 6: 2 border cols x 3 panels. There is
 	// no outer horizontal margin and panels sit flush against each other.
 	available := max(m.width-6, 1)
-	toolsW = max((available * 20) / 100, 15)
-	briefW = max((available * 40) / 100, 30)
+	toolsW = max((available*20)/100, 15)
+	briefW = max((available*40)/100, 30)
 	helpW = available - toolsW - briefW
 	if helpW < 30 {
 		helpW = 30
@@ -1313,7 +1387,7 @@ func (m Model) calcPanelWidths() (toolsW, briefW, helpW int) {
 			if toolsW < 1 {
 				toolsW = 1
 				// Reduce other panels proportionally
-				briefW = max((available - toolsW - 5) / 2, 1)
+				briefW = max((available-toolsW-5)/2, 1)
 				helpW = available - toolsW - briefW
 			}
 		}

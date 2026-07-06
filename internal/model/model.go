@@ -349,9 +349,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err == nil && msg.output != "" {
 			cached[msg.mode] = msg.output
 		} else if msg.mode == helpModeHelp {
-			cached[msg.mode] = "--help not available"
+			cached[msg.mode] = "No --help output for " + msg.toolName + ".\nPress [m] for the man page."
 		} else {
-			cached[msg.mode] = "man page not available"
+			cached[msg.mode] = "No man page for " + msg.toolName + ".\nPress [h] for --help."
 		}
 		m.helpCache[msg.toolName] = cached
 		if mt, ok := m.selectedMeta(); ok && mt.Name == msg.toolName {
@@ -2177,16 +2177,14 @@ func fetchHelpCmd(name string, mode int) tea.Cmd {
 		var output []byte
 		var err error
 
-		// In man mode, try the man page first.
+		// Each mode has exactly one source — no silent cross-fallback — so [m]
+		// and [h] are distinct and a missing page/flag surfaces its own message
+		// instead of masquerading as the other.
 		if mode == helpModeMan {
 			cmd := exec.CommandContext(ctx, "man", name)
 			cmd.Env = append(os.Environ(), "MANPAGER=cat", "MANWIDTH=80", "TERM=dumb")
 			output, err = cmd.Output()
-		}
-
-		// Fall back through the tool's own help flags. This is the only source
-		// for --help mode, and the fallback when `man` has no page.
-		if len(output) == 0 {
+		} else {
 			for _, args := range [][]string{{"--help"}, {"-h"}, {"help"}} {
 				if ctx.Err() != nil {
 					break

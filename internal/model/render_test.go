@@ -658,6 +658,49 @@ func mustModel(tm tea.Model, _ tea.Cmd) Model {
 	return tm.(Model)
 }
 
+// TestHelpMissingSourceMessages verifies that a mode whose source is absent
+// (no man page, or no --help output) surfaces an explicit, tool-named message
+// with a cross-hint to the other mode — instead of silently showing nothing or
+// the other mode's content.
+func TestHelpMissingSourceMessages(t *testing.T) {
+	base := func(mode int) Model {
+		m := Model{
+			width: 120, height: 24, helpW: 60,
+			meta:         []loader.ToolMeta{{Name: "agterm"}},
+			metaSelected: 0,
+			focus:        focusHelp,
+			helpMode:     mode,
+			helpCache:    map[string][2]string{},
+		}
+		m.tools = loader.ToolsFromMeta(m.meta)
+		return m
+	}
+
+	t.Run("man mode with no page names the tool and points to [h]", func(t *testing.T) {
+		m := base(helpModeMan)
+		nm := mustModel(m.Update(helpOutputMsg{toolName: "agterm", mode: helpModeMan, err: errBoom}))
+		plain := ansiCSI.ReplaceAllString(nm.renderHelpContent(), "")
+		if !strings.Contains(plain, "No man page for agterm") {
+			t.Errorf("man message = %q, want explicit no-man-page", plain)
+		}
+		if !strings.Contains(plain, "[h]") {
+			t.Errorf("man message = %q, want cross-hint to --help", plain)
+		}
+	})
+
+	t.Run("help mode with no output names the tool and points to [m]", func(t *testing.T) {
+		m := base(helpModeHelp)
+		nm := mustModel(m.Update(helpOutputMsg{toolName: "agterm", mode: helpModeHelp, err: errBoom}))
+		plain := ansiCSI.ReplaceAllString(nm.renderHelpContent(), "")
+		if !strings.Contains(plain, "No --help output for agterm") {
+			t.Errorf("help message = %q, want explicit no-help", plain)
+		}
+		if !strings.Contains(plain, "[m]") {
+			t.Errorf("help message = %q, want cross-hint to man", plain)
+		}
+	})
+}
+
 func TestRenderStatusBarRenaming(t *testing.T) {
 	m := Model{width: 80, renaming: true, nameInput: textinput.New()}
 	got := m.renderStatusBar()

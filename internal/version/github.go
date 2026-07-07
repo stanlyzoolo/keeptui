@@ -43,9 +43,9 @@ func Rate() RateLimit {
 	return rl
 }
 
-// updateRateFromHeaders parses the X-RateLimit-* response headers into the
-// shared rl snapshot. Missing or malformed headers are ignored (the previous
-// snapshot is left untouched); Known is set true only when values parse.
+// updateRateFromHeaders parses the X-RateLimit-* response headers and folds
+// them into the shared rl snapshot via mergeRateObservation. Missing or
+// malformed headers are ignored (the previous snapshot is left untouched).
 func updateRateFromHeaders(h http.Header) {
 	limitStr := h.Get("X-RateLimit-Limit")
 	remainingStr := h.Get("X-RateLimit-Remaining")
@@ -59,14 +59,52 @@ func updateRateFromHeaders(h http.Header) {
 	if errL != nil || errR != nil || errT != nil {
 		return
 	}
-	rlMu.Lock()
-	rl = RateLimit{
+	mergeRateObservation(RateLimit{
 		Limit:     limit,
 		Remaining: remaining,
 		Reset:     time.Unix(resetUnix, 0),
 		Known:     true,
+	})
+}
+
+// mergeRateObservation folds a new rate snapshot into the shared rl under the
+// shouldReplaceRate precedence rule and returns the resulting snapshot. Every
+// write to rl must go through here so no observation source can clobber a more
+// informed one.
+func mergeRateObservation(snap RateLimit) RateLimit {
+	rlMu.Lock()
+	defer rlMu.Unlock()
+	if shouldReplaceRate(rl, snap, time.Now()) {
+		rl = snap
 	}
-	rlMu.Unlock()
+	return rl
+}
+
+// shouldReplaceRate decides whether an incoming rate observation may replace
+// the current one. GET /rate_limit is unreliable: with a token it can report a
+// pristine counter (used=0, sliding reset) while the per-request X-RateLimit-*
+// headers count real usage — observed live against api.github.com. So the rule
+// is "more informed wins": accept a snapshot that reports the same or more
+// usage (lower/equal Remaining), a different Limit (the auth context changed,
+// e.g. a token was added or removed), or anything once the current window has
+// expired (a reset counter is then legitimate). A same-window snapshot claiming
+// FEWER used requests than already observed is the /rate_limit staleness lie
+// and is dropped. Out-of-order concurrent header updates get the same
+// treatment for free: the most-used observation sticks.
+func shouldReplaceRate(cur, snap RateLimit, now time.Time) bool {
+	if !snap.Known {
+		return false
+	}
+	if !cur.Known {
+		return true
+	}
+	if snap.Limit != cur.Limit {
+		return true
+	}
+	if snap.Remaining <= cur.Remaining {
+		return true
+	}
+	return !now.Before(cur.Reset)
 }
 
 // doGH performs a GitHub API request with the shared client. It sets the Accept
@@ -145,10 +183,12 @@ func decodeCoreRate(body io.Reader) (RateLimit, error) {
 	}, nil
 }
 
-// FetchRate queries GET /rate_limit for the current core rate-limit state and
-// updates the shared snapshot. The rate_limit endpoint does not consume core
-// quota, so it is safe to call on demand (overlay open, refresh, startup seed).
-// It uses the resolved token via doGH.
+// FetchRate queries GET /rate_limit and merges the result into the shared
+// snapshot, returning the merged value. The rate_limit endpoint does not
+// consume core quota, so it is safe to call on demand (overlay open, refresh,
+// startup seed) — but its numbers are advisory only: it can claim zero usage
+// while real requests have been counted (see shouldReplaceRate), so it seeds
+// an unknown snapshot and must never override a more informed one.
 func FetchRate() (RateLimit, error) {
 	req, err := http.NewRequest("GET", apiBase()+"/rate_limit", nil)
 	if err != nil {
@@ -166,10 +206,7 @@ func FetchRate() (RateLimit, error) {
 	if err != nil {
 		return RateLimit{}, err
 	}
-	rlMu.Lock()
-	rl = snap
-	rlMu.Unlock()
-	return snap, nil
+	return mergeRateObservation(snap), nil
 }
 
 // FetchRateWithToken validates a candidate token by issuing GET /rate_limit with

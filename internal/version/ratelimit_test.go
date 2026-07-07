@@ -83,6 +83,146 @@ func TestUpdateRateFromHeadersMalformed(t *testing.T) {
 	}
 }
 
+// TestShouldReplaceRate pins the precedence rule between rate observations:
+// more usage (lower/equal Remaining) wins, a Limit change wins, anything wins
+// over an unknown snapshot or an expired window; a same-window snapshot
+// claiming fewer used requests (the /rate_limit staleness lie) is dropped.
+func TestShouldReplaceRate(t *testing.T) {
+	now := time.Now()
+	future := now.Add(30 * time.Minute)
+	past := now.Add(-time.Minute)
+	informed := RateLimit{Limit: 5000, Remaining: 4935, Reset: future, Known: true}
+
+	tests := []struct {
+		name string
+		cur  RateLimit
+		snap RateLimit
+		want bool
+	}{
+		{"unknown snap never replaces", informed, RateLimit{}, false},
+		{"anything replaces unknown cur", RateLimit{}, informed, true},
+		{"more usage replaces", informed, RateLimit{Limit: 5000, Remaining: 4900, Reset: future, Known: true}, true},
+		{"equal usage replaces (refreshes reset)", informed, RateLimit{Limit: 5000, Remaining: 4935, Reset: future, Known: true}, true},
+		{"less usage in same window is dropped", informed, RateLimit{Limit: 5000, Remaining: 5000, Reset: future, Known: true}, false},
+		{"less usage after window expiry replaces", RateLimit{Limit: 5000, Remaining: 4935, Reset: past, Known: true}, RateLimit{Limit: 5000, Remaining: 5000, Reset: future, Known: true}, true},
+		{"limit change replaces (token added)", RateLimit{Limit: 60, Remaining: 10, Reset: future, Known: true}, RateLimit{Limit: 5000, Remaining: 5000, Reset: future, Known: true}, true},
+		{"limit change replaces (token removed)", informed, RateLimit{Limit: 60, Remaining: 60, Reset: future, Known: true}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldReplaceRate(tt.cur, tt.snap, now); got != tt.want {
+				t.Errorf("shouldReplaceRate(%+v, %+v) = %v, want %v", tt.cur, tt.snap, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestUpdateRateFromHeadersKeepsMoreInformed verifies a same-window header
+// observation with fewer used requests does not clobber the snapshot.
+func TestUpdateRateFromHeadersKeepsMoreInformed(t *testing.T) {
+	resetRate(t)
+	future := time.Now().Add(30 * time.Minute)
+	rlMu.Lock()
+	rl = RateLimit{Limit: 5000, Remaining: 4935, Reset: future, Known: true}
+	rlMu.Unlock()
+
+	h := http.Header{}
+	h.Set("X-RateLimit-Limit", "5000")
+	h.Set("X-RateLimit-Remaining", "5000")
+	h.Set("X-RateLimit-Reset", strconv.FormatInt(future.Unix(), 10))
+	updateRateFromHeaders(h)
+
+	if got := Rate(); got.Remaining != 4935 {
+		t.Errorf("Remaining = %d, want informed 4935 kept", got.Remaining)
+	}
+}
+
+// rateLimitServer returns an httptest server answering GET /rate_limit with the
+// given core numbers in both the body and the response's own X-RateLimit-*
+// headers (mimicking the live endpoint, which lies in both places the same way).
+func rateLimitServer(t *testing.T, limit, remaining int, reset time.Time) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-RateLimit-Limit", strconv.Itoa(limit))
+		w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
+		w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(reset.Unix(), 10))
+		w.Header().Set("Content-Type", "application/json")
+		body := `{"resources":{"core":{"limit":` + strconv.Itoa(limit) +
+			`,"remaining":` + strconv.Itoa(remaining) +
+			`,"reset":` + strconv.FormatInt(reset.Unix(), 10) + `}}}`
+		_, _ = w.Write([]byte(body))
+	}))
+	origAPIBase := testAPIBase
+	testAPIBase = srv.URL
+	t.Cleanup(func() {
+		srv.Close()
+		testAPIBase = origAPIBase
+	})
+	return srv
+}
+
+// TestFetchRateDoesNotClobberInformedSnapshot reproduces the [L]-overlay bug:
+// after real requests counted usage (gauge 65/5000), GET /rate_limit reports a
+// pristine 0/5000. FetchRate must return the informed snapshot and leave the
+// shared one untouched, so the gauge never zeroes out on overlay open.
+func TestFetchRateDoesNotClobberInformedSnapshot(t *testing.T) {
+	resetRate(t)
+	future := time.Now().Add(30 * time.Minute)
+	rlMu.Lock()
+	rl = RateLimit{Limit: 5000, Remaining: 4935, Reset: future, Known: true}
+	rlMu.Unlock()
+
+	rateLimitServer(t, 5000, 5000, future)
+
+	got, err := FetchRate()
+	if err != nil {
+		t.Fatalf("FetchRate: %v", err)
+	}
+	if got.Remaining != 4935 {
+		t.Errorf("FetchRate Remaining = %d, want informed 4935", got.Remaining)
+	}
+	if shared := Rate(); shared.Remaining != 4935 {
+		t.Errorf("shared Remaining = %d, want informed 4935 kept", shared.Remaining)
+	}
+}
+
+// TestFetchRateSeedsUnknownSnapshot verifies the startup path: with no prior
+// observation the /rate_limit numbers are accepted as the initial seed.
+func TestFetchRateSeedsUnknownSnapshot(t *testing.T) {
+	resetRate(t)
+	future := time.Now().Add(30 * time.Minute)
+	rateLimitServer(t, 5000, 4990, future)
+
+	got, err := FetchRate()
+	if err != nil {
+		t.Fatalf("FetchRate: %v", err)
+	}
+	if !got.Known || got.Limit != 5000 || got.Remaining != 4990 {
+		t.Errorf("FetchRate = %+v, want seeded 4990/5000", got)
+	}
+}
+
+// TestFetchRateAcceptsResetWindow verifies a fresh counter is accepted once the
+// current snapshot's window has expired — a legitimate hourly reset must not be
+// mistaken for the staleness lie.
+func TestFetchRateAcceptsResetWindow(t *testing.T) {
+	resetRate(t)
+	past := time.Now().Add(-time.Minute)
+	rlMu.Lock()
+	rl = RateLimit{Limit: 5000, Remaining: 4935, Reset: past, Known: true}
+	rlMu.Unlock()
+
+	rateLimitServer(t, 5000, 5000, time.Now().Add(time.Hour))
+
+	got, err := FetchRate()
+	if err != nil {
+		t.Fatalf("FetchRate: %v", err)
+	}
+	if got.Remaining != 5000 {
+		t.Errorf("Remaining = %d, want fresh 5000 accepted after window expiry", got.Remaining)
+	}
+}
+
 // TestDoGHSendsAuthorizationWhenTokenSet verifies doGH attaches a Bearer header
 // when a token resolves, and that updateRateFromHeaders runs on the response.
 func TestDoGHSendsAuthorizationWhenTokenSet(t *testing.T) {

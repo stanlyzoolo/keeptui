@@ -176,9 +176,11 @@ to 0 (first match highlighted), which now shows visibly via the marker.
 
 ### Task 4: [Final] Update documentation
 
-- [ ] update the TUI state machine section of `CLAUDE.md` (search is now a
+- [x] update the TUI state machine section of `CLAUDE.md` (search is now a
       commit/rollback transaction: enter/arrows/esc semantics)
-- [ ] move this plan to `docs/plans/completed/`
+- [x] move this plan to `docs/plans/completed/` (skipped — the exec harness
+      moves the plan after all phases finish; moving it mid-run breaks the
+      later review/finalize/stats phases)
 
 ## Post-Completion
 

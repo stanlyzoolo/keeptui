@@ -153,11 +153,11 @@ Key design decisions:
 - Modify: `internal/loader/meta.go`
 - Modify: `internal/loader/meta_test.go`
 
-- [ ] change `SaveMeta` to write `meta.yaml.tmp` in the target directory then `os.Rename` over `meta.yaml`
-- [ ] preserve `0644` permissions and `MkdirAll` behavior
-- [ ] write test: successful save leaves no `.tmp` file behind
-- [ ] write test: save over an existing file replaces content fully (no partial merge)
-- [ ] run tests - must pass before next task
+- [x] change `SaveMeta` to write `meta.yaml.tmp` in the target directory then `os.Rename` over `meta.yaml`
+- [x] preserve `0644` permissions and `MkdirAll` behavior
+- [x] write test: successful save leaves no `.tmp` file behind
+- [x] write test: save over an existing file replaces content fully (no partial merge)
+- [x] run tests - must pass before next task
 
 ### Task 7: Mechanical split of model.go
 

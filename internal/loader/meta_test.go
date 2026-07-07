@@ -74,6 +74,44 @@ func TestSaveMetaLoadMetaRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSaveMetaLeavesNoTempFile(t *testing.T) {
+	dir := useTempConfigDir(t)
+
+	if err := SaveMeta([]ToolMeta{{Name: "a", Status: StatusActive}}); err != nil {
+		t.Fatalf("SaveMeta: %v", err)
+	}
+	entries, err := os.ReadDir(filepath.Join(dir, "keys"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "meta.yaml" {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Errorf("config dir contains %v, want only meta.yaml", names)
+	}
+}
+
+func TestSaveMetaReplacesExistingFile(t *testing.T) {
+	useTempConfigDir(t)
+
+	if err := SaveMeta([]ToolMeta{{Name: "old1"}, {Name: "old2"}}); err != nil {
+		t.Fatalf("first SaveMeta: %v", err)
+	}
+	if err := SaveMeta([]ToolMeta{{Name: "new"}}); err != nil {
+		t.Fatalf("second SaveMeta: %v", err)
+	}
+
+	got, err := LoadMeta()
+	if err != nil {
+		t.Fatalf("LoadMeta: %v", err)
+	}
+	if len(got) != 1 || got[0].Name != "new" {
+		t.Errorf("after overwrite LoadMeta = %+v, want single entry new (no partial merge)", got)
+	}
+}
+
 func TestFindMeta(t *testing.T) {
 	meta := []ToolMeta{{Name: "a"}, {Name: "b"}}
 

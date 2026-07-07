@@ -186,18 +186,18 @@ segments in the dim style after truncation.
 
 ### Task 5: Verify acceptance criteria
 
-- [ ] verify all requirements from Overview are implemented (mode gating policy, selection parity, minor fixes, non-italic overlay hints, dimmed background)
-- [ ] verify edge cases: filtered list (`modeSearch` off after esc, click uses `filteredMeta` indices), clicks on borders/status bar remain no-ops
-- [ ] run full test suite: `go test -race ./...`
-- [ ] run `go vet ./...` and `golangci-lint run`
-- [ ] `internal/model` coverage does not drop below 68.3% (should rise — `handleMouse` was at 0%)
+- [x] verify all requirements from Overview are implemented (mode gating policy, selection parity, minor fixes, non-italic overlay hints, dimmed background)
+- [x] verify edge cases: filtered list (`modeSearch` off after esc, click uses `filteredMeta` indices), clicks on borders/status bar remain no-ops
+- [x] run full test suite: `go test -race ./...`
+- [x] run `go vet ./...` and `golangci-lint run` (0 issues)
+- [x] `internal/model` coverage does not drop below 68.3% — rose to 73.1% (`internal/ui` at 86.0%)
 
 ### Task 6: [Final] Update documentation
 
-- [ ] add a mouse-policy note to CLAUDE.md's TUI state machine section (wheel everywhere except under the overlay; clicks only in `modeNormal`; click selection fires `autoFetchCmdsForSelected`)
-- [ ] note in CLAUDE.md's overlay description that `PlaceOverlay` dims the background; also fix the stale claim that search and the changelog popup render via `PlaceOverlay` — the API-status overlay is its only caller (render.go:29)
-- [ ] README: no changes expected (behavior matches what a user would already assume)
-- [ ] move this plan to `docs/plans/completed/`
+- [x] add a mouse-policy note to CLAUDE.md's TUI state machine section (wheel everywhere except under the overlay; clicks only in `modeNormal`; click selection fires `autoFetchCmdsForSelected`)
+- [x] note in CLAUDE.md's overlay description that `PlaceOverlay` dims the background; also fix the stale claim that search and the changelog popup render via `PlaceOverlay` — the API-status overlay is its only caller (render.go:29)
+- [x] README: no changes expected (behavior matches what a user would already assume)
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 

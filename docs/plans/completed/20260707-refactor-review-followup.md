@@ -210,17 +210,17 @@ Key design decisions:
 
 ### Task 10: Verify acceptance criteria
 
-- [ ] verify all requirements from Overview are implemented
-- [ ] verify edge cases are handled (pre-release versions, crash-safe save, mode transitions)
-- [ ] run full test suite: `go test -race ./...`
-- [ ] run `go vet ./...` and `golangci-lint run` locally
-- [ ] compare coverage to baseline (`loader` ≥ 70%, `version/detect.go` > 0 → covered, `model` ≥ 60%); no package below its baseline
+- [x] verify all requirements from Overview are implemented
+- [x] verify edge cases are handled (pre-release versions, crash-safe save, mode transitions)
+- [x] run full test suite: `go test -race ./...`
+- [x] run `go vet ./...` and `golangci-lint run` locally (0 issues)
+- [x] compare coverage to baseline (`loader` 31.4% → 81.7%, `version` 74.5% → 86.1% incl. detect.go, `model` 55.8% → 68.3%, `ui` 84.8% unchanged); no package below its baseline
 
 ### Task 11: [Final] Update documentation
 
-- [ ] update README.md if any user-visible behavior changed (none expected)
-- [ ] confirm CLAUDE.md matches final state (Task 9 done before the split settled — re-verify)
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update README.md — ➕ it carried the same stale content as CLAUDE.md (user configs `config.yaml`, built-in tools list, `internal/loader/data` contribution note); removed those sections, documented `meta.yaml` + `cache.json` storage
+- [x] confirm CLAUDE.md matches final state (Task 9 done before the split settled — re-verify)
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 

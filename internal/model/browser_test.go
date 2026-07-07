@@ -4,8 +4,6 @@ import (
 	"errors"
 	"reflect"
 	"testing"
-
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestBrowserCommand(t *testing.T) {
@@ -55,7 +53,7 @@ func TestUpdateOpenURLMsg(t *testing.T) {
 // openURLCmd must return a non-nil command; we deliberately do not invoke it
 // here because doing so would launch a real browser process.
 func TestOpenURLCmdNonNil(t *testing.T) {
-	var cmd tea.Cmd = openURLCmd("https://example.com")
+	cmd := openURLCmd("https://example.com")
 	if cmd == nil {
 		t.Fatal("openURLCmd returned nil")
 	}

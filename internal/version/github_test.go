@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// TestConcurrentFetch verifies that parallel FetchAndCache calls for multiple
+// TestConcurrentFetch verifies that parallel forced fetches for multiple
 // repos all end up in the cache (no write is lost due to a race condition).
 func TestConcurrentFetch(t *testing.T) {
 	repos := []string{"owner/toolA", "owner/toolB", "owner/toolC"}
@@ -20,11 +20,11 @@ func TestConcurrentFetch(t *testing.T) {
 		case len(r.URL.Path) > 0 && r.URL.Path[len(r.URL.Path)-1] == 's' &&
 			len(r.URL.Path) > 10 && r.URL.Path[len(r.URL.Path)-10:] == "/languages":
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]int{"Go": 1000})
+			_ = json.NewEncoder(w).Encode(map[string]int{"Go": 1000})
 		case len(r.URL.Path) > 7 && r.URL.Path[len(r.URL.Path)-7:] == "/latest":
 			w.Header().Set("Content-Type", "application/json")
 			// Extract repo name from path for unique tag
-			json.NewEncoder(w).Encode(map[string]string{
+			_ = json.NewEncoder(w).Encode(map[string]string{
 				"tag_name":     "v1.0.0",
 				"body":         "release notes",
 				"html_url":     "https://github.com" + r.URL.Path,
@@ -33,7 +33,7 @@ func TestConcurrentFetch(t *testing.T) {
 		default:
 			// Repo info endpoint
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"archived":        false,
 				"description":     "test tool",
 				"stargazers_count": 42,
@@ -59,7 +59,7 @@ func TestConcurrentFetch(t *testing.T) {
 		wg.Add(1)
 		go func(r string) {
 			defer wg.Done()
-			FetchAndCache("github.com/" + r) //nolint:errcheck
+			RefreshRepoData("github.com/" + r)
 		}(repo)
 	}
 	wg.Wait()
@@ -67,7 +67,7 @@ func TestConcurrentFetch(t *testing.T) {
 	cache := LoadCache()
 	for _, repo := range repos {
 		if _, ok := cache[repo]; !ok {
-			t.Errorf("cache missing entry for %q after concurrent FetchAndCache", repo)
+			t.Errorf("cache missing entry for %q after concurrent RefreshRepoData", repo)
 		}
 	}
 }
@@ -154,16 +154,16 @@ func githubTestServer(t *testing.T) *httptest.Server {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case len(r.URL.Path) >= 10 && r.URL.Path[len(r.URL.Path)-10:] == "/languages":
-			json.NewEncoder(w).Encode(map[string]int{"Go": 1000})
+			_ = json.NewEncoder(w).Encode(map[string]int{"Go": 1000})
 		case len(r.URL.Path) >= 7 && r.URL.Path[len(r.URL.Path)-7:] == "/latest":
-			json.NewEncoder(w).Encode(map[string]string{
+			_ = json.NewEncoder(w).Encode(map[string]string{
 				"tag_name":     "v2.3.4",
 				"body":         "release notes",
 				"html_url":     "https://github.com" + r.URL.Path,
 				"published_at": "2025-01-01T00:00:00Z",
 			})
 		default:
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"archived":         false,
 				"description":      "test tool",
 				"stargazers_count": 42,
@@ -182,17 +182,22 @@ func githubTestServer(t *testing.T) *httptest.Server {
 	return srv
 }
 
-// TestGetLatestReadAfterWrite verifies GetLatest persists its result through
-// updateCacheEntry so a subsequent read within TTL is served from cache.
-func TestGetLatestReadAfterWrite(t *testing.T) {
+// TestGetRepoDataReadAfterWrite verifies GetRepoData persists its result
+// through updateCacheEntry so a subsequent read within TTL is served from
+// cache, with release, card and languages fields all intact.
+func TestGetRepoDataReadAfterWrite(t *testing.T) {
 	githubTestServer(t)
 
-	if got := GetLatest("github.com/owner/repo"); got != "v2.3.4" {
-		t.Fatalf("GetLatest = %q, want v2.3.4", got)
+	d := GetRepoData("github.com/owner/repo")
+	if d.Latest != "v2.3.4" {
+		t.Fatalf("Latest = %q, want v2.3.4", d.Latest)
+	}
+	if d.Languages["Go"] != 1000 {
+		t.Errorf("Languages = %v, want Go:1000", d.Languages)
 	}
 	entry, ok := LoadCache()["owner/repo"]
 	if !ok {
-		t.Fatal("cache missing entry after GetLatest")
+		t.Fatal("cache missing entry after GetRepoData")
 	}
 	if entry.Latest != "v2.3.4" {
 		t.Errorf("cached Latest = %q, want v2.3.4", entry.Latest)
@@ -200,36 +205,23 @@ func TestGetLatestReadAfterWrite(t *testing.T) {
 	if entry.RepoStatus != "active" {
 		t.Errorf("cached RepoStatus = %q, want active", entry.RepoStatus)
 	}
-}
-
-// TestGetRepoCardReadAfterWrite verifies GetRepoCard persists languages and
-// preserves the Latest tag already stored by an earlier GetLatest.
-func TestGetRepoCardReadAfterWrite(t *testing.T) {
-	githubTestServer(t)
-
-	GetLatest("github.com/owner/repo")
-	card := GetRepoCard("github.com/owner/repo")
-	if card.Languages["Go"] != 1000 {
-		t.Errorf("card languages = %v, want Go:1000", card.Languages)
-	}
-	if card.Latest != "v2.3.4" {
-		t.Errorf("card Latest = %q, want v2.3.4 (preserved from GetLatest)", card.Latest)
-	}
-	entry := LoadCache()["owner/repo"]
 	if entry.Languages == nil {
-		t.Error("cached Languages nil after GetRepoCard")
+		t.Error("cached Languages nil after GetRepoData")
 	}
-	if entry.Latest != "v2.3.4" {
-		t.Errorf("cached Latest = %q, want v2.3.4 preserved", entry.Latest)
+
+	// A second read within TTL must preserve every field (served from cache).
+	d2 := GetRepoData("github.com/owner/repo")
+	if d2.Latest != "v2.3.4" || d2.Languages["Go"] != 1000 {
+		t.Errorf("second read = %+v, want same data from cache", d2)
 	}
 }
 
 // TestGetChangelogReadAfterWrite verifies GetChangelog persists body and
-// preserves languages already populated by GetRepoCard.
+// preserves languages already populated by GetRepoData.
 func TestGetChangelogReadAfterWrite(t *testing.T) {
 	githubTestServer(t)
 
-	GetRepoCard("github.com/owner/repo")
+	GetRepoData("github.com/owner/repo")
 	info, err := GetChangelog("github.com/owner/repo")
 	if err != nil {
 		t.Fatalf("GetChangelog: %v", err)
@@ -242,13 +234,13 @@ func TestGetChangelogReadAfterWrite(t *testing.T) {
 		t.Errorf("cached Body = %q, want release notes", entry.Body)
 	}
 	if entry.Languages["Go"] != 1000 {
-		t.Errorf("cached Languages = %v, want Go:1000 preserved from GetRepoCard", entry.Languages)
+		t.Errorf("cached Languages = %v, want Go:1000 preserved from GetRepoData", entry.Languages)
 	}
 }
 
-// TestConcurrentInitLikeFetch mimics startup: for several repos GetLatest and
-// GetRepoCard run in parallel; every repo must end up with both release and
-// card fields intact — no lost write between the two paths.
+// TestConcurrentInitLikeFetch mimics startup: for several repos two GetRepoData
+// calls run in parallel; every repo must end up with both release and card
+// fields intact — no lost write between concurrent passes.
 func TestConcurrentInitLikeFetch(t *testing.T) {
 	githubTestServer(t)
 
@@ -256,16 +248,13 @@ func TestConcurrentInitLikeFetch(t *testing.T) {
 	var wg sync.WaitGroup
 	for _, repo := range repos {
 		field := "github.com/" + repo
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			GetLatest(field)
-		}()
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			GetRepoCard(field)
-		}()
+		for range 2 {
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				GetRepoData(field)
+			}()
+		}
 	}
 	wg.Wait()
 
@@ -298,16 +287,16 @@ func TestGetRepoDataSinglePass(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case len(r.URL.Path) >= 10 && r.URL.Path[len(r.URL.Path)-10:] == "/languages":
-			json.NewEncoder(w).Encode(map[string]int{"Go": 1000})
+			_ = json.NewEncoder(w).Encode(map[string]int{"Go": 1000})
 		case len(r.URL.Path) >= 7 && r.URL.Path[len(r.URL.Path)-7:] == "/latest":
-			json.NewEncoder(w).Encode(map[string]string{
+			_ = json.NewEncoder(w).Encode(map[string]string{
 				"tag_name":     "v3.1.4",
 				"body":         "release notes",
 				"html_url":     "https://github.com" + r.URL.Path,
 				"published_at": "2025-01-01T00:00:00Z",
 			})
 		default:
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"archived":         false,
 				"description":      "test tool",
 				"stargazers_count": 42,
@@ -378,7 +367,7 @@ func TestGetRepoDataLanguagesFailureStillCaches(t *testing.T) {
 			w.WriteHeader(http.StatusInternalServerError)
 		case len(r.URL.Path) >= 7 && r.URL.Path[len(r.URL.Path)-7:] == "/latest":
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{
+			_ = json.NewEncoder(w).Encode(map[string]string{
 				"tag_name":     "v1.0.0",
 				"body":         "release notes",
 				"html_url":     "https://github.com" + r.URL.Path,
@@ -386,7 +375,7 @@ func TestGetRepoDataLanguagesFailureStillCaches(t *testing.T) {
 			})
 		default:
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"archived":         false,
 				"description":      "test tool",
 				"stargazers_count": 7,
@@ -450,11 +439,11 @@ func TestGetRepoDataTotalFailureDoesNotPoisonCache(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case len(r.URL.Path) >= 10 && r.URL.Path[len(r.URL.Path)-10:] == "/languages":
-			json.NewEncoder(w).Encode(map[string]int{"Go": 1000})
+			_ = json.NewEncoder(w).Encode(map[string]int{"Go": 1000})
 		case len(r.URL.Path) >= 7 && r.URL.Path[len(r.URL.Path)-7:] == "/latest":
-			json.NewEncoder(w).Encode(map[string]string{"tag_name": "v2.0.0"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"tag_name": "v2.0.0"})
 		default:
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"archived": false, "description": "test tool", "stargazers_count": 9,
 			})
 		}
@@ -508,17 +497,17 @@ func TestGetRepoDataStaleFallbackOnReleaseFailure(t *testing.T) {
 		switch {
 		case len(r.URL.Path) >= 10 && r.URL.Path[len(r.URL.Path)-10:] == "/languages":
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]int{"Go": 500})
+			_ = json.NewEncoder(w).Encode(map[string]int{"Go": 500})
 		case len(r.URL.Path) >= 7 && r.URL.Path[len(r.URL.Path)-7:] == "/latest":
 			if fr {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"tag_name": "v1.2.3"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"tag_name": "v1.2.3"})
 		default:
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"archived": false, "description": "good tool", "stargazers_count": curStars,
 			})
 		}
@@ -576,10 +565,10 @@ func TestGetRepoDataInfoFailureDoesNotPoisonCache(t *testing.T) {
 		switch {
 		case len(r.URL.Path) >= 10 && r.URL.Path[len(r.URL.Path)-10:] == "/languages":
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]int{"Rust": 500})
+			_ = json.NewEncoder(w).Encode(map[string]int{"Rust": 500})
 		case len(r.URL.Path) >= 7 && r.URL.Path[len(r.URL.Path)-7:] == "/latest":
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"tag_name": "v0.1.3"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"tag_name": "v0.1.3"})
 		default:
 			if fi {
 				// Rate-limited repo-info: 403 with the quota exhausted.
@@ -588,7 +577,7 @@ func TestGetRepoDataInfoFailureDoesNotPoisonCache(t *testing.T) {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"archived": false, "description": "hacker news tui", "stargazers_count": 9,
 			})
 		}
@@ -701,7 +690,7 @@ func TestFetchRateParsesCore(t *testing.T) {
 			t.Errorf("unexpected path %q, want /rate_limit", r.URL.Path)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"resources": map[string]interface{}{
 				"core": map[string]interface{}{
 					"limit":     5000,
@@ -740,7 +729,7 @@ func TestFetchRateWithTokenValid(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuth = r.Header.Get("Authorization")
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
 			"resources": map[string]interface{}{
 				"core": map[string]interface{}{"limit": 5000, "remaining": 5000, "reset": 0},
 			},
@@ -850,7 +839,7 @@ func TestFetchRateMalformedBody(t *testing.T) {
 	resetRate(t)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("{not json"))
+		_, _ = w.Write([]byte("{not json"))
 	}))
 	origAPIBase := testAPIBase
 	testAPIBase = srv.URL
@@ -904,11 +893,11 @@ func TestRefreshRepoDataBypassesTTL(t *testing.T) {
 		w.Header().Set("Content-Type", "application/json")
 		switch {
 		case len(r.URL.Path) >= 10 && r.URL.Path[len(r.URL.Path)-10:] == "/languages":
-			json.NewEncoder(w).Encode(map[string]int{"Go": 1000})
+			_ = json.NewEncoder(w).Encode(map[string]int{"Go": 1000})
 		case len(r.URL.Path) >= 7 && r.URL.Path[len(r.URL.Path)-7:] == "/latest":
-			json.NewEncoder(w).Encode(map[string]string{"tag_name": "v1.0.0"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"tag_name": "v1.0.0"})
 		default:
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"archived": false, "description": "tool", "stargazers_count": curStars,
 			})
 		}
@@ -970,10 +959,10 @@ func TestRefreshRepoDataKeepsConclusiveGuard(t *testing.T) {
 		switch {
 		case len(r.URL.Path) >= 10 && r.URL.Path[len(r.URL.Path)-10:] == "/languages":
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]int{"Go": 1000})
+			_ = json.NewEncoder(w).Encode(map[string]int{"Go": 1000})
 		case len(r.URL.Path) >= 7 && r.URL.Path[len(r.URL.Path)-7:] == "/latest":
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"tag_name": "v1.0.0"})
+			_ = json.NewEncoder(w).Encode(map[string]string{"tag_name": "v1.0.0"})
 		default:
 			if fi {
 				w.Header().Set("X-RateLimit-Remaining", "0")
@@ -981,7 +970,7 @@ func TestRefreshRepoDataKeepsConclusiveGuard(t *testing.T) {
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]interface{}{
+			_ = json.NewEncoder(w).Encode(map[string]interface{}{
 				"archived": false, "description": "good tool", "stargazers_count": 5,
 			})
 		}
@@ -1033,10 +1022,10 @@ func TestRefreshChangelogBypassesTTL(t *testing.T) {
 		mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		if len(r.URL.Path) >= 7 && r.URL.Path[len(r.URL.Path)-7:] == "/latest" {
-			json.NewEncoder(w).Encode(map[string]string{"tag_name": "v1.0.0", "body": curBody})
+			_ = json.NewEncoder(w).Encode(map[string]string{"tag_name": "v1.0.0", "body": curBody})
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]interface{}{"archived": false, "description": "tool"})
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"archived": false, "description": "tool"})
 	}))
 	origAPIBase := testAPIBase
 	origCacheDir := testCacheDir
@@ -1057,7 +1046,7 @@ func TestRefreshChangelogBypassesTTL(t *testing.T) {
 	mu.Unlock()
 
 	// Plain GetChangelog is a cache hit (fresh + body present): no new request.
-	GetChangelog("github.com/owner/repo")
+	_, _ = GetChangelog("github.com/owner/repo")
 	mu.Lock()
 	afterHit := requests
 	mu.Unlock()

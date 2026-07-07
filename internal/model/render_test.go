@@ -321,12 +321,12 @@ func TestRenderStatusBarGauge(t *testing.T) {
 
 	t.Run("input and modal modes suppress the gauge", func(t *testing.T) {
 		for _, m := range []Model{
-			{width: 120, tracking: true, trackInput: textinput.New(), rate: known},
-			{width: 120, renaming: true, nameInput: textinput.New(), rate: known},
-			{width: 120, searching: true, search: textinput.New(), rate: known},
-			{width: 120, editingNote: true, rate: known},
-			{width: 120, editingTags: true, rate: known},
-			{width: 120, showingAPIStatus: true, rate: known},
+			{width: 120, mode: modeTrack, trackInput: textinput.New(), rate: known},
+			{width: 120, mode: modeRename, nameInput: textinput.New(), rate: known},
+			{width: 120, mode: modeSearch, search: textinput.New(), rate: known},
+			{width: 120, mode: modeEditNote, rate: known},
+			{width: 120, mode: modeEditTags, rate: known},
+			{width: 120, mode: modeAPIStatus, rate: known},
 		} {
 			got := m.renderStatusBar()
 			if strings.Contains(got, "GitHub API Usage") || strings.Contains(got, "GH ") {
@@ -362,7 +362,7 @@ func TestRenderHintsBarAlignment(t *testing.T) {
 }
 
 func TestRenderStatusBarTracking(t *testing.T) {
-	m := Model{width: 80, tracking: true, trackInput: textinput.New()}
+	m := Model{width: 80, mode: modeTrack, trackInput: textinput.New()}
 	got := m.renderStatusBar()
 	if !strings.Contains(got, "track") {
 		t.Errorf("tracking status bar = %q, missing prompt", got)
@@ -451,7 +451,7 @@ func TestTrackToolSavePath(t *testing.T) {
 }
 
 func TestRenderStatusBarConfirmUntrack(t *testing.T) {
-	m := Model{width: 80, confirmingUntrack: true, untrackTarget: "git"}
+	m := Model{width: 80, mode: modeConfirmUntrack, untrackTarget: "git"}
 	got := m.renderStatusBar()
 	for _, want := range []string{"Untrack", "git", "yes", "no"} {
 		if !strings.Contains(got, want) {
@@ -478,16 +478,16 @@ func TestUpdateUntrackConfirm(t *testing.T) {
 			meta: []loader.ToolMeta{
 				{Name: "a"}, {Name: "b"}, {Name: "c"},
 			},
-			metaSelected:      1,
-			confirmingUntrack: true,
-			untrackTarget:     "b",
+			metaSelected:  1,
+			mode:          modeConfirmUntrack,
+			untrackTarget: "b",
 		}
 		m.tools = loader.ToolsFromMeta(m.meta)
 
 		updated, _ := m.updateUntrackConfirm(enter)
 		nm := updated.(Model)
 
-		if nm.confirmingUntrack {
+		if nm.mode == modeConfirmUntrack {
 			t.Errorf("confirmingUntrack should be false after enter")
 		}
 		if loader.FindMeta(nm.meta, "b") != nil {
@@ -504,10 +504,10 @@ func TestUpdateUntrackConfirm(t *testing.T) {
 
 	t.Run("enter on last item clamps to new last index", func(t *testing.T) {
 		m := Model{
-			meta:              []loader.ToolMeta{{Name: "a"}, {Name: "b"}},
-			metaSelected:      1,
-			confirmingUntrack: true,
-			untrackTarget:     "b",
+			meta:          []loader.ToolMeta{{Name: "a"}, {Name: "b"}},
+			metaSelected:  1,
+			mode:          modeConfirmUntrack,
+			untrackTarget: "b",
 		}
 		m.tools = loader.ToolsFromMeta(m.meta)
 
@@ -521,17 +521,17 @@ func TestUpdateUntrackConfirm(t *testing.T) {
 
 	t.Run("esc cancels and leaves list unchanged", func(t *testing.T) {
 		m := Model{
-			meta:              []loader.ToolMeta{{Name: "a"}, {Name: "b"}},
-			metaSelected:      0,
-			confirmingUntrack: true,
-			untrackTarget:     "a",
+			meta:          []loader.ToolMeta{{Name: "a"}, {Name: "b"}},
+			metaSelected:  0,
+			mode:          modeConfirmUntrack,
+			untrackTarget: "a",
 		}
 		m.tools = loader.ToolsFromMeta(m.meta)
 
 		updated, _ := m.updateUntrackConfirm(esc)
 		nm := updated.(Model)
 
-		if nm.confirmingUntrack {
+		if nm.mode == modeConfirmUntrack {
 			t.Errorf("confirmingUntrack should be false after esc")
 		}
 		if len(nm.meta) != 2 || loader.FindMeta(nm.meta, "a") == nil {
@@ -702,7 +702,7 @@ func TestHelpMissingSourceMessages(t *testing.T) {
 }
 
 func TestRenderStatusBarRenaming(t *testing.T) {
-	m := Model{width: 80, renaming: true, nameInput: textinput.New()}
+	m := Model{width: 80, mode: modeRename, nameInput: textinput.New()}
 	got := m.renderStatusBar()
 	if !strings.Contains(got, "rename to") {
 		t.Errorf("renaming status bar = %q, missing prompt", got)
@@ -1073,7 +1073,7 @@ func TestUpdateRenameInputClearsStaleCaches(t *testing.T) {
 	m := Model{
 		meta:          []loader.ToolMeta{{Name: old, GitHub: "cli/cli"}},
 		metaSelected:  0,
-		renaming:      true,
+		mode:          modeRename,
 		nameInput:     textinput.New(),
 		repoCards:     map[string]version.RepoCard{old: {}},
 		versions:      map[string]VersionInfo{old: {}},
@@ -1289,7 +1289,7 @@ func TestMaskToken(t *testing.T) {
 func TestRenderAPIStatusOverlay(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "ghp_1234567890abcdef3f2a")
 
-	m := Model{width: 80, height: 24, showingAPIStatus: true}
+	m := Model{width: 80, height: 24, mode: modeAPIStatus}
 	m.rate = version.RateLimit{Known: true, Remaining: 0, Limit: 60}
 	got := m.renderAPIStatus()
 
@@ -1311,7 +1311,7 @@ func TestRenderAPIStatusOverlay(t *testing.T) {
 
 func TestRenderAPIStatusUsedLimit(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "ghp_1234567890abcdef3f2a")
-	m := Model{width: 80, height: 24, showingAPIStatus: true}
+	m := Model{width: 80, height: 24, mode: modeAPIStatus}
 	m.rate = version.RateLimit{Known: true, Remaining: 15, Limit: 60}
 	got := m.renderAPIStatus()
 	if !strings.Contains(got, "Used: 45 / 60") {
@@ -1329,7 +1329,7 @@ func TestRenderAPIStatusTokenHint(t *testing.T) {
 		if version.TokenSource() != "none" {
 			t.Skipf("precondition: TokenSource() = %q, want none", version.TokenSource())
 		}
-		m := Model{width: 80, height: 24, showingAPIStatus: true}
+		m := Model{width: 80, height: 24, mode: modeAPIStatus}
 		m.rate = version.RateLimit{Known: true, Remaining: 30, Limit: 60}
 		if got := m.renderAPIStatus(); !strings.Contains(got, "raise the limit") {
 			t.Errorf("overlay = %q, missing token hint when no token", got)
@@ -1339,7 +1339,7 @@ func TestRenderAPIStatusTokenHint(t *testing.T) {
 	t.Run("hidden while entering a token", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		t.Setenv("GITHUB_TOKEN", "")
-		m := Model{width: 80, height: 24, showingAPIStatus: true, enteringToken: true, tokenInput: textinput.New()}
+		m := Model{width: 80, height: 24, mode: modeTokenInput, tokenInput: textinput.New()}
 		if got := m.renderAPIStatus(); strings.Contains(got, "raise the limit") {
 			t.Errorf("overlay = %q, should hide token hint while entering a token", got)
 		}
@@ -1349,7 +1349,7 @@ func TestRenderAPIStatusTokenHint(t *testing.T) {
 func TestRenderAPIStatusWarnIcon(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
 
-	m := Model{width: 80, height: 24, showingAPIStatus: true}
+	m := Model{width: 80, height: 24, mode: modeAPIStatus}
 	m.rate = version.RateLimit{Known: true, Remaining: rateLowThreshold, Limit: 60}
 	got := m.renderAPIStatus()
 	if !strings.Contains(got, "⚠") {
@@ -1361,7 +1361,7 @@ func TestAPIStatusOverlayToggle(t *testing.T) {
 	m := Model{width: 80, height: 24, focus: focusTools, ready: true}
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("L")})
 	nm := updated.(Model)
-	if !nm.showingAPIStatus {
+	if nm.mode != modeAPIStatus {
 		t.Fatalf("pressing L did not open the API-status overlay")
 	}
 	if cmd == nil {
@@ -1369,7 +1369,7 @@ func TestAPIStatusOverlayToggle(t *testing.T) {
 	}
 	// esc closes it.
 	updated2, _ := nm.Update(tea.KeyMsg{Type: tea.KeyEsc})
-	if updated2.(Model).showingAPIStatus {
+	if updated2.(Model).apiOverlayVisible() {
 		t.Errorf("esc did not close the API-status overlay")
 	}
 }
@@ -1377,10 +1377,10 @@ func TestAPIStatusOverlayToggle(t *testing.T) {
 // TestUpdateAPIStatusOpensTokenEntry verifies [e] switches the overlay into the
 // masked token-input sub-mode.
 func TestUpdateAPIStatusOpensTokenEntry(t *testing.T) {
-	m := Model{width: 80, height: 24, showingAPIStatus: true, tokenInput: textinput.New()}
+	m := Model{width: 80, height: 24, mode: modeAPIStatus, tokenInput: textinput.New()}
 	updated, cmd := m.updateAPIStatus(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("e")})
 	nm := updated.(Model)
-	if !nm.enteringToken {
+	if nm.mode != modeTokenInput {
 		t.Fatal("pressing e did not enter token-input mode")
 	}
 	if cmd == nil {
@@ -1397,13 +1397,13 @@ func TestTokenValidatedMsgInvalid(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	version.ClearToken() //nolint:errcheck
 
-	m := Model{width: 80, height: 24, showingAPIStatus: true, enteringToken: true, tokenInput: textinput.New()}
+	m := Model{width: 80, height: 24, mode: modeTokenInput, tokenInput: textinput.New()}
 	updated, _ := m.Update(tokenValidatedMsg{token: "ghp_bad", err: version.ErrTokenInvalid})
 	nm := updated.(Model)
 	if nm.tokenError != "token invalid" {
 		t.Errorf("tokenError = %q, want %q", nm.tokenError, "token invalid")
 	}
-	if !nm.enteringToken {
+	if nm.mode != modeTokenInput {
 		t.Error("invalid token should keep the input open for a retry")
 	}
 	if src := version.TokenSource(); src != "none" {
@@ -1423,7 +1423,7 @@ func TestTokenValidatedMsgValid(t *testing.T) {
 
 	name := "git"
 	m := Model{
-		width: 80, height: 24, showingAPIStatus: true, enteringToken: true,
+		width: 80, height: 24, mode: modeTokenInput,
 		tokenInput:    textinput.New(),
 		tokenError:    "token invalid",
 		meta:          []loader.ToolMeta{{Name: name, GitHub: "cli/cli"}},
@@ -1439,7 +1439,7 @@ func TestTokenValidatedMsgValid(t *testing.T) {
 	if version.TokenSource() != "config" {
 		t.Fatalf("valid token was not stored, TokenSource() = %q", version.TokenSource())
 	}
-	if nm.enteringToken {
+	if nm.mode == modeTokenInput {
 		t.Error("valid token should exit the token-input mode")
 	}
 	if nm.tokenError != "" {
@@ -1467,7 +1467,7 @@ func TestUpdateAPIStatusRemoveToken(t *testing.T) {
 		t.Fatalf("precondition: TokenSource() = %q, want config", version.TokenSource())
 	}
 
-	m := Model{width: 80, height: 24, showingAPIStatus: true, tokenInput: textinput.New()}
+	m := Model{width: 80, height: 24, mode: modeAPIStatus, tokenInput: textinput.New()}
 	m.updateAPIStatus(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("d")})
 	if src := version.TokenSource(); src != "none" {
 		t.Errorf("[d] did not clear the token, TokenSource() = %q", src)
@@ -1477,7 +1477,7 @@ func TestUpdateAPIStatusRemoveToken(t *testing.T) {
 // TestRenderStatusBarTokenInput verifies the status bar reflects the token-input
 // sub-mode.
 func TestRenderStatusBarTokenInput(t *testing.T) {
-	m := Model{width: 80, height: 24, showingAPIStatus: true, enteringToken: true, tokenInput: textinput.New()}
+	m := Model{width: 80, height: 24, mode: modeTokenInput, tokenInput: textinput.New()}
 	got := m.renderStatusBar()
 	if !strings.Contains(got, "validate & save") {
 		t.Errorf("status bar = %q, missing token-input hint", got)
@@ -1488,7 +1488,7 @@ func TestRenderStatusBarTokenInput(t *testing.T) {
 // the inline error while entering a token.
 func TestRenderAPIStatusTokenEntry(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
-	m := Model{width: 80, height: 24, showingAPIStatus: true, enteringToken: true, tokenInput: textinput.New()}
+	m := Model{width: 80, height: 24, mode: modeTokenInput, tokenInput: textinput.New()}
 	m.tokenError = "token invalid"
 	got := m.renderAPIStatus()
 	for _, want := range []string{"token:", "token invalid", "validate & save"} {
@@ -1637,7 +1637,7 @@ func TestUpdateBriefRefresh(t *testing.T) {
 		updated, _ := m.Update(keyR)
 		nm := updated.(Model)
 
-		if !nm.renaming {
+		if nm.mode != modeRename {
 			t.Error("renaming = false, want true (r in focusTools opens rename)")
 		}
 		if nm.refreshingFor != "" {

@@ -40,7 +40,13 @@ type ToolMeta struct {
 	GitHub string   `yaml:"github,omitempty"`
 }
 
+// testConfigDir overrides the config directory in tests.
+var testConfigDir string
+
 func MetaPath() string {
+	if testConfigDir != "" {
+		return filepath.Join(testConfigDir, "keys", "meta.yaml")
+	}
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		return ""
@@ -64,6 +70,9 @@ func LoadMeta() ([]ToolMeta, error) {
 	return meta, nil
 }
 
+// SaveMeta writes meta.yaml atomically: the data lands in a temp file in the
+// same directory first, then rename replaces the old file in one step, so a
+// crash mid-write can never leave a truncated meta.yaml behind.
 func SaveMeta(meta []ToolMeta) error {
 	path := MetaPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -73,7 +82,11 @@ func SaveMeta(meta []ToolMeta) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0644)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func FindMeta(meta []ToolMeta, name string) *ToolMeta {

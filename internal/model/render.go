@@ -736,7 +736,11 @@ func (m Model) renderHelpContent() string {
 		return ui.MetaNoteStyle.Render("No tool selected")
 	}
 
-	if m.helpLoadingFor != "" {
+	// Gate per tool, not on "any fetch in flight": another tool's fetch may
+	// still be running (fast j/k, search arrows then esc/enter) while the
+	// selected tool's help is already cached — that cache must render, or the
+	// panel would stick on "Loading..." when the stale fetch lands unselected.
+	if m.helpLoadingFor == mt.Name {
 		return ui.MetaNoteStyle.Render("Loading...")
 	}
 

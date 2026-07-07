@@ -338,7 +338,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case helpOutputMsg:
-		m.helpLoadingFor = ""
+		// Only the named tool's result retires the loading marker: a stale
+		// fetch for a previously highlighted tool must not clear the flag
+		// while the currently selected tool's fetch is still in flight.
+		if m.helpLoadingFor == msg.toolName {
+			m.helpLoadingFor = ""
+		}
 		cached := m.helpCache[msg.toolName]
 		if msg.err == nil && msg.output != "" {
 			cached[msg.mode] = msg.output

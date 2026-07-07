@@ -339,6 +339,63 @@ func TestSearchEscRestoresSelection(t *testing.T) {
 	}
 }
 
+// TestSearchEscCachedHelpNotStuckLoading reproduces the stuck-"Loading..."
+// sequence: an arrow move in search onto a tool with uncached help fires a
+// help fetch; esc then rolls back to a tool whose help IS cached while that
+// fetch is still in flight. The help panel must show the restored tool's
+// cached help immediately, and the stale fetch landing later (for a tool that
+// is no longer selected) must not leave the panel on "Loading...".
+func TestSearchEscCachedHelpNotStuckLoading(t *testing.T) {
+	m := newSearchTestModel()
+	m.metaSelected = 1 // git
+	m.helpCache["git"] = [2]string{helpModeHelp: "GITHELP"}
+
+	updated, _ := m.Update(keyRunes("/"))
+	m = updated.(Model)
+	m = typeRunes(t, m, "rip") // filtered: [ripgrep]
+
+	// Arrow move onto ripgrep (uncached) fires its help fetch.
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	if m.helpLoadingFor != "ripgrep" {
+		t.Fatalf("helpLoadingFor = %q, want %q (arrow move fires auto-fetch)", m.helpLoadingFor, "ripgrep")
+	}
+
+	// esc rolls back to git while ripgrep's fetch is still in flight: the
+	// cached help must render, not "Loading..." for the foreign fetch.
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+	view := ansiCSI.ReplaceAllString(m.helpViewport.View(), "")
+	if strings.Contains(view, "Loading") {
+		t.Errorf("help panel after esc = %q, want git's cached help, not Loading", view)
+	}
+	if !strings.Contains(view, "GITHELP") {
+		t.Errorf("help panel after esc = %q, want cached %q", view, "GITHELP")
+	}
+	// The stale in-flight fetch still belongs to ripgrep, not git.
+	if m.helpLoadingFor != "ripgrep" {
+		t.Errorf("helpLoadingFor = %q, want still %q (fetch in flight)", m.helpLoadingFor, "ripgrep")
+	}
+
+	// The stale fetch lands for the no-longer-selected tool: it must cache
+	// its output without disturbing the panel showing git's help.
+	updated, _ = m.Update(helpOutputMsg{toolName: "ripgrep", mode: helpModeHelp, output: "RGHELP"})
+	nm := updated.(Model)
+	view = ansiCSI.ReplaceAllString(nm.helpViewport.View(), "")
+	if strings.Contains(view, "Loading") {
+		t.Errorf("help panel after stale fetch = %q, stuck on Loading", view)
+	}
+	if !strings.Contains(view, "GITHELP") {
+		t.Errorf("help panel after stale fetch = %q, want git's cached %q", view, "GITHELP")
+	}
+	if nm.helpLoadingFor != "" {
+		t.Errorf("helpLoadingFor = %q, want cleared by its own result", nm.helpLoadingFor)
+	}
+	if got := nm.helpCache["ripgrep"][helpModeHelp]; got != "RGHELP" {
+		t.Errorf("ripgrep cache = %q, want %q (stale result still cached)", got, "RGHELP")
+	}
+}
+
 // TestSearchEnterNoMatches verifies enter with an empty filter is a no-op:
 // search stays open and the query is kept.
 func TestSearchEnterNoMatches(t *testing.T) {

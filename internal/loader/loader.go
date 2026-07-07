@@ -19,12 +19,3 @@ func ToolsFromMeta(meta []ToolMeta) []Tool {
 	}
 	return tools
 }
-
-// Load builds []Tool from meta.yaml (tracked tools).
-func Load() ([]Tool, error) {
-	meta, err := LoadMeta()
-	if err != nil {
-		return nil, err
-	}
-	return ToolsFromMeta(meta), nil
-}

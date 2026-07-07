@@ -382,47 +382,6 @@ func getRepoData(githubField string, force bool) RepoData {
 	return d
 }
 
-// GetLatest returns the latest release tag for a tool's github field.
-// Thin wrapper over GetRepoData: uses cache when fresh, falls back to the stale
-// value on network error.
-func GetLatest(githubField string) string {
-	return GetRepoData(githubField).Latest
-}
-
-// FetchAndCache force-fetches the latest release, bypassing the cache TTL.
-// Network requests happen without holding the mutex; only the read-modify-write
-// of cache.json is serialized so concurrent goroutines don't overwrite each other.
-func FetchAndCache(githubField string) (string, error) {
-	repo := extractRepo(githubField)
-	if repo == "" {
-		return "", fmt.Errorf("cannot parse github field: %q", githubField)
-	}
-	info, err := fetchRelease(repo)
-	if err != nil {
-		return "", err
-	}
-	repoStatus, about, stars, _ := fetchRepoInfo(repo)
-
-	updateCacheEntry(repo, func(existing CacheEntry) CacheEntry {
-		newEntry := CacheEntry{
-			Latest:      info.Tag,
-			Body:        info.Body,
-			HtmlUrl:     info.HtmlUrl,
-			PublishedAt: info.PublishedAt,
-			CheckedAt:   time.Now(),
-			RepoStatus:  repoStatus,
-			About:       about,
-			Stars:       stars,
-			Languages:   existing.Languages,
-		}
-		if repoStatus == "" {
-			newEntry.RepoStatus = existing.RepoStatus
-		}
-		return newEntry
-	})
-	return info.Tag, nil
-}
-
 // GetChangelog returns full release info for a tool's github field.
 // Uses cache when fresh and body is present; fetches otherwise.
 func GetChangelog(githubField string) (ReleaseInfo, error) {
@@ -581,23 +540,6 @@ func fetchRelease(repo string) (ReleaseInfo, error) {
 		HtmlUrl:     release.HtmlUrl,
 		PublishedAt: release.PublishedAt,
 	}, nil
-}
-
-// GetRepoCard returns repository metadata for display. Thin wrapper over
-// GetRepoData: reads from cache when fresh and languages are populated,
-// otherwise makes one network pass shared with the version lookup.
-func GetRepoCard(githubField string) RepoCard {
-	d := GetRepoData(githubField)
-	return RepoCard{
-		About:       d.About,
-		Stars:       d.Stars,
-		Languages:   d.Languages,
-		Latest:      d.Latest,
-		PublishedAt: d.PublishedAt,
-		HtmlUrl:     d.HtmlUrl,
-		Body:        d.Body,
-		RepoStatus:  d.RepoStatus,
-	}
 }
 
 func extractRepo(githubField string) string {

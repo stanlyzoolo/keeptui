@@ -102,11 +102,11 @@ Key design decisions:
 - Modify: `internal/version/github.go`
 - Modify: `internal/version/github_test.go`
 
-- [ ] delete `loader.Load` (unused in production; `ToolsFromMeta` stays — used by `model`)
-- [ ] delete `version.GetLatest`, `version.GetRepoCard`, `version.FetchAndCache` from `github.go` (`FetchAndCache` bypasses the poison guard — must not survive)
-- [ ] rewire tests that called the deleted wrappers to `GetRepoData`/`RefreshRepoData`, preserving every covered scenario (TTL hit, merge-on-write, stale fallback on error)
-- [ ] grep the repo to confirm no remaining references (`grep -rn "FetchAndCache\|GetRepoCard\|GetLatest\|loader.Load("`)
-- [ ] run `go build ./... && go vet ./... && go test -race ./...` - must pass before next task
+- [x] delete `loader.Load` (unused in production; `ToolsFromMeta` stays — used by `model`)
+- [x] delete `version.GetLatest`, `version.GetRepoCard`, `version.FetchAndCache` from `github.go` (`FetchAndCache` bypasses the poison guard — must not survive)
+- [x] rewire tests that called the deleted wrappers to `GetRepoData`/`RefreshRepoData`, preserving every covered scenario (TTL hit, merge-on-write, stale fallback on error)
+- [x] grep the repo to confirm no remaining references (`grep -rn "FetchAndCache\|GetRepoCard\|GetLatest\|loader.Load("`)
+- [x] run `go build ./... && go vet ./... && go test -race ./...` - must pass before next task
 
 ### Task 3: Test coverage for loader/meta.go
 

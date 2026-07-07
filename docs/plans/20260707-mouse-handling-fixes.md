@@ -177,12 +177,12 @@ undimmed band across exactly the rows the modal occupies. So: dim uncovered
 rows via strip-then-restyle, and inside `overlayLine` wrap the `left`/`right`
 segments in the dim style after truncation.
 
-- [ ] dim the visible background: uncovered bg rows — strip ANSI, re-render in a muted foreground (`ColorDim`/faint); covered rows — apply the dim style to the `left`/`right` segments inside `overlayLine` (after `truncateVisible`/`dropVisible`), so the modal is the only full-color element on screen
-- [ ] keep the fg (overlay) lines byte-for-byte untouched; geometry (centering, splice columns) unchanged
-- [ ] write test: `PlaceOverlay` output — bg rows outside the modal carry the dim style and none of their original colors; fg content is preserved verbatim
-- [ ] write test: a **covered** row's side margins (cells left/right of the fg splice) carry the dim style and none of their original colors — this is the case the naive pre-dim approach fails
-- [ ] write test: alignment unchanged — visible width of every output row equals the bg width (dimming must not shift the splice)
-- [ ] run `go test -race ./...` - must pass before next task
+- [x] dim the visible background: uncovered bg rows — strip ANSI, re-render in a muted foreground (`OverlayDimStyle`, `ColorDim`); covered rows — apply the dim style to the `left`/`right` segments inside `overlayLine` (after `truncateVisible`/`dropVisible`), so the modal is the only full-color element on screen
+- [x] keep the fg (overlay) lines byte-for-byte untouched; geometry (centering, splice columns) unchanged
+- [x] write test: `PlaceOverlay` output — bg rows outside the modal carry the dim style and none of their original colors; fg content is preserved verbatim
+- [x] write test: a **covered** row's side margins (cells left/right of the fg splice) carry the dim style and none of their original colors — this is the case the naive pre-dim approach fails
+- [x] write test: alignment unchanged — visible width of every output row equals the bg width (dimming must not shift the splice)
+- [x] run `go test -race ./...` - must pass before next task
 
 ### Task 5: Verify acceptance criteria
 

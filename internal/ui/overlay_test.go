@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 // TestStripANSI verifies escape sequences are removed while visible text and
@@ -67,6 +68,79 @@ func TestPlaceOverlayWiderThanBackground(t *testing.T) {
 	out := PlaceOverlay(bg, fg)
 	if !strings.Contains(out, "WIDE-OVERLAY") {
 		t.Errorf("wide overlay content missing from %q", out)
+	}
+}
+
+// forceColorProfile makes lipgloss emit real ANSI attributes for the duration
+// of a test — a non-TTY run strips them, which would hide dimming regressions.
+func forceColorProfile(t *testing.T) {
+	t.Helper()
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(old) })
+}
+
+// TestPlaceOverlayDimsBackground verifies the visible background is repainted
+// with the dim style and loses its original colors, while the fg is preserved
+// verbatim. The covered row's side margins are the critical case: overlayLine
+// strips bg styling itself, so a pre-applied dim would be erased there.
+func TestPlaceOverlayDimsBackground(t *testing.T) {
+	forceColorProfile(t)
+
+	red := lipgloss.NewStyle().Foreground(lipgloss.Color("#FF0000"))
+	bgLine := red.Render(strings.Repeat(".", 10))
+	bg := strings.Join([]string{bgLine, bgLine, bgLine}, "\n")
+	fg := red.Render("XX") // styled fg must survive byte-for-byte
+
+	out := PlaceOverlay(bg, fg)
+	lines := strings.Split(out, "\n")
+	if len(lines) != 3 {
+		t.Fatalf("line count = %d, want 3", len(lines))
+	}
+
+	dimSeq := "38;2;136;136;136" // ColorDim #888888 in truecolor
+	redSeq := "38;2;255;0;0"
+
+	// Uncovered rows: dimmed, original color gone.
+	for _, row := range []int{0, 2} {
+		if !strings.Contains(lines[row], dimSeq) {
+			t.Errorf("row %d not dimmed: %q", row, lines[row])
+		}
+		if strings.Contains(lines[row], redSeq) {
+			t.Errorf("row %d kept its original color: %q", row, lines[row])
+		}
+	}
+
+	// Covered row: fg verbatim, margins dimmed and stripped of the original
+	// color (the fg itself is red, so check the margins around it).
+	if !strings.Contains(lines[1], fg) {
+		t.Fatalf("fg not preserved verbatim in %q", lines[1])
+	}
+	pre, post, _ := strings.Cut(lines[1], fg)
+	for side, margin := range map[string]string{"left": pre, "right": post} {
+		if !strings.Contains(margin, dimSeq) {
+			t.Errorf("%s margin of the covered row not dimmed: %q", side, margin)
+		}
+		if strings.Contains(margin, redSeq) {
+			t.Errorf("%s margin of the covered row kept its original color: %q", side, margin)
+		}
+	}
+}
+
+// TestPlaceOverlayDimKeepsAlignment verifies dimming does not change any
+// row's visible width (the splice columns must stay put).
+func TestPlaceOverlayDimKeepsAlignment(t *testing.T) {
+	forceColorProfile(t)
+
+	styled := lipgloss.NewStyle().Foreground(lipgloss.Color("#00FF00"))
+	bgLine := styled.Render(strings.Repeat("-", 30))
+	bg := strings.Join([]string{bgLine, bgLine, bgLine, bgLine}, "\n")
+
+	out := PlaceOverlay(bg, "MODAL")
+	for i, line := range strings.Split(out, "\n") {
+		if w := lipgloss.Width(line); w != 30 {
+			t.Errorf("row %d visible width = %d, want 30", i, w)
+		}
 	}
 }
 

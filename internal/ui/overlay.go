@@ -15,10 +15,14 @@ var OverlayBorder = lipgloss.NewStyle().
 	BorderForeground(ColorPrimary).
 	Padding(0, 1)
 
+// OverlayDimStyle repaints the background behind a modal so the overlay is
+// the only full-color element on screen.
+var OverlayDimStyle = lipgloss.NewStyle().Foreground(ColorDim)
+
 // PlaceOverlay renders fg centered over bg, replacing the background cells it
-// covers so the modal reads as floating on top. Both are treated as plain,
-// already-styled multi-line strings; ANSI escape sequences in bg lines that
-// the overlay covers are dropped for the covered span only.
+// covers so the modal reads as floating on top. The visible background is
+// dimmed: original styling is stripped and repainted with OverlayDimStyle.
+// fg is passed through untouched.
 func PlaceOverlay(bg, fg string) string {
 	bgLines := strings.Split(bg, "\n")
 	fgLines := strings.Split(fg, "\n")
@@ -30,19 +34,23 @@ func PlaceOverlay(bg, fg string) string {
 	y := max((bgH-fgH)/2, 0)
 
 	out := make([]string, len(bgLines))
-	copy(out, bgLines)
+	for i, line := range bgLines {
+		// Covered rows are handled below via overlayLine, which strips the bg
+		// styling itself; dimming them here first would be undone by that strip.
+		out[i] = dimBG(line)
+	}
 	for i, fgLine := range fgLines {
 		row := y + i
 		if row >= len(out) {
 			break
 		}
-		out[row] = overlayLine(out[row], fgLine, x)
+		out[row] = overlayLine(bgLines[row], fgLine, x)
 	}
 	return strings.Join(out, "\n")
 }
 
-// overlayLine splices fg into bg starting at visual column x, preserving the
-// visible bg to the left and right of the overlaid span.
+// overlayLine splices fg into bg starting at visual column x, dimming the
+// visible bg margins to the left and right of the overlaid span.
 func overlayLine(bg, fg string, x int) string {
 	fgW := lipgloss.Width(fg)
 	left := truncateVisible(bg, x)
@@ -51,7 +59,15 @@ func overlayLine(bg, fg string, x int) string {
 		left += strings.Repeat(" ", x-leftW)
 	}
 	right := dropVisible(bg, x+fgW)
-	return left + fg + right
+	return dimBG(left) + fg + dimBG(right)
+}
+
+// dimBG strips s of its own styling and repaints it with OverlayDimStyle.
+func dimBG(s string) string {
+	if s == "" {
+		return ""
+	}
+	return OverlayDimStyle.Render(StripANSI(s))
 }
 
 // truncateVisible returns the prefix of s spanning the first w visible columns,

@@ -118,32 +118,32 @@ to 0 (first match highlighted), which now shows visibly via the marker.
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/mode_test.go`
 
-- [ ] add `searchPrevName string` field to `Model` (near `search`), with a
+- [x] add `searchPrevName string` field to `Model` (near `search`), with a
       comment stating the commit/rollback contract
-- [ ] add `indexOfMeta(name string) int` helper next to `filteredMeta()`
+- [x] add `indexOfMeta(name string) int` helper next to `filteredMeta()`
       (full-list lookup, fallback 0)
-- [ ] `case "/"` (focusTools branch): capture `m.searchPrevName` from
+- [x] `case "/"` (focusTools branch): capture `m.searchPrevName` from
       `selectedMeta()` before entering `modeSearch` (empty string when list
       is empty)
-- [ ] `modeSearch` branch: add `enter` (accept: exit mode, remap cursor via
+- [x] `modeSearch` branch: add `enter` (accept: exit mode, remap cursor via
       `indexOfMeta`, focus brief, re-render, `autoFetchCmdsForSelected()`;
       no-op when no matches) and `up`/`down` (modular move over
       `filteredMeta()` with full `j`/`k` parity incl. `calcVpHeight()`;
       never forwarded to textinput)
-- [ ] `modeSearch` `esc`: restore cursor via `indexOfMeta(m.searchPrevName)`,
+- [x] `modeSearch` `esc`: restore cursor via `indexOfMeta(m.searchPrevName)`,
       clear `searchPrevName`
-- [ ] write tests: enter selects highlighted tool (cursor points at the right
+- [x] write tests: enter selects highlighted tool (cursor points at the right
       tool in the **full** list, `focus == focusBrief`, `mode == modeNormal`,
       query cleared — assert observable state, not cmd non-nil-ness)
-- [ ] write tests: esc restores the pre-search selection (move selection
+- [x] write tests: esc restores the pre-search selection (move selection
       before `/`, type a query, esc → original tool selected again)
-- [ ] write tests: enter with zero matches is a no-op (stays in `modeSearch`)
-- [ ] write tests: `↑`/`↓` navigate the filtered list with wrap-around and do
+- [x] write tests: enter with zero matches is a no-op (stays in `modeSearch`)
+- [x] write tests: `↑`/`↓` navigate the filtered list with wrap-around and do
       not change `m.search.Value()`
-- [ ] write tests: `indexOfMeta` table test (found, missing → 0, empty name
+- [x] write tests: `indexOfMeta` table test (found, missing → 0, empty name
       → 0); a letter key (e.g. `j`) in `modeSearch` lands in
       `m.search.Value()` and does not move `metaSelected`
-- [ ] run `go test -race ./...` — must pass before task 2
+- [x] run `go test -race ./...` — must pass before task 2
 
 ### Task 2: Render polish — visible selection marker + status-bar hints
 

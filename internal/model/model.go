@@ -87,7 +87,12 @@ type Model struct {
 	briefViewport       viewport.Model
 	helpViewport        viewport.Model
 	search              textinput.Model
-	statusMsg           string
+	// searchPrevName is the commit/rollback anchor for modeSearch: captured
+	// (from the current selection) when "/" opens the search and cleared on any
+	// exit. enter commits to the highlighted match; esc rolls the cursor back
+	// to this tool in the full list.
+	searchPrevName string
+	statusMsg      string
 	width               int
 	height              int
 	ready               bool
@@ -431,12 +436,51 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.mode == modeSearch {
 			switch msg.String() {
 			case "esc":
+				// Rollback: restore the cursor to the tool selected before the
+				// search started (fallback 0 when it was untracked mid-search).
 				m.mode = modeNormal
 				m.search.SetValue("")
 				m.search.Blur()
-				m.metaSelected = 0
+				m.metaSelected = m.indexOfMeta(m.searchPrevName)
+				m.searchPrevName = ""
 				m.setToolsContent()
 				m.briefViewport.SetContent(m.renderCard())
+				return m, nil
+			case "enter":
+				// Commit: accept the highlighted match. With no matches the key
+				// is a no-op and search stays open.
+				mt, ok := m.selectedMeta()
+				if !ok {
+					return m, nil
+				}
+				m.mode = modeNormal
+				m.search.SetValue("")
+				m.search.Blur()
+				m.searchPrevName = ""
+				// The filter is gone once the mode is normal, so remap the
+				// cursor onto the full list by name.
+				m.metaSelected = m.indexOfMeta(mt.Name)
+				m.focus = focusBrief
+				m.setToolsContent()
+				m.briefViewport.GotoTop()
+				m.briefViewport.SetContent(m.renderCard())
+				return m, m.autoFetchCmdsForSelected()
+			case "up", "down":
+				// Move the highlight through the filtered list (wrap-around,
+				// j/k parity). Never forwarded to the textinput, so the query
+				// text is untouched; with zero matches the key is consumed.
+				if n := len(m.filteredMeta()); n > 0 {
+					if msg.String() == "down" {
+						m.metaSelected = (m.metaSelected + 1) % n
+					} else {
+						m.metaSelected = (m.metaSelected - 1 + n) % n
+					}
+					m.setToolsContent()
+					m.briefViewport.Height = m.calcVpHeight()
+					m.briefViewport.GotoTop()
+					m.briefViewport.SetContent(m.renderCard())
+					return m, m.autoFetchCmdsForSelected()
+				}
 				return m, nil
 			default:
 				m.search, cmd = m.search.Update(msg)
@@ -573,6 +617,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.mode = modeHelpSearch
 				m.helpSearch.Focus()
 				return m, textinput.Blink
+			}
+			// Remember the current selection so esc can roll back to it.
+			m.searchPrevName = ""
+			if mt, ok := m.selectedMeta(); ok {
+				m.searchPrevName = mt.Name
 			}
 			m.mode = modeSearch
 			m.search.Focus()
@@ -749,6 +798,18 @@ func (m Model) filteredMeta() []loader.ToolMeta {
 		}
 	}
 	return source
+}
+
+// indexOfMeta returns the index of the named tool in the full m.meta list,
+// falling back to 0 when the name is empty or the tool is absent (e.g.
+// untracked mid-search).
+func (m Model) indexOfMeta(name string) int {
+	for i, mt := range m.meta {
+		if mt.Name == name {
+			return i
+		}
+	}
+	return 0
 }
 
 const (

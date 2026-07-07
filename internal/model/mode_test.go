@@ -208,6 +208,212 @@ func TestModeGuards(t *testing.T) {
 	}
 }
 
+// newSearchTestModel builds a model with several tracked tools for exercising
+// the search commit/rollback flow from focusTools.
+func newSearchTestModel() Model {
+	m := New([]loader.ToolMeta{
+		{Name: "fzf"},
+		{Name: "git"},
+		{Name: "ripgrep"},
+	})
+	m.width = 80
+	m.height = 24
+	m.focus = focusTools
+	return m
+}
+
+// typeRunes feeds each rune of s into Update as a separate key message.
+func typeRunes(t *testing.T, m Model, s string) Model {
+	t.Helper()
+	for _, r := range s {
+		updated, _ := m.Update(keyRunes(string(r)))
+		m = updated.(Model)
+	}
+	return m
+}
+
+// TestSearchEnterSelectsMatch verifies enter accepts the highlighted match:
+// search exits, the cursor points at the chosen tool in the full list, focus
+// moves to the brief panel and the query is cleared.
+func TestSearchEnterSelectsMatch(t *testing.T) {
+	m := newSearchTestModel()
+
+	updated, _ := m.Update(keyRunes("/"))
+	m = updated.(Model)
+	m = typeRunes(t, m, "rip")
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	nm := updated.(Model)
+
+	if nm.mode != modeNormal {
+		t.Errorf("mode = %d, want modeNormal", nm.mode)
+	}
+	if nm.focus != focusBrief {
+		t.Errorf("focus = %d, want focusBrief", nm.focus)
+	}
+	if nm.metaSelected != 2 {
+		t.Errorf("metaSelected = %d, want 2 (ripgrep in the full list)", nm.metaSelected)
+	}
+	if sel, ok := nm.selectedMeta(); !ok || sel.Name != "ripgrep" {
+		t.Errorf("selectedMeta = %v, want ripgrep", sel)
+	}
+	if nm.search.Value() != "" {
+		t.Errorf("query = %q, want cleared", nm.search.Value())
+	}
+	if nm.searchPrevName != "" {
+		t.Errorf("searchPrevName = %q, want cleared", nm.searchPrevName)
+	}
+}
+
+// TestSearchEscRestoresSelection verifies esc rolls the cursor back to the
+// tool selected before the search started.
+func TestSearchEscRestoresSelection(t *testing.T) {
+	m := newSearchTestModel()
+	m.metaSelected = 2 // ripgrep
+
+	updated, _ := m.Update(keyRunes("/"))
+	m = updated.(Model)
+	m = typeRunes(t, m, "fz") // typing resets the highlight to 0
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	nm := updated.(Model)
+
+	if nm.mode != modeNormal {
+		t.Errorf("mode = %d, want modeNormal", nm.mode)
+	}
+	if nm.metaSelected != 2 {
+		t.Errorf("metaSelected = %d, want restored 2", nm.metaSelected)
+	}
+	if sel, ok := nm.selectedMeta(); !ok || sel.Name != "ripgrep" {
+		t.Errorf("selectedMeta = %v, want ripgrep restored", sel)
+	}
+	if nm.searchPrevName != "" {
+		t.Errorf("searchPrevName = %q, want cleared", nm.searchPrevName)
+	}
+}
+
+// TestSearchEnterNoMatches verifies enter with an empty filter is a no-op:
+// search stays open and the query is kept.
+func TestSearchEnterNoMatches(t *testing.T) {
+	m := newSearchTestModel()
+
+	updated, _ := m.Update(keyRunes("/"))
+	m = updated.(Model)
+	m = typeRunes(t, m, "zzz")
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	nm := updated.(Model)
+
+	if nm.mode != modeSearch {
+		t.Errorf("mode = %d, want still modeSearch", nm.mode)
+	}
+	if nm.search.Value() != "zzz" {
+		t.Errorf("query = %q, want kept %q", nm.search.Value(), "zzz")
+	}
+}
+
+// TestSearchArrowsMoveHighlight verifies up/down move through the filtered
+// list with wrap-around and never touch the query text.
+func TestSearchArrowsMoveHighlight(t *testing.T) {
+	m := newSearchTestModel()
+
+	updated, _ := m.Update(keyRunes("/"))
+	m = updated.(Model)
+	m = typeRunes(t, m, "i") // filtered: [git, ripgrep]
+
+	down := tea.KeyMsg{Type: tea.KeyDown}
+	up := tea.KeyMsg{Type: tea.KeyUp}
+
+	updated, _ = m.Update(down)
+	m = updated.(Model)
+	if m.metaSelected != 1 {
+		t.Fatalf("after down metaSelected = %d, want 1", m.metaSelected)
+	}
+	updated, _ = m.Update(down)
+	m = updated.(Model)
+	if m.metaSelected != 0 {
+		t.Fatalf("after wrap-around down metaSelected = %d, want 0", m.metaSelected)
+	}
+	updated, _ = m.Update(up)
+	m = updated.(Model)
+	if m.metaSelected != 1 {
+		t.Fatalf("after wrap-around up metaSelected = %d, want 1", m.metaSelected)
+	}
+	if m.search.Value() != "i" {
+		t.Errorf("query = %q, want untouched %q", m.search.Value(), "i")
+	}
+	if m.mode != modeSearch {
+		t.Errorf("mode = %d, want still modeSearch", m.mode)
+	}
+	if sel, ok := m.selectedMeta(); !ok || sel.Name != "ripgrep" {
+		t.Errorf("selectedMeta = %v, want ripgrep (second match)", sel)
+	}
+}
+
+// TestSearchArrowsZeroMatches verifies arrows are consumed as no-ops when the
+// filter has no matches (not forwarded to the textinput).
+func TestSearchArrowsZeroMatches(t *testing.T) {
+	m := newSearchTestModel()
+
+	updated, _ := m.Update(keyRunes("/"))
+	m = updated.(Model)
+	m = typeRunes(t, m, "zzz")
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	nm := updated.(Model)
+	if nm.metaSelected != 0 {
+		t.Errorf("metaSelected = %d, want unchanged 0", nm.metaSelected)
+	}
+	if nm.search.Value() != "zzz" {
+		t.Errorf("query = %q, want untouched %q", nm.search.Value(), "zzz")
+	}
+}
+
+// TestIndexOfMeta covers the full-list name lookup and its fallbacks.
+func TestIndexOfMeta(t *testing.T) {
+	m := newSearchTestModel()
+
+	tests := []struct {
+		name string
+		arg  string
+		want int
+	}{
+		{"found first", "fzf", 0},
+		{"found last", "ripgrep", 2},
+		{"missing falls back to 0", "gone", 0},
+		{"empty name falls back to 0", "", 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := m.indexOfMeta(tt.arg); got != tt.want {
+				t.Errorf("indexOfMeta(%q) = %d, want %d", tt.arg, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSearchLetterKeyTypesIntoQuery verifies a letter that doubles as a nav
+// key in modeNormal (j) lands in the query while searching and does not act
+// as navigation.
+func TestSearchLetterKeyTypesIntoQuery(t *testing.T) {
+	m := newSearchTestModel()
+
+	updated, _ := m.Update(keyRunes("/"))
+	m = updated.(Model)
+
+	updated, _ = m.Update(keyRunes("j"))
+	nm := updated.(Model)
+	if !strings.Contains(nm.search.Value(), "j") {
+		t.Errorf("search value = %q, expected the j rune to land in the query", nm.search.Value())
+	}
+	if nm.metaSelected != 0 {
+		t.Errorf("metaSelected = %d, want 0 (typing highlights the first match)", nm.metaSelected)
+	}
+	if nm.mode != modeSearch {
+		t.Errorf("mode = %d, want still modeSearch", nm.mode)
+	}
+}
+
 // TestQuitTypedIntoSearch verifies q does not quit while the search input is
 // active — the rune lands in the query instead.
 func TestQuitTypedIntoSearch(t *testing.T) {

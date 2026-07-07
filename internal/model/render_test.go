@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 
@@ -1344,6 +1345,38 @@ func TestRenderAPIStatusTokenHint(t *testing.T) {
 			t.Errorf("overlay = %q, should hide token hint while entering a token", got)
 		}
 	})
+}
+
+// sgrParamRe captures the parameter list of each SGR escape sequence.
+var sgrParamRe = regexp.MustCompile(`\x1b\[([0-9;]*)m`)
+
+// hasItalic reports whether s contains an SGR sequence enabling italics
+// (parameter 3, possibly merged with colors, e.g. "\x1b[3;38;5;145m").
+func hasItalic(s string) bool {
+	for _, match := range sgrParamRe.FindAllStringSubmatch(s, -1) {
+		if slices.Contains(strings.Split(match[1], ";"), "3") {
+			return true
+		}
+	}
+	return false
+}
+
+// TestRenderAPIStatusHintsNotItalic pins the overlay styling: no part of the
+// overlay (in particular the hint line) may render in italics, in either the
+// read-only view or the token-input sub-state.
+func TestRenderAPIStatusHintsNotItalic(t *testing.T) {
+	// Force a color profile so lipgloss actually emits ANSI attributes;
+	// otherwise a non-TTY test run strips them and hides regressions.
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Setenv("GITHUB_TOKEN", "ghp_1234567890abcdef3f2a")
+
+	for _, mode := range []inputMode{modeAPIStatus, modeTokenInput} {
+		m := Model{width: 80, height: 24, mode: mode, tokenInput: textinput.New()}
+		m.rate = version.RateLimit{Known: true, Remaining: 15, Limit: 60}
+		if got := m.renderAPIStatus(); hasItalic(got) {
+			t.Errorf("mode %d: overlay contains italic styling: %q", mode, got)
+		}
+	}
 }
 
 func TestRenderAPIStatusWarnIcon(t *testing.T) {

@@ -313,7 +313,7 @@ func (m Model) renderAPIStatus() string {
 		}
 		hints += keyHint("r") + " refresh  " + keyHint("esc") + " close"
 	}
-	b.WriteString(ui.MetaNoteStyle.Render(hints))
+	b.WriteString(ui.InfoStyle.Render(hints))
 
 	return ui.OverlayBorder.Render(b.String())
 }

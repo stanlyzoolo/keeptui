@@ -156,9 +156,9 @@ tools panel focuses it, matching brief/help.
 **Files:**
 - Modify: `internal/model/render.go`
 
-- [ ] render the `[L]` overlay hint line (both variants: normal `[e] set token …` and token-input `[enter] validate & save …`) with the existing `ui.InfoStyle` (non-italic `ColorMuted`, styles.go:126) instead of `ui.MetaNoteStyle`; no new style — and do **not** change `MetaNoteStyle` itself, the brief card's note line keeps its italics
-- [ ] write test: `renderAPIStatus()` output contains no italic ANSI sequence (`\x1b[3m`) in the hint line, in both `modeAPIStatus` and `modeTokenInput`
-- [ ] run `go test -race ./...` - must pass before next task
+- [x] render the `[L]` overlay hint line (both variants: normal `[e] set token …` and token-input `[enter] validate & save …`) with the existing `ui.InfoStyle` (non-italic `ColorMuted`, styles.go:126) instead of `ui.MetaNoteStyle`; no new style — and do **not** change `MetaNoteStyle` itself, the brief card's note line keeps its italics
+- [x] write test: `renderAPIStatus()` output contains no italic ANSI sequence in the hint line, in both `modeAPIStatus` and `modeTokenInput` (italic merges into combined SGR params, e.g. `\x1b[3;38;5;145m`, so the test parses SGR parameter lists; profile forced to TrueColor because non-TTY runs strip attributes)
+- [x] run `go test -race ./...` - must pass before next task
 
 ### Task 4: Dim the background under the API-status overlay
 

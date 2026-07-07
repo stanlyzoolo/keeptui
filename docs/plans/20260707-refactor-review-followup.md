@@ -89,11 +89,11 @@ Key design decisions:
 - Create: `.github/workflows/ci.yml`
 - Create: `.golangci.yml`
 
-- [ ] create `ci.yml`: triggers on push/PR to `main`; steps: checkout, setup-go (from `go.mod`), `go build ./...`, `go vet ./...`, `go test -race ./...`
-- [ ] add `golangci-lint` job via `golangci/golangci-lint-action` with a minimal `.golangci.yml`
-- [ ] scope lint findings: fix only trivial ones (unused vars, err checks); for anything larger, disable the linter in `.golangci.yml` with a comment — no drive-by refactoring in this task
-- [ ] verify the workflow YAML is valid (`gh workflow view` after push, or actionlint locally if available)
-- [ ] run `go test -race ./...` locally - must pass before next task
+- [x] create `ci.yml`: triggers on push/PR to `main`; steps: checkout, setup-go (from `go.mod`), `go build ./...`, `go vet ./...`, `go test -race ./...`
+- [x] add `golangci-lint` job via `golangci/golangci-lint-action` with a minimal `.golangci.yml`
+- [x] scope lint findings: fix only trivial ones (unused vars, err checks); for anything larger, disable the linter in `.golangci.yml` with a comment — no drive-by refactoring in this task (fixed: `_ =` on test-server Encode/Write, dropped a redundant type annotation; config-excluded: `(io.ReadCloser).Close` errcheck, staticcheck QF1003)
+- [x] verify the workflow YAML is valid (parsed OK locally; Actions run will confirm on push)
+- [x] run `go test -race ./...` locally - must pass before next task
 
 ### Task 2: Remove dead code from loader and version
 

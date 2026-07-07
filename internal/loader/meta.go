@@ -40,7 +40,13 @@ type ToolMeta struct {
 	GitHub string   `yaml:"github,omitempty"`
 }
 
+// testConfigDir overrides the config directory in tests.
+var testConfigDir string
+
 func MetaPath() string {
+	if testConfigDir != "" {
+		return filepath.Join(testConfigDir, "keys", "meta.yaml")
+	}
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		return ""

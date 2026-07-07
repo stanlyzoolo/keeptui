@@ -114,12 +114,12 @@ Key design decisions:
 - Modify: `internal/loader/meta.go`
 - Create: `internal/loader/meta_test.go`
 
-- [ ] add package-level `testConfigDir` seam to `MetaPath` (mirror `version.testCacheDir` pattern)
-- [ ] write tests for `LoadMeta`: missing file → empty slice, valid YAML round-trip, malformed YAML → error
-- [ ] write tests for `SaveMeta` + `LoadMeta` round-trip (creates directory, preserves all fields incl. tags/note/github)
-- [ ] write table tests for `FindMeta`, `UpsertMeta` (update-in-place + append), `RemoveMeta` (present, absent, empty slice)
-- [ ] write tests for `NextStatus` (full cycle + unknown status → `StatusActive`)
-- [ ] run tests - must pass before next task
+- [x] add package-level `testConfigDir` seam to `MetaPath` (mirror `version.testCacheDir` pattern)
+- [x] write tests for `LoadMeta`: missing file → empty slice, valid YAML round-trip, malformed YAML → error
+- [x] write tests for `SaveMeta` + `LoadMeta` round-trip (creates directory, preserves all fields incl. tags/note/github)
+- [x] write table tests for `FindMeta`, `UpsertMeta` (update-in-place + append), `RemoveMeta` (present, absent, empty slice)
+- [x] write tests for `NextStatus` (full cycle + unknown status → `StatusActive`)
+- [x] run tests - must pass before next task (loader coverage 31.4% → 82.4%)
 
 ### Task 4: Test coverage for version/detect.go
 

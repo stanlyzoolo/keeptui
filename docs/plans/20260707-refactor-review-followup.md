@@ -168,12 +168,12 @@ Key design decisions:
 - Create: `internal/model/render.go`
 - Create: `internal/model/textutil.go`
 
-- [ ] move per-mode key handlers (`updateNoteEdit`, `updateTagsEdit`, `updateTrackInput`, `updateUntrackConfirm`, `updateRenameInput`, `updateAPIStatus`, `trackTool`, `renameTool`) to `mode.go` — **no logic changes**
-- [ ] move all `tea.Cmd` constructors and fetch predicates (`fetch*Cmd`, `remoteCmd`, `changelogCmd`, `validateTokenCmd`, `needsInstalled`, `needsRemote`, `refreshSelectedCmd`, `autoFetchCmdsForSelected`) to `commands.go`
-- [ ] move `View`, all `render*` functions, gauge/scrollbar/mouse helpers to `render.go`
-- [ ] move pure text/format helpers (`wrapText`, `stripMarkdown`, `stripANSI`, `cleanTerminalOutput`, `colorizeHelp`, `findMatches`, `highlightMatch`, `formatStars`, `languagePercents`, `renderLangBar`) to `textutil.go`
-- [ ] verify `model.go` retains only: struct, msg types, `New`, `Init`, `Update`, selection/filter helpers; confirm with `git diff --stat` that the change is move-only
-- [ ] run `go build ./... && go vet ./... && go test -race ./...` - existing render/update tests are the safety net; must pass before next task
+- [x] move per-mode key handlers (`updateNoteEdit`, `updateTagsEdit`, `updateTrackInput`, `updateUntrackConfirm`, `updateRenameInput`, `updateAPIStatus`, `trackTool`, `renameTool`) to `mode.go` — **no logic changes**
+- [x] move all `tea.Cmd` constructors and fetch predicates (`fetch*Cmd`, `remoteCmd`, `changelogCmd`, `validateTokenCmd`, `needsInstalled`, `needsRemote`, `refreshSelectedCmd`, `autoFetchCmdsForSelected`) to `commands.go`
+- [x] move `View`, all `render*` functions, gauge/scrollbar/mouse helpers to `render.go`
+- [x] move pure text/format helpers (`wrapText`, `stripMarkdown`, `stripANSI`, `cleanTerminalOutput`, `colorizeHelp`, `findMatches`, `highlightMatch`, `formatStars`, `languagePercents`, `renderLangBar`) to `textutil.go`
+- [x] verify `model.go` retains only: struct, msg types, `New`, `Init`, `Update`, selection/filter helpers; confirm with `git diff --stat` that the change is move-only (verified move-only by diffing sorted decl content old vs new: identical modulo duplicated import lines; model.go 2278 → 767 lines)
+- [x] run `go build ./... && go vet ./... && go test -race ./...` - existing render/update tests are the safety net; must pass before next task
 
 ### Task 8: Replace boolean mode flags with a single mode enum
 

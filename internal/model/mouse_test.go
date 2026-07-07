@@ -2,6 +2,7 @@ package model
 
 import (
 	"fmt"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -137,6 +138,99 @@ func TestMouseNoOpUnderOverlay(t *testing.T) {
 				t.Errorf("state moved under the overlay: metaSelected = %d, focus = %d", m.metaSelected, m.focus)
 			}
 		})
+	}
+}
+
+// TestMouseClickSelectsAndFetches verifies click-selection parity with the
+// keyboard path: selecting another tool returns the auto-fetch cmd and
+// re-renders the help viewport from the new tool's cached help.
+func TestMouseClickSelectsAndFetches(t *testing.T) {
+	m := newMouseTestModel(t, 80, 24, "alpha", "beta")
+	m.helpCache["alpha"] = [2]string{"ALPHA HELP", ""}
+	m.helpCache["beta"] = [2]string{"BETA HELP", ""}
+	m.helpViewport.SetContent(m.renderHelpContent())
+
+	updated, cmd := m.Update(leftClick(1, toolRowY(m, 1)))
+	nm := updated.(Model)
+	if nm.metaSelected != 1 {
+		t.Fatalf("metaSelected = %d, want 1", nm.metaSelected)
+	}
+	if cmd == nil {
+		t.Error("click selection returned nil cmd, want the auto-fetch batch")
+	}
+	if !strings.Contains(nm.helpViewport.View(), "BETA HELP") {
+		t.Error("help viewport still shows the previous tool's help")
+	}
+	if nm.helpViewport.YOffset != 0 {
+		t.Errorf("help viewport YOffset = %d, want 0 after GotoTop", nm.helpViewport.YOffset)
+	}
+}
+
+// TestMouseClickUncachedToolSetsLoading verifies a click on an uncached tool
+// sets the same loading fields as the keyboard path.
+func TestMouseClickUncachedToolSetsLoading(t *testing.T) {
+	m := newMouseTestModel(t, 80, 24, "alpha", "beta")
+	m.meta[1].GitHub = "github.com/example/beta"
+	m.tools = loader.ToolsFromMeta(m.meta)
+
+	updated, cmd := m.Update(leftClick(1, toolRowY(m, 1)))
+	nm := updated.(Model)
+	if cmd == nil {
+		t.Fatal("click on uncached tool returned nil cmd")
+	}
+	if nm.helpLoadingFor != "beta" {
+		t.Errorf("helpLoadingFor = %q, want %q", nm.helpLoadingFor, "beta")
+	}
+	if nm.changelogLoadingFor != "beta" {
+		t.Errorf("changelogLoadingFor = %q, want %q", nm.changelogLoadingFor, "beta")
+	}
+}
+
+// TestMouseClickSameRowAndEmptyArea verifies clicking the already-selected row
+// returns no cmd, and a click on the empty area below the list focuses the
+// tools panel without moving the selection.
+func TestMouseClickSameRowAndEmptyArea(t *testing.T) {
+	m := newMouseTestModel(t, 80, 24, "alpha", "beta")
+	m.focus = focusBrief
+
+	updated, cmd := m.Update(leftClick(1, toolRowY(m, 0)))
+	nm := updated.(Model)
+	if cmd != nil {
+		t.Error("click on the already-selected row returned a cmd")
+	}
+	if nm.focus != focusTools {
+		t.Errorf("focus = %d, want focusTools", nm.focus)
+	}
+
+	nm.focus = focusBrief
+	updated, cmd = nm.Update(leftClick(1, toolRowY(nm, 10)))
+	nm = updated.(Model)
+	if cmd != nil {
+		t.Error("click on the empty area returned a cmd")
+	}
+	if nm.focus != focusTools {
+		t.Errorf("empty-area click: focus = %d, want focusTools", nm.focus)
+	}
+	if nm.metaSelected != 0 {
+		t.Errorf("empty-area click moved selection: metaSelected = %d", nm.metaSelected)
+	}
+}
+
+// TestMouseClickHonorsYOffset verifies the row mapping accounts for the tools
+// viewport scroll offset.
+func TestMouseClickHonorsYOffset(t *testing.T) {
+	names := make([]string, 20)
+	for i := range names {
+		names[i] = fmt.Sprintf("tool%02d", i)
+	}
+	m := newMouseTestModel(t, 80, 10, names...)
+	m.toolsViewport.YOffset = 5
+
+	// Screen row 2 is the first visible list row = index YOffset.
+	updated, _ := m.Update(leftClick(1, 2))
+	nm := updated.(Model)
+	if nm.metaSelected != 5 {
+		t.Errorf("metaSelected = %d, want 5 (YOffset honored)", nm.metaSelected)
 	}
 }
 

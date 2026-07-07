@@ -143,13 +143,13 @@ tools panel focuses it, matching brief/help.
 - Modify: `internal/model/render.go`
 - Modify: `internal/model/mouse_test.go`
 
-- [ ] on a click that changes `metaSelected`, return `m.autoFetchCmdsForSelected()` (same as the `j`/`k` path); keep the no-op cmd when clicking the already-selected row
-- [ ] focus the tools panel on any left click inside it, including empty area below the list (selection unchanged there)
-- [ ] write test: click on a different row returns a non-nil cmd and re-renders the help viewport from the new tool's cached help (`GotoTop` + content switch)
-- [ ] write test: click on an uncached tool sets the changelog/help loading state (same fields the keyboard path sets)
-- [ ] write test: click on the already-selected row returns nil cmd; click on empty area sets `focus == focusTools` and leaves `metaSelected` intact
-- [ ] write test: click row mapping still honors `toolsViewport.YOffset` (scroll then click)
-- [ ] run `go test -race ./...` - must pass before next task
+- [x] on a click that changes `metaSelected`, return `m.autoFetchCmdsForSelected()` (same as the `j`/`k` path); keep the no-op cmd when clicking the already-selected row
+- [x] focus the tools panel on any left click inside it, including empty area below the list (selection unchanged there)
+- [x] write test: click on a different row returns a non-nil cmd and re-renders the help viewport from the new tool's cached help (`GotoTop` + content switch)
+- [x] write test: click on an uncached tool sets the changelog/help loading state (same fields the keyboard path sets)
+- [x] write test: click on the already-selected row returns nil cmd; click on empty area sets `focus == focusTools` and leaves `metaSelected` intact
+- [x] write test: click row mapping still honors `toolsViewport.YOffset` (scroll then click)
+- [x] run `go test -race ./...` - must pass before next task
 
 ### Task 3: Overlay hint line without italics
 

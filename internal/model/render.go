@@ -675,18 +675,19 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	if msg.X < toolsPanelEnd {
 		// Left panel (Tools)
 		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress && clickable {
+			// Any click in the panel focuses it, matching brief/help.
+			m.focus = focusTools
 			// Row 0 = top margin, row 1 = panel border, row 2 = first list row.
 			toolIdx := msg.Y - 2 + m.toolsViewport.YOffset
 			filtered := m.filteredMeta()
-			if toolIdx >= 0 && toolIdx < len(filtered) {
-				if m.metaSelected != toolIdx {
-					m.metaSelected = toolIdx
-					m.setToolsContent()
-					m.briefViewport.Height = m.calcVpHeight()
-					m.briefViewport.GotoTop()
-					m.briefViewport.SetContent(m.renderCard())
-				}
-				m.focus = focusTools
+			if toolIdx >= 0 && toolIdx < len(filtered) && m.metaSelected != toolIdx {
+				// Mirror the keyboard j/k path, including the auto-fetch.
+				m.metaSelected = toolIdx
+				m.setToolsContent()
+				m.briefViewport.Height = m.calcVpHeight()
+				m.briefViewport.GotoTop()
+				m.briefViewport.SetContent(m.renderCard())
+				return m, m.autoFetchCmdsForSelected()
 			}
 		} else if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
 			m.toolsViewport, cmd = m.toolsViewport.Update(msg)

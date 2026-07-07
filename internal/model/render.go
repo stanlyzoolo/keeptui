@@ -656,6 +656,15 @@ func (m Model) hasUpdate(toolName string) bool {
 }
 
 func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	// Mouse policy: wheel scrolls in every mode, clicks (selection/focus) only
+	// in modeNormal — while an input mode owns the keyboard a click must not
+	// move selectedMeta() under it (wrong-target note/tags/rename commits).
+	// Under the [L] overlay nothing may move: scrolling there is invisible.
+	if !m.ready || m.apiOverlayVisible() {
+		return m, nil
+	}
+	clickable := m.mode == modeNormal
+
 	// Panels sit flush (each is panelW+2 wide incl. borders) with no outer
 	// horizontal margin, so screen X maps directly to panel spans.
 	toolsPanelEnd := m.toolsW + 2
@@ -665,7 +674,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	if msg.X < toolsPanelEnd {
 		// Left panel (Tools)
-		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
+		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress && clickable {
 			// Row 0 = top margin, row 1 = panel border, row 2 = first list row.
 			toolIdx := msg.Y - 2 + m.toolsViewport.YOffset
 			filtered := m.filteredMeta()
@@ -688,7 +697,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
 			m.briefViewport, cmd = m.briefViewport.Update(msg)
 		case tea.MouseButtonLeft:
-			if msg.Action == tea.MouseActionPress && m.focus != focusBrief {
+			if msg.Action == tea.MouseActionPress && clickable && m.focus != focusBrief {
 				m.focus = focusBrief
 				m.briefViewport.SetContent(m.renderCard())
 			}
@@ -699,7 +708,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
 			m.helpViewport, cmd = m.helpViewport.Update(msg)
 		case tea.MouseButtonLeft:
-			if msg.Action == tea.MouseActionPress && m.focus != focusHelp {
+			if msg.Action == tea.MouseActionPress && clickable && m.focus != focusHelp {
 				m.focus = focusHelp
 				m.helpViewport.SetContent(m.renderHelpContent())
 			}

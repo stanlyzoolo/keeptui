@@ -129,13 +129,13 @@ tools panel focuses it, matching brief/help.
 - Modify: `internal/model/render.go`
 - Create: `internal/model/mouse_test.go`
 
-- [ ] add the guard ladder at the top of `handleMouse`: `!m.ready` → return; `m.apiOverlayVisible()` → return
-- [ ] restrict the three click branches (tools row select, brief focus, help focus) to `m.mode == modeNormal`; wheel branches stay reachable in all non-overlay modes
-- [ ] write test: wrong-target repro — in `modeEditNote` a left click on another tools row must not change `metaSelected` (and enter still saves to the original tool)
-- [ ] write test: clicks in `modeConfirmUntrack`/`modeTokenInput` change neither selection nor focus
-- [ ] write test: wheel in `modeSearch` scrolls the tools viewport; any mouse event while the overlay is visible is a no-op (viewport offsets and focus unchanged)
-- [ ] write test: `!m.ready` mouse event is a no-op
-- [ ] run `go test -race ./...` - must pass before next task
+- [x] add the guard ladder at the top of `handleMouse`: `!m.ready` → return; `m.apiOverlayVisible()` → return
+- [x] restrict the three click branches (tools row select, brief focus, help focus) to `m.mode == modeNormal`; wheel branches stay reachable in all non-overlay modes
+- [x] write test: wrong-target repro — in `modeEditNote` a left click on another tools row must not change `metaSelected` (and enter still saves to the original tool)
+- [x] write test: clicks in `modeConfirmUntrack`/`modeTokenInput` change neither selection nor focus
+- [x] write test: wheel in `modeSearch` scrolls the tools viewport; any mouse event while the overlay is visible is a no-op (viewport offsets and focus unchanged)
+- [x] write test: `!m.ready` mouse event is a no-op
+- [x] run `go test -race ./...` - must pass before next task
 
 ### Task 2: Click selection parity with keyboard navigation
 

@@ -201,12 +201,12 @@ Key design decisions:
 - Delete: `schema.json`
 - Delete: `plan/` (entire directory)
 
-- [ ] delete `schema.json` and `plan/` (superseded by `docs/plans/completed/`)
-- [ ] rewrite CLAUDE.md loader/architecture sections: remove embedded-config (`//go:embed data/tools`), `config.yaml`, validation and "Adding a new built-in tool" content; describe the actual meta.yaml-only flow
-- [ ] fix the file-storage table (drop "Built-in tool configs" / "User tool configs" rows)
-- [ ] document the new `internal/model` file layout and the `inputMode` enum in CLAUDE.md
-- [ ] add a CI note (ci.yml: build/vet/test-race/lint) to the Commands section
-- [ ] verify every CLAUDE.md claim against the code (spot-check function names and file paths mentioned)
+- [x] delete `schema.json` and `plan/` (superseded by `docs/plans/completed/`)
+- [x] rewrite CLAUDE.md loader/architecture sections: remove embedded-config (`//go:embed data/tools`), `config.yaml`, validation and "Adding a new built-in tool" content; describe the actual meta.yaml-only flow
+- [x] fix the file-storage table (drop "Built-in tool configs" / "User tool configs" rows)
+- [x] document the new `internal/model` file layout and the `inputMode` enum in CLAUDE.md
+- [x] add a CI note (ci.yml: build/vet/test-race/lint) to the Commands section
+- [x] verify every CLAUDE.md claim against the code (spot-check function names and file paths mentioned; grep confirms zero references to deleted APIs/embedded configs)
 
 ### Task 10: Verify acceptance criteria
 

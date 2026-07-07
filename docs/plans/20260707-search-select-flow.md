@@ -163,12 +163,16 @@ to 0 (first match highlighted), which now shows visibly via the marker.
 
 ### Task 3: Verify acceptance criteria
 
-- [ ] verify all requirements from Overview are implemented (enter → brief
+- [x] verify all requirements from Overview are implemented (enter → brief
       panel + full list + cursor on tool; arrows move highlight; esc rollback)
-- [ ] verify edge cases: empty tool list, zero matches, tool untracked
+- [x] verify edge cases: empty tool list, zero matches, tool untracked
       between search open and esc (fallback 0), single-match wrap-around
-- [ ] run full suite: `go test -race ./...`
-- [ ] run `go vet ./...` and `golangci-lint run`
+      (➕ added `TestSearchEmptyToolList` and `TestSearchSingleMatchWrapAround`
+      for the two cases that had no explicit coverage)
+- [x] run full suite: `go test -race ./...`
+- [x] run `go vet ./...` and `golangci-lint run` (lint via
+      `/opt/homebrew/bin/golangci-lint` v2.10.1 — the `~/go/bin` copy is v1
+      built with go1.24 and cannot load the config; 0 issues)
 
 ### Task 4: [Final] Update documentation
 

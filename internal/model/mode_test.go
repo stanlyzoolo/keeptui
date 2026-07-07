@@ -392,6 +392,70 @@ func TestIndexOfMeta(t *testing.T) {
 	}
 }
 
+// TestSearchEmptyToolList verifies the whole search transaction is safe with
+// no tracked tools: `/` opens with an empty rollback anchor, enter and arrows
+// are no-ops, and esc closes cleanly with the cursor at 0.
+func TestSearchEmptyToolList(t *testing.T) {
+	m := New(nil)
+	m.width = 80
+	m.height = 24
+	m.focus = focusTools
+
+	updated, _ := m.Update(keyRunes("/"))
+	m = updated.(Model)
+	if m.mode != modeSearch {
+		t.Fatalf("mode = %d, want modeSearch", m.mode)
+	}
+	if m.searchPrevName != "" {
+		t.Errorf("searchPrevName = %q, want empty for an empty list", m.searchPrevName)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = updated.(Model)
+	if m.mode != modeSearch {
+		t.Errorf("after enter mode = %d, want still modeSearch (no matches)", m.mode)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	if m.metaSelected != 0 {
+		t.Errorf("after down metaSelected = %d, want unchanged 0", m.metaSelected)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(Model)
+	if m.mode != modeNormal {
+		t.Errorf("after esc mode = %d, want modeNormal", m.mode)
+	}
+	if m.metaSelected != 0 {
+		t.Errorf("after esc metaSelected = %d, want 0", m.metaSelected)
+	}
+}
+
+// TestSearchSingleMatchWrapAround verifies arrows on a single-match filter
+// wrap onto the same tool (modular move over n=1) without touching the query.
+func TestSearchSingleMatchWrapAround(t *testing.T) {
+	m := newSearchTestModel()
+
+	updated, _ := m.Update(keyRunes("/"))
+	m = updated.(Model)
+	m = typeRunes(t, m, "rip") // filtered: [ripgrep]
+
+	for _, key := range []tea.KeyMsg{{Type: tea.KeyDown}, {Type: tea.KeyUp}} {
+		updated, _ = m.Update(key)
+		m = updated.(Model)
+		if m.metaSelected != 0 {
+			t.Errorf("after %s metaSelected = %d, want 0 (single match wraps onto itself)", key, m.metaSelected)
+		}
+	}
+	if sel, ok := m.selectedMeta(); !ok || sel.Name != "ripgrep" {
+		t.Errorf("selectedMeta = %v, want ripgrep", sel)
+	}
+	if m.search.Value() != "rip" {
+		t.Errorf("query = %q, want untouched %q", m.search.Value(), "rip")
+	}
+}
+
 // TestSearchLetterKeyTypesIntoQuery verifies a letter that doubles as a nav
 // key in modeNormal (j) lands in the query while searching and does not act
 // as navigation.

@@ -29,10 +29,17 @@ func TestIsNewer(t *testing.T) {
 		{"v-prefix installed", "v1.2.3", "1.2.4", true},
 		{"v-prefix latest", "1.2.3", "v1.2.4", true},
 		{"v-prefix both equal", "v1.2.3", "v1.2.3", false},
-		// TODO: changes in Task 5 (semver) — pre-release suffixes are currently
-		// ignored, so 1.2.3-rc1 compares equal to 1.2.3. With semver.Compare a
-		// release is newer than its own rc: this case flips to true.
-		{"pre-release ignored", "1.2.3-rc1", "1.2.3", false},
+		{"release newer than its rc", "1.2.3-rc1", "1.2.3", true},
+		{"rc not newer than release", "1.2.3", "1.2.3-rc1", false},
+		{"rc ordering", "1.2.3-rc1", "1.2.3-rc2", true},
+		{"build metadata ignored", "1.2.3+build7", "1.2.3+build9", false},
+		{"CalVer zero-padded segments", "2024.01.15", "2024.02.01", true},
+		{"CalVer equal after zero-strip", "2024.01.15", "2024.1.15", false},
+		{"4th segment truncated: equal", "1.2.3.4", "1.2.3.5", false},
+		{"4th segment truncated: patch decides", "1.2.3.9", "1.2.4.0", true},
+		{"invalid installed", "abc", "1.2.3", false},
+		{"invalid latest", "1.2.3", "abc", false},
+		{"two segments", "1.2", "1.3", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

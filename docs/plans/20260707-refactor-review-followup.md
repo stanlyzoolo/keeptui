@@ -139,13 +139,13 @@ Key design decisions:
 - Modify: `internal/version/detect_test.go`
 - Modify: `go.mod`
 
-- [ ] add `golang.org/x/mod` dependency
-- [ ] rewrite `IsNewer` on top of `semver.Compare` with input canonicalization (ensure `v` prefix, strip build metadata); delete hand-rolled `parseVersion`
-- [ ] ⚠️ canonicalization MUST also handle what `semver.IsValid` rejects but the current parser accepts, or the update indicator silently dies for those tools: strip leading zeros in segments (CalVer `2024.01.15`) and truncate a 4th segment (`1.2.3.4` → compare as `1.2.3`)
-- [ ] keep fallback: any side still invalid after canonicalization → `false` (matches current empty-string behavior)
-- [ ] update the pre-release test from Task 4 to the correct expectation (`1.2.3-rc1` < `1.2.3`), remove the TODO
-- [ ] add test cases: build metadata (`1.2.3+build`), two pre-releases (`-rc1` vs `-rc2`), invalid input (`"abc"`), CalVer with zero-padding (`2024.01.15` vs `2024.02.01`), 4-part versions (`1.2.3.4` vs `1.2.3.5` — pin the chosen behavior explicitly)
-- [ ] run `go test -race ./...` - must pass before next task
+- [x] add `golang.org/x/mod` dependency
+- [x] rewrite `IsNewer` on top of `semver.Compare` with input canonicalization (ensure `v` prefix, strip build metadata); delete hand-rolled `parseVersion`
+- [x] ⚠️ canonicalization MUST also handle what `semver.IsValid` rejects but the current parser accepts, or the update indicator silently dies for those tools: strip leading zeros in segments (CalVer `2024.01.15`) and truncate a 4th segment (`1.2.3.4` → compare as `1.2.3`)
+- [x] keep fallback: any side still invalid after canonicalization → `false` (matches current empty-string behavior)
+- [x] update the pre-release test from Task 4 to the correct expectation (`1.2.3-rc1` < `1.2.3`), remove the TODO
+- [x] add test cases: build metadata (`1.2.3+build`), two pre-releases (`-rc1` vs `-rc2`), invalid input (`"abc"`), CalVer with zero-padding (`2024.01.15` vs `2024.02.01`), 4-part versions (`1.2.3.4` vs `1.2.3.5` — pin the chosen behavior explicitly)
+- [x] run `go test -race ./...` - must pass before next task
 
 ### Task 6: Atomic SaveMeta
 

@@ -209,15 +209,16 @@ func TestModeGuards(t *testing.T) {
 }
 
 // newSearchTestModel builds a model with several tracked tools for exercising
-// the search commit/rollback flow from focusTools.
+// the search commit/rollback flow from focusTools. Sizing goes through a real
+// WindowSizeMsg so toolsW/ready match what the running app renders with.
 func newSearchTestModel() Model {
 	m := New([]loader.ToolMeta{
 		{Name: "fzf"},
 		{Name: "git"},
 		{Name: "ripgrep"},
 	})
-	m.width = 80
-	m.height = 24
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(Model)
 	m.focus = focusTools
 	return m
 }
@@ -263,17 +264,58 @@ func TestSearchEnterSelectsMatch(t *testing.T) {
 	if nm.searchPrevName != "" {
 		t.Errorf("searchPrevName = %q, want cleared", nm.searchPrevName)
 	}
+	// The commit must fire the auto-fetch path so the card and help panel
+	// populate: with an empty helpCache it marks the tool's help as loading.
+	if nm.helpLoadingFor != "ripgrep" {
+		t.Errorf("helpLoadingFor = %q, want %q (enter fires auto-fetch)", nm.helpLoadingFor, "ripgrep")
+	}
 }
 
-// TestSearchEscRestoresSelection verifies esc rolls the cursor back to the
-// tool selected before the search started.
-func TestSearchEscRestoresSelection(t *testing.T) {
+// TestSearchArrowThenEnterCommitsHighlight verifies the primary flow —
+// / → type → down → enter — commits the arrow-moved highlight, not the
+// first match of the filter.
+func TestSearchArrowThenEnterCommitsHighlight(t *testing.T) {
 	m := newSearchTestModel()
-	m.metaSelected = 2 // ripgrep
 
 	updated, _ := m.Update(keyRunes("/"))
 	m = updated.(Model)
-	m = typeRunes(t, m, "fz") // typing resets the highlight to 0
+	m = typeRunes(t, m, "i") // filtered: [git, ripgrep]
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	nm := updated.(Model)
+
+	if nm.mode != modeNormal {
+		t.Errorf("mode = %d, want modeNormal", nm.mode)
+	}
+	if nm.focus != focusBrief {
+		t.Errorf("focus = %d, want focusBrief", nm.focus)
+	}
+	if nm.metaSelected != 2 {
+		t.Errorf("metaSelected = %d, want 2 (ripgrep in the full list)", nm.metaSelected)
+	}
+	if sel, ok := nm.selectedMeta(); !ok || sel.Name != "ripgrep" {
+		t.Errorf("selectedMeta = %v, want the arrow-highlighted ripgrep", sel)
+	}
+}
+
+// TestSearchEscRestoresSelection verifies esc rolls the cursor back to the
+// tool selected before the search started, discarding arrow navigation, and
+// re-syncs the help panel to the restored tool.
+func TestSearchEscRestoresSelection(t *testing.T) {
+	m := newSearchTestModel()
+	m.metaSelected = 1 // git
+
+	updated, _ := m.Update(keyRunes("/"))
+	m = updated.(Model)
+	m = typeRunes(t, m, "i") // filtered: [git, ripgrep], highlight reset to 0
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // highlight ripgrep
+	m = updated.(Model)
+	if sel, ok := m.selectedMeta(); !ok || sel.Name != "ripgrep" {
+		t.Fatalf("selectedMeta before esc = %v, want ripgrep", sel)
+	}
 
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	nm := updated.(Model)
@@ -281,14 +323,19 @@ func TestSearchEscRestoresSelection(t *testing.T) {
 	if nm.mode != modeNormal {
 		t.Errorf("mode = %d, want modeNormal", nm.mode)
 	}
-	if nm.metaSelected != 2 {
-		t.Errorf("metaSelected = %d, want restored 2", nm.metaSelected)
+	if nm.metaSelected != 1 {
+		t.Errorf("metaSelected = %d, want restored 1 (git)", nm.metaSelected)
 	}
-	if sel, ok := nm.selectedMeta(); !ok || sel.Name != "ripgrep" {
-		t.Errorf("selectedMeta = %v, want ripgrep restored", sel)
+	if sel, ok := nm.selectedMeta(); !ok || sel.Name != "git" {
+		t.Errorf("selectedMeta = %v, want git restored", sel)
 	}
 	if nm.searchPrevName != "" {
 		t.Errorf("searchPrevName = %q, want cleared", nm.searchPrevName)
+	}
+	// The rollback must re-sync the help panel: the arrow move loaded
+	// ripgrep's help, esc has to re-target the restored tool.
+	if nm.helpLoadingFor != "git" {
+		t.Errorf("helpLoadingFor = %q, want %q (esc refreshes the help panel)", nm.helpLoadingFor, "git")
 	}
 }
 
@@ -347,6 +394,11 @@ func TestSearchArrowsMoveHighlight(t *testing.T) {
 	}
 	if sel, ok := m.selectedMeta(); !ok || sel.Name != "ripgrep" {
 		t.Errorf("selectedMeta = %v, want ripgrep (second match)", sel)
+	}
+	// Every arrow move must fire the auto-fetch path for the newly
+	// highlighted tool (helpCache is empty, so it marks help as loading).
+	if m.helpLoadingFor != "ripgrep" {
+		t.Errorf("helpLoadingFor = %q, want %q (arrow move fires auto-fetch)", m.helpLoadingFor, "ripgrep")
 	}
 }
 
@@ -458,20 +510,58 @@ func TestSearchSingleMatchWrapAround(t *testing.T) {
 
 // TestSearchLetterKeyTypesIntoQuery verifies a letter that doubles as a nav
 // key in modeNormal (j) lands in the query while searching and does not act
-// as navigation.
+// as navigation — and that typing a query-changing rune resets an
+// arrow-moved highlight to the first match (a stale index could fall out of
+// the narrower filter's range and make enter a silent no-op).
 func TestSearchLetterKeyTypesIntoQuery(t *testing.T) {
 	m := newSearchTestModel()
 
 	updated, _ := m.Update(keyRunes("/"))
 	m = updated.(Model)
+	m = typeRunes(t, m, "i") // filtered: [git, ripgrep]
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // arrow-move to index 1
+	m = updated.(Model)
+	if m.metaSelected != 1 {
+		t.Fatalf("after down metaSelected = %d, want 1", m.metaSelected)
+	}
 
 	updated, _ = m.Update(keyRunes("j"))
 	nm := updated.(Model)
-	if !strings.Contains(nm.search.Value(), "j") {
-		t.Errorf("search value = %q, expected the j rune to land in the query", nm.search.Value())
+	if nm.search.Value() != "ij" {
+		t.Errorf("search value = %q, expected the j rune to land in the query (want %q)", nm.search.Value(), "ij")
 	}
 	if nm.metaSelected != 0 {
-		t.Errorf("metaSelected = %d, want 0 (typing highlights the first match)", nm.metaSelected)
+		t.Errorf("metaSelected = %d, want 0 (typing resets the highlight to the first match)", nm.metaSelected)
+	}
+	if nm.mode != modeSearch {
+		t.Errorf("mode = %d, want still modeSearch", nm.mode)
+	}
+}
+
+// TestSearchCursorKeyKeepsHighlight verifies pure cursor movement inside the
+// query (left/right/home/end) does not reset an arrow-moved highlight — only
+// a keystroke that actually changes the query text does.
+func TestSearchCursorKeyKeepsHighlight(t *testing.T) {
+	m := newSearchTestModel()
+
+	updated, _ := m.Update(keyRunes("/"))
+	m = updated.(Model)
+	m = typeRunes(t, m, "i") // filtered: [git, ripgrep]
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown}) // arrow-move to index 1
+	m = updated.(Model)
+	if m.metaSelected != 1 {
+		t.Fatalf("after down metaSelected = %d, want 1", m.metaSelected)
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyLeft}) // move the input cursor
+	nm := updated.(Model)
+	if nm.metaSelected != 1 {
+		t.Errorf("metaSelected = %d, want 1 kept (query unchanged)", nm.metaSelected)
+	}
+	if nm.search.Value() != "i" {
+		t.Errorf("query = %q, want untouched %q", nm.search.Value(), "i")
 	}
 	if nm.mode != modeSearch {
 		t.Errorf("mode = %d, want still modeSearch", nm.mode)

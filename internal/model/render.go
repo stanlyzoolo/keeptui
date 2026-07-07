@@ -685,13 +685,9 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			toolIdx := msg.Y - 2 + m.toolsViewport.YOffset
 			filtered := m.filteredMeta()
 			if toolIdx >= 0 && toolIdx < len(filtered) && m.metaSelected != toolIdx {
-				// Mirror the keyboard j/k path, including the auto-fetch.
-				m.metaSelected = toolIdx
-				m.setToolsContent()
-				m.briefViewport.Height = m.calcVpHeight()
-				m.briefViewport.GotoTop()
-				m.briefViewport.SetContent(m.renderCard())
-				return m, m.autoFetchCmdsForSelected()
+				// Mirror the keyboard j/k path (shared selectMeta helper,
+				// including the auto-fetch).
+				return m, m.selectMeta(toolIdx)
 			}
 		} else if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
 			m.toolsViewport, cmd = m.toolsViewport.Update(msg)

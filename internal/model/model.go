@@ -93,9 +93,9 @@ type Model struct {
 	// to this tool in the full list.
 	searchPrevName string
 	statusMsg      string
-	width               int
-	height              int
-	ready               bool
+	width          int
+	height         int
+	ready          bool
 
 	// mode is the single input/modal state (see inputMode in mode.go). The
 	// zero value modeNormal is the base state; per-mode key handlers own the
@@ -438,14 +438,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "esc":
 				// Rollback: restore the cursor to the tool selected before the
 				// search started (fallback 0 when it was untracked mid-search).
+				// selectMeta refreshes the help viewport too — arrow moves may
+				// have loaded another tool's help mid-search.
 				m.mode = modeNormal
 				m.search.SetValue("")
 				m.search.Blur()
-				m.metaSelected = m.indexOfMeta(m.searchPrevName)
+				prev := m.searchPrevName
 				m.searchPrevName = ""
-				m.setToolsContent()
-				m.briefViewport.SetContent(m.renderCard())
-				return m, nil
+				return m, m.selectMeta(m.indexOfMeta(prev))
 			case "enter":
 				// Commit: accept the highlighted match. With no matches the key
 				// is a no-op and search stays open.
@@ -457,37 +457,34 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.search.SetValue("")
 				m.search.Blur()
 				m.searchPrevName = ""
+				m.focus = focusBrief
 				// The filter is gone once the mode is normal, so remap the
 				// cursor onto the full list by name.
-				m.metaSelected = m.indexOfMeta(mt.Name)
-				m.focus = focusBrief
-				m.setToolsContent()
-				m.briefViewport.GotoTop()
-				m.briefViewport.SetContent(m.renderCard())
-				return m, m.autoFetchCmdsForSelected()
+				return m, m.selectMeta(m.indexOfMeta(mt.Name))
 			case "up", "down":
 				// Move the highlight through the filtered list (wrap-around,
 				// j/k parity). Never forwarded to the textinput, so the query
 				// text is untouched; with zero matches the key is consumed.
 				if n := len(m.filteredMeta()); n > 0 {
 					if msg.String() == "down" {
-						m.metaSelected = (m.metaSelected + 1) % n
-					} else {
-						m.metaSelected = (m.metaSelected - 1 + n) % n
+						return m, m.selectMeta((m.metaSelected + 1) % n)
 					}
-					m.setToolsContent()
-					m.briefViewport.Height = m.calcVpHeight()
-					m.briefViewport.GotoTop()
-					m.briefViewport.SetContent(m.renderCard())
-					return m, m.autoFetchCmdsForSelected()
+					return m, m.selectMeta((m.metaSelected - 1 + n) % n)
 				}
 				return m, nil
 			default:
+				prevQuery := m.search.Value()
 				m.search, cmd = m.search.Update(msg)
-				m.metaSelected = 0
-				m.setToolsContent()
-				m.briefViewport.SetContent(m.renderCard())
-				m.briefViewport.GotoTop()
+				if m.search.Value() != prevQuery {
+					// The filter changed: reset the highlight to the first
+					// match (a stale index could fall out of a narrower
+					// filter's range). Pure cursor movement (left/right/
+					// home/end) keeps a user-moved highlight.
+					m.metaSelected = 0
+					m.setToolsContent()
+					m.briefViewport.GotoTop()
+					m.briefViewport.SetContent(m.renderCard())
+				}
 				return m, cmd
 			}
 		}
@@ -532,12 +529,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focus == focusTools {
 				// Wrap around to the top when moving past the last tool.
 				if n := len(m.filteredMeta()); n > 0 {
-					m.metaSelected = (m.metaSelected + 1) % n
-					m.setToolsContent()
-					m.briefViewport.Height = m.calcVpHeight()
-					m.briefViewport.GotoTop()
-					m.briefViewport.SetContent(m.renderCard())
-					return m, m.autoFetchCmdsForSelected()
+					return m, m.selectMeta((m.metaSelected + 1) % n)
 				}
 			} else {
 				// Arrows scroll faster than line-by-line; j stays per-line.
@@ -557,12 +549,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focus == focusTools {
 				// Wrap around to the bottom when moving above the first tool.
 				if n := len(m.filteredMeta()); n > 0 {
-					m.metaSelected = (m.metaSelected - 1 + n) % n
-					m.setToolsContent()
-					m.briefViewport.Height = m.calcVpHeight()
-					m.briefViewport.GotoTop()
-					m.briefViewport.SetContent(m.renderCard())
-					return m, m.autoFetchCmdsForSelected()
+					return m, m.selectMeta((m.metaSelected - 1 + n) % n)
 				}
 			} else {
 				step := 1
@@ -580,22 +567,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "pgup", "ctrl+b":
 			if m.focus == focusTools {
 				step := max(m.toolsViewport.Height, 1)
-				m.metaSelected = max(m.metaSelected-step, 0)
-				m.setToolsContent()
-				m.briefViewport.GotoTop()
-				m.briefViewport.SetContent(m.renderCard())
-				return m, m.autoFetchCmdsForSelected()
+				return m, m.selectMeta(max(m.metaSelected-step, 0))
 			}
 
 		case "pgdown", "ctrl+f":
 			if m.focus == focusTools {
-				filtered := m.filteredMeta()
 				step := max(m.toolsViewport.Height, 1)
-				m.metaSelected = min(m.metaSelected+step, max(len(filtered)-1, 0))
-				m.setToolsContent()
-				m.briefViewport.GotoTop()
-				m.briefViewport.SetContent(m.renderCard())
-				return m, m.autoFetchCmdsForSelected()
+				return m, m.selectMeta(min(m.metaSelected+step, max(len(m.filteredMeta())-1, 0)))
 			}
 
 		case "g":
@@ -798,6 +776,20 @@ func (m Model) filteredMeta() []loader.ToolMeta {
 		}
 	}
 	return source
+}
+
+// selectMeta moves the cursor to idx in the current (possibly filtered) list
+// and refreshes every panel that tracks the selection: the tools list, the
+// brief card (scrolled to top) and the help viewport via the auto-fetch path.
+// Shared by keyboard navigation (j/k, arrows, pgup/pgdown), the search
+// commit/rollback exits and mouse clicks so the post-move refresh ritual
+// cannot drift between call sites.
+func (m *Model) selectMeta(idx int) tea.Cmd {
+	m.metaSelected = idx
+	m.setToolsContent()
+	m.briefViewport.GotoTop()
+	m.briefViewport.SetContent(m.renderCard())
+	return m.autoFetchCmdsForSelected()
 }
 
 // indexOfMeta returns the index of the named tool in the full m.meta list,

@@ -54,9 +54,11 @@ func (m Model) renderStatusBar() string {
 	}
 	if m.mode == modeSearch {
 		return style.Render(fmt.Sprintf(
-			"%s %s  %s exit search",
+			"%s %s  %s open  %s move  %s cancel",
 			ui.SearchPromptStyle.Render("/"),
 			m.search.View(),
+			keyHint("enter"),
+			keyHint("↑/↓"),
 			keyHint("esc"),
 		))
 	}
@@ -368,7 +370,9 @@ func (m Model) renderLeftContent() string {
 			updateMark = " " + ui.UpdateAvailableStyle.Render("↑")
 		}
 
-		isSelected := i == m.metaSelected && m.focus == focusTools && m.mode != modeSearch
+		// The marker stays visible in modeSearch: the cursor there is
+		// user-controlled (arrows move the highlight through the matches).
+		isSelected := i == m.metaSelected && m.focus == focusTools
 		if isSelected {
 			circle := ui.SelectionBarStyle.Render("●")
 			sb.WriteString(circle + " " + name + updateMark + "\n")

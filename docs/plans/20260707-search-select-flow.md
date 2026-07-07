@@ -151,15 +151,15 @@ to 0 (first match highlighted), which now shows visibly via the marker.
 - Modify: `internal/model/render.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] `renderToolsList` (~line 371): show the selection marker during
+- [x] `renderToolsList` (~line 371): show the selection marker during
       `modeSearch` (drop the `m.mode != modeSearch` condition)
-- [ ] status-bar `modeSearch` branch (~line 55): **keep** the live query echo
+- [x] status-bar `modeSearch` branch (~line 55): **keep** the live query echo
       (`ui.SearchPromptStyle.Render("/")` + `m.search.View()`) and append the
       hints via `keyHint(...)` — `enter` open, `↑/↓` move, `esc` cancel
-- [ ] write/extend render tests: marker visible for the highlighted row while
+- [x] write/extend render tests: marker visible for the highlighted row while
       in `modeSearch`; status bar contains the new hints and still echoes the
       query; existing `modeSearch` gauge case keeps passing
-- [ ] run `go test -race ./...` — must pass before task 3
+- [x] run `go test -race ./...` — must pass before task 3
 
 ### Task 3: Verify acceptance criteria
 

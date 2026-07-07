@@ -126,11 +126,11 @@ Key design decisions:
 **Files:**
 - Create: `internal/version/detect_test.go`
 
-- [ ] write table tests for `IsNewer`: newer/older/equal on each of major/minor/patch, empty strings, `v`-prefix mix (`v1.2.3` vs `1.2.3`)
-- [ ] pin current pre-release behavior in a test with a `// TODO: changes in Task 5` note (`1.2.3-rc1` vs `1.2.3`)
-- [ ] write tests for `InstalledVersion`: fake tool script on a temp `PATH` (t.Setenv) returning a version string; tool not found → ""; tool exits non-zero → ""
-- [ ] write test for `VersionCmd` override path (custom command used instead of `--version`/`-V` candidates; note: `VersionCmd` is never populated from `ToolMeta` today — the test pins the unit contract, not a production flow)
-- [ ] run tests - must pass before next task
+- [x] write table tests for `IsNewer`: newer/older/equal on each of major/minor/patch, empty strings, `v`-prefix mix (`v1.2.3` vs `1.2.3`)
+- [x] pin current pre-release behavior in a test with a `// TODO: changes in Task 5` note (`1.2.3-rc1` vs `1.2.3`)
+- [x] write tests for `InstalledVersion`: fake tool script on a temp `PATH` (t.Setenv) returning a version string; tool not found → ""; tool exits non-zero → ""
+- [x] write test for `VersionCmd` override path (custom command used instead of `--version`/`-V` candidates; note: `VersionCmd` is never populated from `ToolMeta` today — the test pins the unit contract, not a production flow)
+- [x] run tests - must pass before next task
 
 ### Task 5: Semver-correct version comparison
 

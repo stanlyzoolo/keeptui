@@ -489,6 +489,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.setToolsContent()
 					m.briefViewport.GotoTop()
 					m.briefViewport.SetContent(m.renderCard())
+					// Re-sync the help panel like selectMeta does: a prior
+					// arrow move may have left it on "Loading..." for a tool
+					// this reset just unselected, and the stale fetch landing
+					// later won't repaint an unselected tool's panel.
+					m.helpViewport.SetContent(m.renderHelpContent())
+					m.helpViewport.GotoTop()
 				}
 				return m, cmd
 			}

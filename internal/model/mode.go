@@ -11,10 +11,36 @@ import (
 	"github.com/lepeshko/keys/internal/version"
 )
 
+// inputMode is the single input/modal state of the TUI. Exactly one mode is
+// active at a time; modeNormal is the base state where the per-focus key map
+// applies. modeTokenInput is a sub-state of the API-status overlay: it is
+// entered from modeAPIStatus via [e] and exits back to modeAPIStatus, and the
+// overlay stays visible in both (apiOverlayVisible).
+type inputMode int
+
+const (
+	modeNormal inputMode = iota
+	modeSearch         // "/" in focusTools: filter the tool list
+	modeHelpSearch     // "/" in focusBrief/focusHelp: search the help viewport
+	modeEditNote       // "e" in focusBrief
+	modeEditTags       // "t" in focusBrief
+	modeTrack          // "t" in focusTools
+	modeConfirmUntrack // "u" in focusTools
+	modeRename         // "r" in focusTools
+	modeAPIStatus      // "L": rate-limit / token overlay
+	modeTokenInput     // "e" inside the overlay: masked token entry
+)
+
+// apiOverlayVisible reports whether the API-status overlay is on screen —
+// true both while browsing it and while entering a token.
+func (m Model) apiOverlayVisible() bool {
+	return m.mode == modeAPIStatus || m.mode == modeTokenInput
+}
+
 func (m Model) updateNoteEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
-		m.editingNote = false
+		m.mode = modeNormal
 		m.noteInput.Blur()
 		if mt, ok := m.selectedMeta(); ok {
 			mt.Note = strings.TrimSpace(m.noteInput.Value())
@@ -24,7 +50,7 @@ func (m Model) updateNoteEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.briefViewport.SetContent(m.renderCard())
 		return m, nil
 	case "esc":
-		m.editingNote = false
+		m.mode = modeNormal
 		m.noteInput.Blur()
 		m.briefViewport.SetContent(m.renderCard())
 		return m, nil
@@ -39,7 +65,7 @@ func (m Model) updateNoteEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) updateTagsEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
-		m.editingTags = false
+		m.mode = modeNormal
 		m.tagsInput.Blur()
 		if mt, ok := m.selectedMeta(); ok {
 			raw := strings.TrimSpace(m.tagsInput.Value())
@@ -57,7 +83,7 @@ func (m Model) updateTagsEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.briefViewport.SetContent(m.renderCard())
 		return m, nil
 	case "esc":
-		m.editingTags = false
+		m.mode = modeNormal
 		m.tagsInput.Blur()
 		m.briefViewport.SetContent(m.renderCard())
 		return m, nil
@@ -94,7 +120,7 @@ func trackTool(meta []loader.ToolMeta, input string) ([]loader.ToolMeta, string)
 func (m Model) updateTrackInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
-		m.tracking = false
+		m.mode = modeNormal
 		m.trackInput.Blur()
 		input := strings.TrimSpace(m.trackInput.Value())
 		if input == "" {
@@ -117,7 +143,7 @@ func (m Model) updateTrackInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.statusMsg = status
 		return m, m.autoFetchCmdsForSelected()
 	case "esc":
-		m.tracking = false
+		m.mode = modeNormal
 		m.trackInput.Blur()
 		return m, nil
 	default:
@@ -130,7 +156,7 @@ func (m Model) updateTrackInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) updateUntrackConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
-		m.confirmingUntrack = false
+		m.mode = modeNormal
 		m.meta = loader.RemoveMeta(m.meta, m.untrackTarget)
 		loader.SaveMeta(m.meta) //nolint:errcheck
 		m.tools = loader.ToolsFromMeta(m.meta)
@@ -146,7 +172,7 @@ func (m Model) updateUntrackConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, m.autoFetchCmdsForSelected()
 	default:
 		// esc or any other key cancels.
-		m.confirmingUntrack = false
+		m.mode = modeNormal
 		m.untrackTarget = ""
 		return m, nil
 	}
@@ -178,7 +204,7 @@ func (m Model) updateRenameInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		mt, ok := m.selectedMeta()
 		if !ok {
-			m.renaming = false
+			m.mode = modeNormal
 			m.nameInput.Blur()
 			return m, nil
 		}
@@ -186,12 +212,12 @@ func (m Model) updateRenameInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		newName := strings.TrimSpace(m.nameInput.Value())
 		updated, err := renameTool(m.meta, old, newName)
 		if err != nil {
-			m.renaming = false
+			m.mode = modeNormal
 			m.nameInput.Blur()
 			m.statusMsg = err.Error()
 			return m, nil
 		}
-		m.renaming = false
+		m.mode = modeNormal
 		m.nameInput.Blur()
 		if newName == "" || newName == old {
 			return m, nil
@@ -215,7 +241,7 @@ func (m Model) updateRenameInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.briefViewport.SetContent(m.renderCard())
 		return m, m.autoFetchCmdsForSelected()
 	case "esc":
-		m.renaming = false
+		m.mode = modeNormal
 		m.nameInput.Blur()
 		return m, nil
 	default:
@@ -230,12 +256,12 @@ func (m Model) updateRenameInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // refreshes the numbers, [esc] closes. While entering a token, submit validates
 // via version.FetchRateWithToken before anything is persisted.
 func (m Model) updateAPIStatus(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	if m.enteringToken {
+	if m.mode == modeTokenInput {
 		switch msg.String() {
 		case "enter":
 			candidate := strings.TrimSpace(m.tokenInput.Value())
 			if candidate == "" {
-				m.enteringToken = false
+				m.mode = modeAPIStatus
 				m.tokenInput.Blur()
 				m.tokenError = ""
 				return m, nil
@@ -244,7 +270,7 @@ func (m Model) updateAPIStatus(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// after a 200 in the tokenValidatedMsg handler.
 			return m, validateTokenCmd(candidate)
 		case "esc":
-			m.enteringToken = false
+			m.mode = modeAPIStatus
 			m.tokenInput.Blur()
 			m.tokenInput.SetValue("")
 			m.tokenError = ""
@@ -257,13 +283,13 @@ func (m Model) updateAPIStatus(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.String() {
 	case "esc", "q":
-		m.showingAPIStatus = false
+		m.mode = modeNormal
 		m.tokenError = ""
 		return m, nil
 	case "r":
 		return m, fetchRateCmd()
 	case "e":
-		m.enteringToken = true
+		m.mode = modeTokenInput
 		m.tokenError = ""
 		m.tokenInput.SetValue("")
 		m.tokenInput.Focus()

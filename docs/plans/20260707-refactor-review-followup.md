@@ -184,15 +184,15 @@ Key design decisions:
 - Modify: `internal/model/render_test.go`
 - Create: `internal/model/mode_test.go`
 
-- [ ] verify mutual exclusivity of the nine booleans before collapsing: audit every place that sets one flag to confirm no pair can be true simultaneously (if a pair can co-exist, the enum changes behavior — stop and record it here with ⚠️)
-- [ ] define `inputMode` enum in `mode.go`: `modeNormal`, `modeSearch`, `modeEditNote`, `modeEditTags`, `modeTrack`, `modeConfirmUntrack`, `modeRename`, `modeHelpSearch`, `modeAPIStatus`, `modeTokenInput`; `refreshingFor`/`helpMode`/`focus` are NOT input modes and stay as separate fields
-- [ ] replace `editingNote`/`editingTags`/`tracking`/`confirmingUntrack`/`renaming`/`showingAPIStatus`/`enteringToken`/`searching`/`helpSearching` booleans with one `mode` field; `modeTokenInput` exits back to `modeAPIStatus` on esc/success
-- [ ] rewrite the `tea.KeyMsg` early-branch chain in `Update()` as a single `switch m.mode`; the `[L]` guard becomes `m.mode == modeNormal`
-- [ ] update `renderStatusBar()` and gauge visibility checks to switch on `m.mode`
-- [ ] update existing tests in `render_test.go` that set the old booleans
-- [ ] write `mode_test.go`: transition tests for each mode (enter via key, exit via esc, commit via enter) — this closes the 0% gap on the input handlers
-- [ ] write tests for guard behavior: `[L]`/`[t]`/`[r]` ignored while another mode is active
-- [ ] run `go test -race ./...` - must pass before next task
+- [x] verify mutual exclusivity of the nine booleans before collapsing: audit every place that sets one flag to confirm no pair can be true simultaneously (confirmed: all nine set only from the base state — mode branches consume input and return earlier; the only co-existing pair was `showingAPIStatus`+`enteringToken`, by design the `modeTokenInput` sub-state)
+- [x] define `inputMode` enum in `mode.go`: `modeNormal`, `modeSearch`, `modeEditNote`, `modeEditTags`, `modeTrack`, `modeConfirmUntrack`, `modeRename`, `modeHelpSearch`, `modeAPIStatus`, `modeTokenInput`; `refreshingFor`/`helpMode`/`focus` are NOT input modes and stay as separate fields
+- [x] replace `editingNote`/`editingTags`/`tracking`/`confirmingUntrack`/`renaming`/`showingAPIStatus`/`enteringToken`/`searching`/`helpSearching` booleans with one `mode` field; `modeTokenInput` exits back to `modeAPIStatus` on esc/success (async `tokenValidatedMsg` success only falls back to `modeAPIStatus` when still in `modeTokenInput`; `apiOverlayVisible()` covers "overlay on screen" checks)
+- [x] rewrite the `tea.KeyMsg` early-branch chain in `Update()` as a single `switch m.mode`; the `[L]` guard becomes `m.mode == modeNormal`
+- [x] update `renderStatusBar()` and gauge visibility checks to switch on `m.mode`
+- [x] update existing tests in `render_test.go` that set the old booleans
+- [x] write `mode_test.go`: transition tests for each mode (enter via key, exit via esc, commit via enter) — this closes the 0% gap on the input handlers
+- [x] write tests for guard behavior: `[L]`/`[t]`/`[r]` ignored while another mode is active
+- [x] run `go test -race ./...` - must pass before next task (model coverage 55.8% → 68.3%)
 
 ### Task 9: Repo hygiene and CLAUDE.md actualization
 

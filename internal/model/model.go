@@ -87,24 +87,23 @@ type Model struct {
 	briefViewport       viewport.Model
 	helpViewport        viewport.Model
 	search              textinput.Model
-	searching           bool
 	statusMsg           string
 	width               int
 	height              int
 	ready               bool
 
-	editingNote bool
-	editingTags bool
-	noteInput   textinput.Model
-	tagsInput   textinput.Model
+	// mode is the single input/modal state (see inputMode in mode.go). The
+	// zero value modeNormal is the base state; per-mode key handlers own the
+	// input while any other mode is active.
+	mode inputMode
 
-	tracking   bool
+	noteInput textinput.Model
+	tagsInput textinput.Model
+
 	trackInput textinput.Model
 
-	confirmingUntrack bool
-	untrackTarget     string
+	untrackTarget string
 
-	renaming  bool
 	nameInput textinput.Model
 
 	// spinner animates while a force refresh ([r]) is in flight; refreshingFor
@@ -119,7 +118,6 @@ type Model struct {
 	helpMode       int
 	helpLoadingFor string
 	helpCache      map[string][2]string
-	helpSearching  bool
 	helpSearch     textinput.Model
 	helpMatches    []int
 	helpMatchIdx   int
@@ -133,15 +131,10 @@ type Model struct {
 	// never overwrites a previously-known value.
 	rate version.RateLimit
 
-	// showingAPIStatus toggles the L-triggered API-status overlay, which shows
-	// the token source, current rate limits, and reset time.
-	showingAPIStatus bool
-
-	// enteringToken is the overlay's token-input sub-mode ([e]); tokenInput is
-	// the masked field and tokenError holds the inline "token invalid" message.
-	enteringToken bool
-	tokenInput    textinput.Model
-	tokenError    string
+	// tokenInput is the overlay's masked token field (modeTokenInput) and
+	// tokenError holds the inline "token invalid" message.
+	tokenInput textinput.Model
+	tokenError string
 }
 
 func New(meta []loader.ToolMeta) Model {
@@ -211,7 +204,7 @@ func (m Model) Init() tea.Cmd {
 			cmds = append(cmds, fetchRemoteCmd(t))
 		}
 	}
-	if m.searching {
+	if m.mode == modeSearch {
 		cmds = append(cmds, textinput.Blink)
 	}
 	// Auto-fetch --help and changelog for initial selected tool
@@ -319,7 +312,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.tokenError = "could not save token"
 			return m, nil
 		}
-		m.enteringToken = false
+		// The result may land after the user already left the token input via
+		// esc; only a still-active modeTokenInput falls back to the overlay.
+		if m.mode == modeTokenInput {
+			m.mode = modeAPIStatus
+		}
 		m.tokenInput.Blur()
 		m.tokenInput.SetValue("")
 		m.tokenError = ""
@@ -381,29 +378,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		m.statusMsg = ""
 
-		if m.editingNote {
+		switch m.mode {
+		case modeEditNote:
 			return m.updateNoteEdit(msg)
-		}
-		if m.editingTags {
+		case modeEditTags:
 			return m.updateTagsEdit(msg)
-		}
-		if m.tracking {
+		case modeTrack:
 			return m.updateTrackInput(msg)
-		}
-		if m.confirmingUntrack {
+		case modeConfirmUntrack:
 			return m.updateUntrackConfirm(msg)
-		}
-		if m.renaming {
+		case modeRename:
 			return m.updateRenameInput(msg)
-		}
-		if m.showingAPIStatus {
+		case modeAPIStatus, modeTokenInput:
 			return m.updateAPIStatus(msg)
 		}
 
-		if m.helpSearching {
+		if m.mode == modeHelpSearch {
 			switch msg.String() {
 			case "esc":
-				m.helpSearching = false
+				m.mode = modeNormal
 				m.helpSearch.SetValue("")
 				m.helpSearch.Blur()
 				m.helpMatches = nil
@@ -435,10 +428,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		if m.searching {
+		if m.mode == modeSearch {
 			switch msg.String() {
 			case "esc":
-				m.searching = false
+				m.mode = modeNormal
 				m.search.SetValue("")
 				m.search.Blur()
 				m.metaSelected = 0
@@ -577,11 +570,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "/":
 			if m.focus == focusBrief || m.focus == focusHelp {
-				m.helpSearching = true
+				m.mode = modeHelpSearch
 				m.helpSearch.Focus()
 				return m, textinput.Blink
 			}
-			m.searching = true
+			m.mode = modeSearch
 			m.search.Focus()
 			return m, textinput.Blink
 
@@ -620,7 +613,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "e":
 			if m.focus == focusBrief {
 				if mt, ok := m.selectedMeta(); ok {
-					m.editingNote = true
+					m.mode = modeEditNote
 					m.noteInput.SetValue(mt.Note)
 					m.noteInput.Focus()
 					m.briefViewport.SetContent(m.renderCard())
@@ -631,14 +624,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "t":
 			if m.focus == focusBrief {
 				if mt, ok := m.selectedMeta(); ok {
-					m.editingTags = true
+					m.mode = modeEditTags
 					m.tagsInput.SetValue(strings.Join(mt.Tags, ", "))
 					m.tagsInput.Focus()
 					m.briefViewport.SetContent(m.renderCard())
 					return m, textinput.Blink
 				}
 			} else if m.focus == focusTools {
-				m.tracking = true
+				m.mode = modeTrack
 				m.trackInput.SetValue("")
 				m.trackInput.Focus()
 				return m, textinput.Blink
@@ -647,7 +640,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "u":
 			if m.focus == focusTools {
 				if mt, ok := m.selectedMeta(); ok {
-					m.confirmingUntrack = true
+					m.mode = modeConfirmUntrack
 					m.untrackTarget = mt.Name
 					return m, nil
 				}
@@ -656,7 +649,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			if m.focus == focusTools {
 				if mt, ok := m.selectedMeta(); ok {
-					m.renaming = true
+					m.mode = modeRename
 					m.nameInput.SetValue(mt.Name)
 					m.nameInput.Focus()
 					return m, textinput.Blink
@@ -702,10 +695,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "L":
 			// Open the API-status overlay and refresh the rate numbers on demand
-			// (GET /rate_limit does not spend quota). Reached only when no other
-			// input/modal mode is active — those branches return earlier.
-			m.showingAPIStatus = true
-			m.enteringToken = false
+			// (GET /rate_limit does not spend quota). Reached only in modeNormal —
+			// every other mode's handler returns earlier.
+			m.mode = modeAPIStatus
 			m.tokenError = ""
 			return m, fetchRateCmd()
 		}
@@ -744,7 +736,7 @@ func (m Model) selectedTool() (loader.Tool, bool) {
 func (m Model) filteredMeta() []loader.ToolMeta {
 	source := m.meta
 
-	if m.searching {
+	if m.mode == modeSearch {
 		query := strings.ToLower(strings.TrimSpace(m.search.Value()))
 		if query != "" {
 			var out []loader.ToolMeta

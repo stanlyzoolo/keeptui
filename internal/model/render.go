@@ -25,7 +25,7 @@ func (m Model) View() string {
 	right := m.renderHelp()
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, middle, right)
 	layout := lipgloss.JoinVertical(lipgloss.Left, body, m.renderStatusBar())
-	if m.showingAPIStatus {
+	if m.apiOverlayVisible() {
 		layout = ui.PlaceOverlay(layout, m.renderAPIStatus())
 	}
 	// Vertical margin only; no horizontal margin so panels/status bar reach the
@@ -35,7 +35,7 @@ func (m Model) View() string {
 
 func (m Model) renderStatusBar() string {
 	style := ui.HelpStyle.Width(m.width - 2)
-	if m.helpSearching {
+	if m.mode == modeHelpSearch {
 		matchInfo := ""
 		if len(m.helpMatches) > 0 {
 			matchInfo = fmt.Sprintf("  %d/%d matches", m.helpMatchIdx+1, len(m.helpMatches))
@@ -52,7 +52,7 @@ func (m Model) renderStatusBar() string {
 			matchInfo,
 		))
 	}
-	if m.searching {
+	if m.mode == modeSearch {
 		return style.Render(fmt.Sprintf(
 			"%s %s  %s exit search",
 			ui.SearchPromptStyle.Render("/"),
@@ -60,13 +60,13 @@ func (m Model) renderStatusBar() string {
 			keyHint("esc"),
 		))
 	}
-	if m.editingNote {
+	if m.mode == modeEditNote {
 		return style.Render(keyHint("enter") + " save  " + keyHint("esc") + " cancel")
 	}
-	if m.editingTags {
+	if m.mode == modeEditTags {
 		return style.Render(keyHint("enter") + " save  " + keyHint("esc") + " cancel  " + ui.MetaNoteStyle.Render("comma-separated"))
 	}
-	if m.tracking {
+	if m.mode == modeTrack {
 		return style.Render(fmt.Sprintf(
 			"%s %s  %s cancel",
 			ui.SearchPromptStyle.Render("track (github url or tool name):"),
@@ -74,7 +74,7 @@ func (m Model) renderStatusBar() string {
 			keyHint("esc"),
 		))
 	}
-	if m.confirmingUntrack {
+	if m.mode == modeConfirmUntrack {
 		return style.Render(fmt.Sprintf(
 			"%s  %s yes  %s no",
 			ui.SearchPromptStyle.Render("Untrack "+m.untrackTarget+"?"),
@@ -82,7 +82,7 @@ func (m Model) renderStatusBar() string {
 			keyHint("esc"),
 		))
 	}
-	if m.renaming {
+	if m.mode == modeRename {
 		return style.Render(fmt.Sprintf(
 			"%s %s  %s cancel",
 			ui.SearchPromptStyle.Render("rename to:"),
@@ -90,10 +90,10 @@ func (m Model) renderStatusBar() string {
 			keyHint("esc"),
 		))
 	}
-	if m.showingAPIStatus && m.enteringToken {
+	if m.mode == modeTokenInput {
 		return style.Render(keyHint("enter") + " validate & save  " + keyHint("esc") + " cancel")
 	}
-	if m.showingAPIStatus {
+	if m.mode == modeAPIStatus {
 		return style.Render(keyHint("r") + " refresh  " + keyHint("esc") + " close")
 	}
 	if m.statusMsg != "" {
@@ -265,7 +265,7 @@ func (m Model) renderAPIStatus() string {
 	source := version.TokenSource()
 	// Nudge the user to add a token when none is configured — it lifts the hourly
 	// limit from 60 to 5000. Hidden once a token exists or while entering one.
-	if source == "none" && !m.enteringToken {
+	if source == "none" && m.mode != modeTokenInput {
 		b.WriteString(ui.WarnStyle.Render("Add a GitHub token to raise the limit (60 → 5000/h)  ") + keyHint("e") + "\n\n")
 	}
 
@@ -295,7 +295,7 @@ func (m Model) renderAPIStatus() string {
 		b.WriteString(ui.InfoStyle.Render("Limit: unknown") + "\n")
 	}
 
-	if m.enteringToken {
+	if m.mode == modeTokenInput {
 		b.WriteString("\n" + ui.SearchPromptStyle.Render("token: ") + m.tokenInput.View() + "\n")
 	}
 	if m.tokenError != "" {
@@ -304,7 +304,7 @@ func (m Model) renderAPIStatus() string {
 
 	b.WriteString("\n")
 	var hints string
-	if m.enteringToken {
+	if m.mode == modeTokenInput {
 		hints = keyHint("enter") + " validate & save  " + keyHint("esc") + " cancel"
 	} else {
 		hints = keyHint("e") + " set token  "
@@ -368,7 +368,7 @@ func (m Model) renderLeftContent() string {
 			updateMark = " " + ui.UpdateAvailableStyle.Render("↑")
 		}
 
-		isSelected := i == m.metaSelected && m.focus == focusTools && !m.searching
+		isSelected := i == m.metaSelected && m.focus == focusTools && m.mode != modeSearch
 		if isSelected {
 			circle := ui.SelectionBarStyle.Render("●")
 			sb.WriteString(circle + " " + name + updateMark + "\n")
@@ -378,7 +378,7 @@ func (m Model) renderLeftContent() string {
 	}
 
 	if len(filtered) == 0 {
-		if m.searching {
+		if m.mode == modeSearch {
 			sb.WriteString(ui.DescStyle.Render("  No matches.") + "\n")
 		} else {
 			sb.WriteString(ui.DescStyle.Render("  No tools tracked.\n  Press t to add one.") + "\n")
@@ -565,7 +565,7 @@ func (m Model) renderCard() string {
 		symStyled := ui.StatusStyle(mt.Status).Render(sym + " " + string(mt.Status))
 		sb.WriteString(ui.MetaDetailLabelStyle.Render("status:") + " " + symStyled + "\n")
 
-		if m.editingNote {
+		if m.mode == modeEditNote {
 			sb.WriteString(ui.MetaDetailLabelStyle.Render("note:") + " " + m.noteInput.View() + "\n")
 		} else {
 			noteText := mt.Note
@@ -576,7 +576,7 @@ func (m Model) renderCard() string {
 			sb.WriteString(ui.MetaDetailLabelStyle.Render("note:") + " " + ui.MetaNoteStyle.Render(wrapped) + "\n")
 		}
 
-		if m.editingTags {
+		if m.mode == modeEditTags {
 			sb.WriteString(ui.MetaDetailLabelStyle.Render("tags:") + " " + m.tagsInput.View() + "\n")
 		} else {
 			tagsText := strings.Join(mt.Tags, ", ")
@@ -741,7 +741,7 @@ func (m Model) renderHelpContent() string {
 	if innerW := max(m.helpW-2, 20); innerW > 0 {
 		text = wrapText(text, innerW)
 	}
-	if !m.helpSearching || m.helpSearch.Value() == "" {
+	if m.mode != modeHelpSearch || m.helpSearch.Value() == "" {
 		return colorizeHelp(text)
 	}
 	query := m.helpSearch.Value()

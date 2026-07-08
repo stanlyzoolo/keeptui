@@ -256,6 +256,51 @@ func TestRenderStatusBarFocusBrief(t *testing.T) {
 	}
 }
 
+// TestRenderStatusBarSearch verifies the modeSearch bar still echoes the live
+// query and shows the commit/rollback hints: enter open, arrows move, esc
+// cancel.
+func TestRenderStatusBarSearch(t *testing.T) {
+	m := newSearchTestModel()
+	updated, _ := m.Update(keyRunes("/"))
+	m = updated.(Model)
+	m = typeRunes(t, m, "rip")
+
+	got := m.renderStatusBar()
+	for _, want := range []string{"rip", "[enter]", "open", "[↑/↓]", "move", "[esc]", "cancel"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("search status bar = %q, missing %q", got, want)
+		}
+	}
+}
+
+// TestRenderLeftContentSearchMarker verifies the selection marker stays
+// visible while searching and follows the arrow-moved highlight through the
+// filtered list.
+func TestRenderLeftContentSearchMarker(t *testing.T) {
+	m := newSearchTestModel()
+	updated, _ := m.Update(keyRunes("/"))
+	m = updated.(Model)
+	m = typeRunes(t, m, "g") // matches git and ripgrep
+
+	lines := strings.Split(m.renderLeftContent(), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("renderLeftContent = %q, want at least 2 rows", lines)
+	}
+	if !strings.Contains(lines[0], "●") || !strings.Contains(lines[0], "git") {
+		t.Errorf("first match row = %q, want marker on git", lines[0])
+	}
+
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	lines = strings.Split(m.renderLeftContent(), "\n")
+	if strings.Contains(lines[0], "●") {
+		t.Errorf("first row = %q, marker should move away after down", lines[0])
+	}
+	if !strings.Contains(lines[1], "●") || !strings.Contains(lines[1], "ripgrep") {
+		t.Errorf("second match row = %q, want marker on ripgrep", lines[1])
+	}
+}
+
 func TestRenderStatusBarGauge(t *testing.T) {
 	known := version.RateLimit{Known: true, Remaining: 15, Limit: 60} // used 45/60
 

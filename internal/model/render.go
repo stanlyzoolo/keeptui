@@ -54,9 +54,11 @@ func (m Model) renderStatusBar() string {
 	}
 	if m.mode == modeSearch {
 		return style.Render(fmt.Sprintf(
-			"%s %s  %s exit search",
+			"%s %s  %s open  %s move  %s cancel",
 			ui.SearchPromptStyle.Render("/"),
 			m.search.View(),
+			keyHint("enter"),
+			keyHint("↑/↓"),
 			keyHint("esc"),
 		))
 	}
@@ -368,7 +370,9 @@ func (m Model) renderLeftContent() string {
 			updateMark = " " + ui.UpdateAvailableStyle.Render("↑")
 		}
 
-		isSelected := i == m.metaSelected && m.focus == focusTools && m.mode != modeSearch
+		// The marker stays visible in modeSearch: the cursor there is
+		// user-controlled (arrows move the highlight through the matches).
+		isSelected := i == m.metaSelected && m.focus == focusTools
 		if isSelected {
 			circle := ui.SelectionBarStyle.Render("●")
 			sb.WriteString(circle + " " + name + updateMark + "\n")
@@ -681,13 +685,9 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			toolIdx := msg.Y - 2 + m.toolsViewport.YOffset
 			filtered := m.filteredMeta()
 			if toolIdx >= 0 && toolIdx < len(filtered) && m.metaSelected != toolIdx {
-				// Mirror the keyboard j/k path, including the auto-fetch.
-				m.metaSelected = toolIdx
-				m.setToolsContent()
-				m.briefViewport.Height = m.calcVpHeight()
-				m.briefViewport.GotoTop()
-				m.briefViewport.SetContent(m.renderCard())
-				return m, m.autoFetchCmdsForSelected()
+				// Mirror the keyboard j/k path (shared selectMeta helper,
+				// including the auto-fetch).
+				return m, m.selectMeta(toolIdx)
 			}
 		} else if msg.Button == tea.MouseButtonWheelUp || msg.Button == tea.MouseButtonWheelDown {
 			m.toolsViewport, cmd = m.toolsViewport.Update(msg)
@@ -736,7 +736,11 @@ func (m Model) renderHelpContent() string {
 		return ui.MetaNoteStyle.Render("No tool selected")
 	}
 
-	if m.helpLoadingFor != "" {
+	// Gate per tool, not on "any fetch in flight": another tool's fetch may
+	// still be running (fast j/k, search arrows then esc/enter) while the
+	// selected tool's help is already cached — that cache must render, or the
+	// panel would stick on "Loading..." when the stale fetch lands unselected.
+	if m.helpLoadingFor == mt.Name {
 		return ui.MetaNoteStyle.Render("Loading...")
 	}
 

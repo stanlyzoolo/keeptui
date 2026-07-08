@@ -50,7 +50,7 @@ var (
 			Foreground(ColorMuted)
 
 	// Rate-usage gauge (status-bar right corner): yellow brackets + used-count,
-	// yellow █ fill glyphs and darker-yellow ░ track glyphs. The bar is drawn
+	// yellow ▮ fill glyphs and darker-yellow ░ track glyphs. The bar is drawn
 	// with foreground-colored glyphs, not painted backgrounds, so it stays
 	// visible when a terminal's color profile degrades and ANSI is stripped.
 	// Colors are constant — the bar never recolors on rate pressure.

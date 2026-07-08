@@ -156,14 +156,24 @@ func keyHint(k string) string {
 // not an absolute count.
 const gaugeCells = 12
 
+// gaugeFillGlyph / gaugeTrackGlyph draw the bar. Both must stay width-stable:
+// neither is East-Asian-Ambiguous, so lipgloss.Width counts them as one cell
+// even under RUNEWIDTH_EASTASIAN=1. A full block (█ U+2588) is Ambiguous and
+// would measure as two cells there, inflating the gap math in renderHintsBar
+// and wrongly downgrading or mis-padding the bar.
+const (
+	gaugeFillGlyph  = "▮" // U+25AE black vertical rectangle
+	gaugeTrackGlyph = "░" // U+2591 light shade
+)
+
 // renderRateGauge builds the right-corner "GitHub API Usage" indicator for the
 // current rate snapshot, or "" when there is no known snapshot. It shows
 // used/limit (used = Limit-Remaining), matching the API-status overlay. The bar
-// is █ fill / ░ track glyphs (visible even if ANSI is stripped; any usage shows
-// at least one █ via gaugeFilled) and constant yellow at every pressure level —
-// exhaustion (used==limit) simply renders a full bar; the ⚠/✕ alarm lives only
-// in the [L] overlay. compact drops the label and bar, keeping "GH used/limit
-// [L]" for narrow terminals.
+// is ▮ fill / ░ track glyphs (visible even if ANSI is stripped; any usage shows
+// at least one filled cell via gaugeFilled) and constant yellow at every
+// pressure level — exhaustion (used==limit) simply renders a full bar; the ⚠/✕
+// alarm lives only in the [L] overlay. compact drops the label and bar, keeping
+// "GH used/limit [L]" for narrow terminals.
 func (m Model) renderRateGauge(compact bool) string {
 	r := m.rate
 	if !r.Known || r.Limit <= 0 {
@@ -175,8 +185,8 @@ func (m Model) renderRateGauge(compact bool) string {
 		return ui.GithubStyle.Render("GH ") + nums + " " + keyHint("L")
 	}
 	filled := gaugeFilled(used, r.Limit)
-	bar := ui.RateGaugeFillStyle.Render(strings.Repeat("█", filled)) +
-		ui.RateGaugeTrackStyle.Render(strings.Repeat("░", gaugeCells-filled))
+	bar := ui.RateGaugeFillStyle.Render(strings.Repeat(gaugeFillGlyph, filled)) +
+		ui.RateGaugeTrackStyle.Render(strings.Repeat(gaugeTrackGlyph, gaugeCells-filled))
 	return ui.GithubStyle.Render("GitHub API Usage ") +
 		ui.RateBracketStyle.Render("[") + bar + ui.RateBracketStyle.Render("]") +
 		" " + nums + "  " + keyHint("L") + ui.GithubStyle.Render(" details")
@@ -212,11 +222,12 @@ func gaugeFilled(used, limit int) int {
 	if filled < 1 {
 		filled = 1
 	}
-	if used < limit && filled > gaugeCells-1 {
-		filled = gaugeCells - 1
+	maxFill := gaugeCells
+	if used < limit {
+		maxFill = gaugeCells - 1
 	}
-	if filled > gaugeCells {
-		filled = gaugeCells
+	if filled > maxFill {
+		filled = maxFill
 	}
 	return filled
 }

@@ -2,6 +2,8 @@ package model
 
 import (
 	"errors"
+	"os"
+	"os/exec"
 	"regexp"
 	"slices"
 	"strings"
@@ -110,10 +112,18 @@ func TestCleanTerminalOutput(t *testing.T) {
 	}
 }
 
-func TestColorizeHelp(t *testing.T) {
-	// Force truecolor so styled tokens actually emit ANSI escapes; otherwise
-	// lipgloss strips color under a non-TTY test run and hides the bug.
+// forceColorProfile forces truecolor so lipgloss actually emits ANSI escapes
+// (a non-TTY test run strips them and hides regressions), restoring the
+// previous profile on cleanup so the global doesn't leak into later tests.
+func forceColorProfile(t *testing.T) {
+	t.Helper()
+	old := lipgloss.ColorProfile()
 	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(old) })
+}
+
+func TestColorizeHelp(t *testing.T) {
+	forceColorProfile(t)
 
 	// A dash inside a word (e.g. "golangci-lint") must not be styled as a
 	// short flag, which would inject an ANSI escape mid-word.
@@ -644,20 +654,20 @@ func TestRenderRateGauge(t *testing.T) {
 		if !strings.Contains(got, "60/60") {
 			t.Errorf("exhausted gauge = %q, want 60/60", got)
 		}
-		// Strip ANSI (a prior test globally forces truecolor) before checking the
-		// bar is a full gaugeCells-wide █ block between the brackets.
+		// Strip ANSI before checking the bar is a full gaugeCells-wide fill
+		// block between the brackets.
 		plain := ansiCSI.ReplaceAllString(got, "")
-		if !strings.Contains(plain, "["+strings.Repeat("█", gaugeCells)+"]") {
+		if !strings.Contains(plain, "["+strings.Repeat(gaugeFillGlyph, gaugeCells)+"]") {
 			t.Errorf("exhausted gauge = %q, want a full %d-cell bar", plain, gaugeCells)
 		}
 	})
 
-	t.Run("partial fill draws █ fill and ░ track glyphs", func(t *testing.T) {
+	t.Run("partial fill draws fill and track glyphs", func(t *testing.T) {
 		// 30/60 → exactly half the bar; glyphs survive ANSI stripping, so the
 		// bar stays visible on degraded color profiles.
 		m := Model{rate: version.RateLimit{Known: true, Remaining: 30, Limit: 60}}
 		plain := ansiCSI.ReplaceAllString(m.renderRateGauge(false), "")
-		want := "[" + strings.Repeat("█", gaugeCells/2) + strings.Repeat("░", gaugeCells/2) + "]"
+		want := "[" + strings.Repeat(gaugeFillGlyph, gaugeCells/2) + strings.Repeat(gaugeTrackGlyph, gaugeCells/2) + "]"
 		if !strings.Contains(plain, want) {
 			t.Errorf("half-used gauge = %q, want bar %q", plain, want)
 		}
@@ -677,36 +687,59 @@ func TestRenderRateGauge(t *testing.T) {
 // RateUsageNumStyle), so a fill regression — colorless, merged into the track,
 // or back to a painted background — would be masked by them.
 func TestRenderRateGaugeColors(t *testing.T) {
-	// Force truecolor so lipgloss actually emits ANSI sequences; a non-TTY test
-	// run would strip them and hide regressions.
-	old := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(old) })
+	forceColorProfile(t)
 
 	// Expected sequences come from termenv (its hex→RGB conversion rounds, so
 	// literal palette bytes would be brittle): "38;2;r;g;b" foreground form.
 	fgSeq := func(c lipgloss.Color) string {
 		return termenv.TrueColor.Color(string(c)).Sequence(false)
 	}
+	fillSeq, trackSeq := fgSeq(ui.ColorOrange), fgSeq(ui.ColorOrangeDim)
 
-	fill := ui.RateGaugeFillStyle.Render("█")
-	if want := fgSeq(ui.ColorOrange); !strings.Contains(fill, want) {
-		t.Errorf("fill = %q, missing foreground sequence %q", fill, want)
+	fill := ui.RateGaugeFillStyle.Render(gaugeFillGlyph)
+	if !strings.Contains(fill, fillSeq) {
+		t.Errorf("fill = %q, missing foreground sequence %q", fill, fillSeq)
 	}
 	if strings.Contains(fill, "48;2;") {
 		t.Errorf("fill = %q, must color the glyph, not paint a background", fill)
 	}
 
-	track := ui.RateGaugeTrackStyle.Render("░")
-	if want := fgSeq(ui.ColorOrangeDim); !strings.Contains(track, want) {
-		t.Errorf("track = %q, missing foreground sequence %q", track, want)
+	track := ui.RateGaugeTrackStyle.Render(gaugeTrackGlyph)
+	if !strings.Contains(track, trackSeq) {
+		t.Errorf("track = %q, missing foreground sequence %q", track, trackSeq)
 	}
 	if strings.Contains(track, "48;2;") {
 		t.Errorf("track = %q, must color the glyph, not paint a background", track)
 	}
 
-	if fgSeq(ui.ColorOrange) == fgSeq(ui.ColorOrangeDim) {
+	if fillSeq == trackSeq {
 		t.Error("fill and track resolve to the same color — the empty track would be indistinguishable")
+	}
+}
+
+// TestGaugeGlyphWidthsStable pins that the bar glyphs are not
+// East-Asian-Ambiguous: lipgloss.Width must report one cell per glyph even
+// under RUNEWIDTH_EASTASIAN=1, or renderHintsBar's gap math would inflate and
+// wrongly downgrade or mis-pad the gauge (a full block █ measures as two cells
+// there). The width tables read the env var once at package init, so the
+// ambiguous-width variant re-runs this test in a child process.
+func TestGaugeGlyphWidthsStable(t *testing.T) {
+	for _, g := range []string{gaugeFillGlyph, gaugeTrackGlyph} {
+		if w := lipgloss.Width(g); w != 1 {
+			t.Errorf("glyph %q width = %d, want 1", g, w)
+		}
+	}
+	if os.Getenv("KEYS_WIDTH_CHECK_CHILD") == "1" {
+		return
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	cmd := exec.Command(exe, "-test.run", "^TestGaugeGlyphWidthsStable$")
+	cmd.Env = append(os.Environ(), "KEYS_WIDTH_CHECK_CHILD=1", "RUNEWIDTH_EASTASIAN=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Errorf("glyph widths change under RUNEWIDTH_EASTASIAN=1:\n%s", out)
 	}
 }
 
@@ -1465,9 +1498,7 @@ func hasItalic(s string) bool {
 // overlay (in particular the hint line) may render in italics, in either the
 // read-only view or the token-input sub-state.
 func TestRenderAPIStatusHintsNotItalic(t *testing.T) {
-	// Force a color profile so lipgloss actually emits ANSI attributes;
-	// otherwise a non-TTY test run strips them and hides regressions.
-	lipgloss.SetColorProfile(termenv.TrueColor)
+	forceColorProfile(t)
 	t.Setenv("GITHUB_TOKEN", "ghp_1234567890abcdef3f2a")
 
 	for _, mode := range []inputMode{modeAPIStatus, modeTokenInput} {

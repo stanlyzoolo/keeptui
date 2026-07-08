@@ -66,9 +66,9 @@
 - Modify: `internal/model/render.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] add min-1-cell clamp (`used > 0` → `filled >= 1`) and not-full clamp (`used < limit` → `filled <= gaugeCells-1`) to `gaugeFilled` in `internal/model/render.go`; update its doc comment
-- [ ] extend `TestGaugeFilled` table: `{1, 5000, 1}` and `{1, 60, 1}` (min cell), `{4999, 5000, gaugeCells - 1}` and `{59, 60, gaugeCells - 1}` (not full below limit), keep `{60, 60, gaugeCells}` and `{99, 60, gaugeCells}` (exhausted/over-limit stay full), keep `{0, 60, 0}` and the 25% parity check
-- [ ] run `go test -race ./internal/model/` — must pass before task 2
+- [x] add min-1-cell clamp (`used > 0` → `filled >= 1`) and not-full clamp (`used < limit` → `filled <= gaugeCells-1`) to `gaugeFilled` in `internal/model/render.go`; update its doc comment
+- [x] extend `TestGaugeFilled` table: `{1, 5000, 1}` and `{1, 60, 1}` (min cell), `{4999, 5000, gaugeCells - 1}` and `{59, 60, gaugeCells - 1}` (not full below limit), keep `{60, 60, gaugeCells}` and `{99, 60, gaugeCells}` (exhausted/over-limit stay full), keep `{0, 60, 0}` and the 25% parity check
+- [x] run `go test -race ./internal/model/` — must pass before task 2
 
 ### Task 2: Glyph-based bar rendering with foreground colors
 
@@ -77,24 +77,26 @@
 - Modify: `internal/model/render.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] switch `RateGaugeFillStyle`/`RateGaugeTrackStyle` in `internal/ui/styles.go` from `Background` to `Foreground` (same `ColorOrange`/`ColorOrangeDim`); update the comment above them
-- [ ] build the bar in `renderRateGauge` (`internal/model/render.go`) from `█` (fill) and `░` (track) glyphs instead of background-painted spaces; update the doc comment
-- [ ] update `TestRenderRateGauge`: exhausted case asserts `"[" + strings.Repeat("█", gaugeCells) + "]"` in the stripped output; add a partial-fill case (e.g. `used=30, limit=60` → 6×`█` + 6×`░` between brackets)
-- [ ] add `TestRenderRateGaugeColors`: force `lipgloss.SetColorProfile(termenv.TrueColor)` with save/restore via `t.Cleanup` (pattern from `internal/ui/overlay_test.go:79`), then assert on the *isolated* styles — `ui.RateGaugeFillStyle.Render("█")` contains foreground `38;2;229;160;64` and does NOT contain background `48;2;`, `ui.RateGaugeTrackStyle.Render("░")` contains foreground `38;2;122;90;30`; do not assert fill color on the full gauge string (brackets and the used/limit number also emit foreground `#E5A040` via `RateBracketStyle`/`RateUsageNumStyle` and would mask a fill regression)
-- [ ] check `TestRenderStatusBarGauge` and the `renderHintsBar` width test still pass unmodified (glyphs are single-cell; if a stripped-content assertion matched literal spaces, update it to glyphs)
-- [ ] run `go test -race ./internal/model/ ./internal/ui/` — must pass before task 3
+- [x] switch `RateGaugeFillStyle`/`RateGaugeTrackStyle` in `internal/ui/styles.go` from `Background` to `Foreground` (same `ColorOrange`/`ColorOrangeDim`); update the comment above them
+- [x] build the bar in `renderRateGauge` (`internal/model/render.go`) from `█` (fill) and `░` (track) glyphs instead of background-painted spaces; update the doc comment
+- [x] update `TestRenderRateGauge`: exhausted case asserts `"[" + strings.Repeat("█", gaugeCells) + "]"` in the stripped output; add a partial-fill case (e.g. `used=30, limit=60` → 6×`█` + 6×`░` between brackets)
+- [x] add `TestRenderRateGaugeColors`: force `lipgloss.SetColorProfile(termenv.TrueColor)` with save/restore via `t.Cleanup` (pattern from `internal/ui/overlay_test.go:79`), then assert on the *isolated* styles — `ui.RateGaugeFillStyle.Render("█")` contains foreground `38;2;229;160;64` and does NOT contain background `48;2;`, `ui.RateGaugeTrackStyle.Render("░")` contains foreground `38;2;122;90;30`; do not assert fill color on the full gauge string (brackets and the used/limit number also emit foreground `#E5A040` via `RateBracketStyle`/`RateUsageNumStyle` and would mask a fill regression)
+  - ⚠️ deviation: literal `38;2;…` byte assertions proved brittle — termenv's hex→RGB conversion rounds (`#7A5A1E` emits `38;2;121;89;30`, not `…122;90;30`). The test derives expected sequences via `termenv.TrueColor.Color(string(ui.ColorOrangeDim)).Sequence(false)` instead, which also pins fill=ColorOrange / track=ColorOrangeDim directly, plus asserts fill ≠ track.
+- [x] check `TestRenderStatusBarGauge` and the `renderHintsBar` width test still pass unmodified (glyphs are single-cell; if a stripped-content assertion matched literal spaces, update it to glyphs)
+- [x] run `go test -race ./internal/model/ ./internal/ui/` — must pass before task 3
 
 ### Task 3: Verify acceptance criteria
 
-- [ ] verify all requirements from Overview are implemented: glyph bar, min-1-cell fill, full-bar-only-at-exhaustion, truecolor color-distinction test
-- [ ] verify edge cases: `used=0` → all-track bar; `Known=false` → no gauge; compact form (`GH x/y [L]`) unchanged; narrow-terminal downgrade unchanged
-- [ ] run full test suite: `go test -race ./...`
-- [ ] run `go vet ./...` and `golangci-lint run`
+- [x] verify all requirements from Overview are implemented: glyph bar, min-1-cell fill, full-bar-only-at-exhaustion, truecolor color-distinction test
+- [x] verify edge cases: `used=0` → all-track bar; `Known=false` → no gauge; compact form (`GH x/y [L]`) unchanged; narrow-terminal downgrade unchanged
+- [x] run full test suite: `go test -race ./...`
+- [x] run `go vet ./...` and `golangci-lint run`
+  - ⚠️ local `golangci-lint` binary is built with go1.24 and refuses the project's go1.25 target ("can't load config") — lint will be verified by CI, which installs a matching version. `go vet` passed locally.
 
 ### Task 4: [Final] Update documentation
 
-- [ ] update the gauge description in `CLAUDE.md` (status-bar section: "fixed 12-cell yellow fill" → glyph bar `█`/`░`, min-1-cell behavior, full bar = exhausted)
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update the gauge description in `CLAUDE.md` (status-bar section: "fixed 12-cell yellow fill" → glyph bar `█`/`░`, min-1-cell behavior, full bar = exhausted)
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 *Items requiring manual intervention — informational only*

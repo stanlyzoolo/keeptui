@@ -159,9 +159,11 @@ const gaugeCells = 12
 // renderRateGauge builds the right-corner "GitHub API Usage" indicator for the
 // current rate snapshot, or "" when there is no known snapshot. It shows
 // used/limit (used = Limit-Remaining), matching the API-status overlay. The bar
-// is constant yellow at every pressure level — exhaustion (used==limit) simply
-// renders a full bar; the ⚠/✕ alarm lives only in the [L] overlay. compact drops
-// the label and bar, keeping "GH used/limit [L]" for narrow terminals.
+// is █ fill / ░ track glyphs (visible even if ANSI is stripped; any usage shows
+// at least one █ via gaugeFilled) and constant yellow at every pressure level —
+// exhaustion (used==limit) simply renders a full bar; the ⚠/✕ alarm lives only
+// in the [L] overlay. compact drops the label and bar, keeping "GH used/limit
+// [L]" for narrow terminals.
 func (m Model) renderRateGauge(compact bool) string {
 	r := m.rate
 	if !r.Known || r.Limit <= 0 {
@@ -173,8 +175,8 @@ func (m Model) renderRateGauge(compact bool) string {
 		return ui.GithubStyle.Render("GH ") + nums + " " + keyHint("L")
 	}
 	filled := gaugeFilled(used, r.Limit)
-	bar := ui.RateGaugeFillStyle.Render(strings.Repeat(" ", filled)) +
-		ui.RateGaugeTrackStyle.Render(strings.Repeat(" ", gaugeCells-filled))
+	bar := ui.RateGaugeFillStyle.Render(strings.Repeat("█", filled)) +
+		ui.RateGaugeTrackStyle.Render(strings.Repeat("░", gaugeCells-filled))
 	return ui.GithubStyle.Render("GitHub API Usage ") +
 		ui.RateBracketStyle.Render("[") + bar + ui.RateBracketStyle.Render("]") +
 		" " + nums + "  " + keyHint("L") + ui.GithubStyle.Render(" details")
@@ -197,13 +199,22 @@ func usedOf(r version.RateLimit) int {
 
 // gaugeFilled maps used/limit onto the fixed gaugeCells-wide bar, rounding to the
 // nearest cell with integer math (no math import) and clamping to [0,gaugeCells].
-// The result depends only on the used ratio, so limit 60 and limit 5000 fill
-// identically at the same percentage.
+// The rounded ratio is then clamped into a truthful range: any usage shows at
+// least one cell (with limit 5000 the first cell would otherwise need ~209
+// requests), and only exhaustion renders a full bar (used < limit caps at
+// gaugeCells-1). Outside those edge bands the fill tracks the used ratio only,
+// so limit 60 and limit 5000 fill identically at the same percentage.
 func gaugeFilled(used, limit int) int {
 	if limit <= 0 || used <= 0 {
 		return 0
 	}
 	filled := (used*gaugeCells + limit/2) / limit
+	if filled < 1 {
+		filled = 1
+	}
+	if used < limit && filled > gaugeCells-1 {
+		filled = gaugeCells - 1
+	}
 	if filled > gaugeCells {
 		filled = gaugeCells
 	}

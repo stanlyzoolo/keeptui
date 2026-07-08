@@ -15,6 +15,7 @@ import (
 	"github.com/muesli/termenv"
 
 	"github.com/lepeshko/keys/internal/loader"
+	"github.com/lepeshko/keys/internal/ui"
 	"github.com/lepeshko/keys/internal/version"
 )
 
@@ -597,9 +598,13 @@ func TestGaugeFilled(t *testing.T) {
 		{0, 60, 0},
 		{60, 60, gaugeCells}, // exhausted → full bar
 		{30, 60, gaugeCells / 2},
-		{-5, 60, 0},          // never negative
-		{99, 60, gaugeCells}, // clamped
-		{5, 0, 0},            // no divide-by-zero
+		{-5, 60, 0},                  // never negative
+		{99, 60, gaugeCells},         // over-limit stays full
+		{5, 0, 0},                    // no divide-by-zero
+		{1, 60, 1},                   // any usage shows at least one cell…
+		{1, 5000, 1},                 // …even when the ratio rounds to zero
+		{59, 60, gaugeCells - 1},     // full bar means exhaustion only…
+		{4999, 5000, gaugeCells - 1}, // …however close the ratio rounds to it
 	}
 	for _, tt := range tests {
 		if got := gaugeFilled(tt.used, tt.limit); got != tt.want {
@@ -640,10 +645,21 @@ func TestRenderRateGauge(t *testing.T) {
 			t.Errorf("exhausted gauge = %q, want 60/60", got)
 		}
 		// Strip ANSI (a prior test globally forces truecolor) before checking the
-		// bar is a full gaugeCells-wide block between the brackets.
+		// bar is a full gaugeCells-wide █ block between the brackets.
 		plain := ansiCSI.ReplaceAllString(got, "")
-		if !strings.Contains(plain, "["+strings.Repeat(" ", gaugeCells)+"]") {
+		if !strings.Contains(plain, "["+strings.Repeat("█", gaugeCells)+"]") {
 			t.Errorf("exhausted gauge = %q, want a full %d-cell bar", plain, gaugeCells)
+		}
+	})
+
+	t.Run("partial fill draws █ fill and ░ track glyphs", func(t *testing.T) {
+		// 30/60 → exactly half the bar; glyphs survive ANSI stripping, so the
+		// bar stays visible on degraded color profiles.
+		m := Model{rate: version.RateLimit{Known: true, Remaining: 30, Limit: 60}}
+		plain := ansiCSI.ReplaceAllString(m.renderRateGauge(false), "")
+		want := "[" + strings.Repeat("█", gaugeCells/2) + strings.Repeat("░", gaugeCells/2) + "]"
+		if !strings.Contains(plain, want) {
+			t.Errorf("half-used gauge = %q, want bar %q", plain, want)
 		}
 	})
 
@@ -653,6 +669,45 @@ func TestRenderRateGauge(t *testing.T) {
 			t.Errorf("unknown gauge = %q, want empty", got)
 		}
 	})
+}
+
+// TestRenderRateGaugeColors pins the gauge's fill/track color distinction. It
+// asserts the isolated styles, not the full gauge string: the brackets and the
+// used/limit number also emit foreground ColorOrange (RateBracketStyle /
+// RateUsageNumStyle), so a fill regression — colorless, merged into the track,
+// or back to a painted background — would be masked by them.
+func TestRenderRateGaugeColors(t *testing.T) {
+	// Force truecolor so lipgloss actually emits ANSI sequences; a non-TTY test
+	// run would strip them and hide regressions.
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(old) })
+
+	// Expected sequences come from termenv (its hex→RGB conversion rounds, so
+	// literal palette bytes would be brittle): "38;2;r;g;b" foreground form.
+	fgSeq := func(c lipgloss.Color) string {
+		return termenv.TrueColor.Color(string(c)).Sequence(false)
+	}
+
+	fill := ui.RateGaugeFillStyle.Render("█")
+	if want := fgSeq(ui.ColorOrange); !strings.Contains(fill, want) {
+		t.Errorf("fill = %q, missing foreground sequence %q", fill, want)
+	}
+	if strings.Contains(fill, "48;2;") {
+		t.Errorf("fill = %q, must color the glyph, not paint a background", fill)
+	}
+
+	track := ui.RateGaugeTrackStyle.Render("░")
+	if want := fgSeq(ui.ColorOrangeDim); !strings.Contains(track, want) {
+		t.Errorf("track = %q, missing foreground sequence %q", track, want)
+	}
+	if strings.Contains(track, "48;2;") {
+		t.Errorf("track = %q, must color the glyph, not paint a background", track)
+	}
+
+	if fgSeq(ui.ColorOrange) == fgSeq(ui.ColorOrangeDim) {
+		t.Error("fill and track resolve to the same color — the empty track would be indistinguishable")
+	}
 }
 
 func TestListNavigationWraps(t *testing.T) {

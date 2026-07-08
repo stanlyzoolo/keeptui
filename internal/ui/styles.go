@@ -50,12 +50,14 @@ var (
 			Foreground(ColorMuted)
 
 	// Rate-usage gauge (status-bar right corner): yellow brackets + used-count,
-	// a filled track in the same yellow, and a darker-yellow empty track. Colors
-	// are constant — the bar never recolors on rate pressure.
+	// yellow █ fill glyphs and darker-yellow ░ track glyphs. The bar is drawn
+	// with foreground-colored glyphs, not painted backgrounds, so it stays
+	// visible when a terminal's color profile degrades and ANSI is stripped.
+	// Colors are constant — the bar never recolors on rate pressure.
 	RateBracketStyle    = lipgloss.NewStyle().Foreground(ColorOrange)
 	RateUsageNumStyle   = lipgloss.NewStyle().Foreground(ColorOrange)
-	RateGaugeFillStyle  = lipgloss.NewStyle().Background(ColorOrange)
-	RateGaugeTrackStyle = lipgloss.NewStyle().Background(ColorOrangeDim)
+	RateGaugeFillStyle  = lipgloss.NewStyle().Foreground(ColorOrange)
+	RateGaugeTrackStyle = lipgloss.NewStyle().Foreground(ColorOrangeDim)
 
 	// WarnStyle / DangerStyle flag GitHub API rate-limit pressure in the
 	// status bar and API-status overlay.

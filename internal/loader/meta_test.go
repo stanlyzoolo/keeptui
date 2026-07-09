@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -167,14 +168,95 @@ func TestRemoveMeta(t *testing.T) {
 	}
 }
 
+func TestLoadMetaMigratesRetiredStatuses(t *testing.T) {
+	dir := useTempConfigDir(t)
+
+	yaml := `- name: old-forgotten
+  status: forgotten
+- name: old-archived
+  status: archived
+- name: still-active
+  status: active
+- name: still-trying
+  status: trying
+- name: oddball
+  status: bogus
+`
+	path := filepath.Join(dir, "keys", "meta.yaml")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(yaml), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := LoadMeta()
+	if err != nil {
+		t.Fatalf("LoadMeta: %v", err)
+	}
+	want := map[string]Status{
+		"old-forgotten": StatusInactive,
+		"old-archived":  StatusInactive,
+		"still-active":  StatusActive,
+		"still-trying":  StatusTrying,
+		"oddball":       Status("bogus"), // unknown values pass through
+	}
+	if len(got) != len(want) {
+		t.Fatalf("LoadMeta returned %d entries, want %d", len(got), len(want))
+	}
+	for _, m := range got {
+		if m.Status != want[m.Name] {
+			t.Errorf("%s: status = %q, want %q", m.Name, m.Status, want[m.Name])
+		}
+	}
+}
+
+func TestLoadMetaMigrationRoundTrip(t *testing.T) {
+	dir := useTempConfigDir(t)
+
+	path := filepath.Join(dir, "keys", "meta.yaml")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("- name: a\n  status: forgotten\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	meta, err := LoadMeta()
+	if err != nil {
+		t.Fatalf("LoadMeta: %v", err)
+	}
+	if meta[0].Status != StatusInactive {
+		t.Fatalf("in-memory status = %q, want %q", meta[0].Status, StatusInactive)
+	}
+
+	if err := SaveMeta(meta); err != nil {
+		t.Fatalf("SaveMeta: %v", err)
+	}
+	onDisk, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(onDisk), "inactive") || strings.Contains(string(onDisk), "forgotten") {
+		t.Errorf("on-disk yaml after save = %q, want inactive persisted and forgotten gone", onDisk)
+	}
+
+	reloaded, err := LoadMeta()
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if reloaded[0].Status != StatusInactive {
+		t.Errorf("reloaded status = %q, want %q", reloaded[0].Status, StatusInactive)
+	}
+}
+
 func TestNextStatus(t *testing.T) {
 	tests := []struct {
 		in, want Status
 	}{
 		{StatusActive, StatusTrying},
-		{StatusTrying, StatusForgotten},
-		{StatusForgotten, StatusArchived},
-		{StatusArchived, StatusActive}, // cycle wraps
+		{StatusTrying, StatusInactive},
+		{StatusInactive, StatusActive}, // cycle wraps
 		{Status("bogus"), StatusActive},
 		{Status(""), StatusActive},
 	}

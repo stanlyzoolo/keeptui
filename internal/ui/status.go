@@ -11,10 +11,8 @@ func StatusStyle(s loader.Status) lipgloss.Style {
 		return StatusStyleActive
 	case loader.StatusTrying:
 		return StatusStyleTrying
-	case loader.StatusForgotten:
-		return StatusStyleForgotten
-	case loader.StatusArchived:
-		return StatusStyleArchived
+	case loader.StatusInactive:
+		return StatusStyleInactive
 	default:
 		return StatusStyleTrying
 	}

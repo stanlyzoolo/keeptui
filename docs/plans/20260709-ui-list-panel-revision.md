@@ -77,13 +77,13 @@ UI-ревизия TUI по итогам brainstorm-сессии (кадры сн
 - Modify: `internal/loader/meta_test.go`
 - Modify: `internal/model/render_test.go` (только компиляционный фикс цикла статусов)
 
-- [ ] заменить `StatusForgotten`/`StatusArchived` на `StatusInactive = "inactive"` в константах, `StatusSymbol` (`✕`), `StatusCycle` (active → trying → inactive)
-- [ ] добавить нормализацию в `LoadMeta` после unmarshal: `forgotten`→`inactive`, `archived`→`inactive`
-- [ ] обновить `TestNextStatus` под новый цикл (включая фолбэк неизвестного статуса → active)
-- [ ] обновить `TestUpdateBriefStatusCycle` (`render_test.go:988–992`): `want`-срез перечисляет `StatusForgotten`/`StatusArchived` — без правки тест-бинарь пакета `model` не соберётся и гейт не пройдёт
-- [ ] написать тест миграции: yaml с `status: forgotten` и `status: archived` загружается как `inactive`; `active`/`trying` не изменяются
-- [ ] написать round-trip тест: load (`forgotten`) → `SaveMeta` → reload → на диске и в памяти `inactive`
-- [ ] прогнать `go test -race ./...` — компиляция сломается и в `ui/status.go`/`ui/styles.go`; допустимо чинить их минимальной правкой здесь же (полноценные стили — Task 2), тесты должны пройти до перехода дальше
+- [x] заменить `StatusForgotten`/`StatusArchived` на `StatusInactive = "inactive"` в константах, `StatusSymbol` (`✕`), `StatusCycle` (active → trying → inactive)
+- [x] добавить нормализацию в `LoadMeta` после unmarshal: `forgotten`→`inactive`, `archived`→`inactive`
+- [x] обновить `TestNextStatus` под новый цикл (включая фолбэк неизвестного статуса → active)
+- [x] обновить `TestUpdateBriefStatusCycle` (`render_test.go:988–992`): `want`-срез перечисляет `StatusForgotten`/`StatusArchived` — без правки тест-бинарь пакета `model` не соберётся и гейт не пройдёт
+- [x] написать тест миграции: yaml с `status: forgotten` и `status: archived` загружается как `inactive`; `active`/`trying` не изменяются
+- [x] написать round-trip тест: load (`forgotten`) → `SaveMeta` → reload → на диске и в памяти `inactive`
+- [x] прогнать `go test -race ./...` — компиляция сломается и в `ui/status.go`/`ui/styles.go`; допустимо чинить их минимальной правкой здесь же (полноценные стили — Task 2), тесты должны пройти до перехода дальше (ui/styles.go и ui/status.go починены переименованием forgotten/archived → inactive; golangci-lint в окружении не запускается — несовпадение версий Go, не связано с изменениями)
 
 ### Task 2: Стили ui — inactive, dim-выделение, кромка
 

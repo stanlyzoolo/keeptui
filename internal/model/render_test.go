@@ -987,8 +987,7 @@ func TestUpdateBriefStatusCycle(t *testing.T) {
 
 		want := []loader.Status{
 			loader.StatusTrying,
-			loader.StatusForgotten,
-			loader.StatusArchived,
+			loader.StatusInactive,
 			loader.StatusActive,
 		}
 

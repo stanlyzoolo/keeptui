@@ -74,10 +74,9 @@ var (
 				Bold(true)
 
 	// My Tools status colors
-	StatusColorActive    = ColorGreen
-	StatusColorTrying    = ColorOrange
-	StatusColorForgotten = ColorMuted
-	StatusColorArchived  = ColorBorder
+	StatusColorActive   = ColorGreen
+	StatusColorTrying   = ColorOrange
+	StatusColorInactive = ColorMuted
 
 	StatusStyleActive = lipgloss.NewStyle().
 				Foreground(StatusColorActive).
@@ -87,11 +86,8 @@ var (
 				Foreground(StatusColorTrying).
 				Bold(true)
 
-	StatusStyleForgotten = lipgloss.NewStyle().
-				Foreground(StatusColorForgotten)
-
-	StatusStyleArchived = lipgloss.NewStyle().
-				Foreground(StatusColorArchived)
+	StatusStyleInactive = lipgloss.NewStyle().
+				Foreground(StatusColorInactive)
 
 	HelpFlagStyle = lipgloss.NewStyle().
 			Foreground(ColorPrimary)

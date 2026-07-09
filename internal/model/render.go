@@ -392,15 +392,24 @@ func (m Model) renderLeftContent() string {
 			updateMark = " " + ui.UpdateAvailableStyle.Render("↑")
 		}
 
-		// The marker stays visible in modeSearch: the cursor there is
-		// user-controlled (arrows move the highlight through the matches).
-		isSelected := i == m.metaSelected && m.focus == focusTools
-		if isSelected {
-			circle := ui.SelectionBarStyle.Render("●")
-			sb.WriteString(circle + " " + name + updateMark + "\n")
-		} else {
-			sb.WriteString("  " + name + updateMark + "\n")
+		// Marker column (width 1): ▸ on the selected row — peach while the
+		// tools panel is focused, dim otherwise so the selection never
+		// disappears when focus moves to brief/help. Non-selected rows carry
+		// a status edge ▎ when the tool deviates from active; the ▸ takes
+		// priority over the edge on the selected row. The marker stays
+		// visible in modeSearch too: the cursor there is user-controlled
+		// (arrows move the highlight through the matches).
+		var mark string
+		switch {
+		case i == m.metaSelected && m.focus == focusTools:
+			mark = ui.SelectionBarStyle.Render("▸")
+			name = ui.SelectedNameStyle.Render(name)
+		case i == m.metaSelected:
+			mark = ui.SelectionBarDimStyle.Render("▸")
+		default:
+			mark = statusEdge(mt.Status)
 		}
+		sb.WriteString(mark + " " + name + updateMark + "\n")
 	}
 
 	if len(filtered) == 0 {
@@ -412,6 +421,19 @@ func (m Model) renderLeftContent() string {
 	}
 
 	return sb.String()
+}
+
+// statusEdge marks non-active tools with a colored left edge in the marker
+// column; active is the norm and gets a plain space.
+func statusEdge(s loader.Status) string {
+	switch s {
+	case loader.StatusTrying:
+		return ui.StatusStyleTrying.Render("▎")
+	case loader.StatusInactive:
+		return ui.StatusStyleInactive.Render("▎")
+	default:
+		return " "
+	}
 }
 
 // syncToolsViewport adjusts YOffset so that metaSelected is visible.

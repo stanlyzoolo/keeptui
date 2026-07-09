@@ -103,11 +103,11 @@ UI-ревизия TUI по итогам brainstorm-сессии (кадры сн
 - Modify: `internal/model/render.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] в `renderLeftContent` заменить `●` на `▸` и убрать `&& m.focus == focusTools`: маркер персиковый при `focusTools`, dim иначе; имя выбранной строки жирным только при `focusTools`
-- [ ] колонка маркера: `▸` у выбранной, иначе `▎` в цвете статуса у trying/inactive, иначе пробел
-- [ ] проверить, что `maxName`/ширина строки не поехали (глифы одноколоночные)
-- [ ] тесты: маркер присутствует при фокусе на brief/help (dim); `▸` у выбранной строки вытесняет её кромку; `▎` у не-active строк; active-строки без кромки
-- [ ] прогнать `go test -race ./...` — must pass before task 4
+- [x] в `renderLeftContent` заменить `●` на `▸` и убрать `&& m.focus == focusTools`: маркер персиковый при `focusTools`, dim иначе; имя выбранной строки жирным только при `focusTools`
+- [x] колонка маркера: `▸` у выбранной, иначе `▎` в цвете статуса у trying/inactive, иначе пробел (хелпер `statusEdge` в render.go)
+- [x] проверить, что `maxName`/ширина строки не поехали (глифы одноколоночные) — тест `TestRenderLeftContentRowWidth` фиксирует видимую ширину строк
+- [x] тесты: маркер присутствует при фокусе на brief/help (dim); `▸` у выбранной строки вытесняет её кромку; `▎` у не-active строк; active-строки без кромки (`TestRenderLeftContentMarkerSurvivesFocus`, `TestRenderLeftContentStatusEdge`; существующий `TestRenderLeftContentSearchMarker` переведён на `▸`)
+- [x] прогнать `go test -race ./...` — must pass before task 4
 
 ### Task 4: Карточка — installed: и подсветка latest:
 

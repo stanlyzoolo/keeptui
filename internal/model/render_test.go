@@ -297,18 +297,100 @@ func TestRenderLeftContentSearchMarker(t *testing.T) {
 	if len(lines) < 2 {
 		t.Fatalf("renderLeftContent = %q, want at least 2 rows", lines)
 	}
-	if !strings.Contains(lines[0], "●") || !strings.Contains(lines[0], "git") {
+	if !strings.Contains(lines[0], "▸") || !strings.Contains(lines[0], "git") {
 		t.Errorf("first match row = %q, want marker on git", lines[0])
 	}
 
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m = updated.(Model)
 	lines = strings.Split(m.renderLeftContent(), "\n")
-	if strings.Contains(lines[0], "●") {
+	if strings.Contains(lines[0], "▸") {
 		t.Errorf("first row = %q, marker should move away after down", lines[0])
 	}
-	if !strings.Contains(lines[1], "●") || !strings.Contains(lines[1], "ripgrep") {
+	if !strings.Contains(lines[1], "▸") || !strings.Contains(lines[1], "ripgrep") {
 		t.Errorf("second match row = %q, want marker on ripgrep", lines[1])
+	}
+}
+
+// TestRenderLeftContentMarkerSurvivesFocus verifies the ▸ marker on the
+// selected row does not disappear when focus moves to the brief/help panels
+// (it renders dim there, but stays in the output).
+func TestRenderLeftContentMarkerSurvivesFocus(t *testing.T) {
+	m := New([]loader.ToolMeta{
+		{Name: "fzf", Status: loader.StatusActive},
+		{Name: "git", Status: loader.StatusActive},
+	})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(Model)
+	m.metaSelected = 1
+
+	for _, f := range []int{focusTools, focusBrief, focusHelp} {
+		m.focus = f
+		lines := strings.Split(stripANSI(m.renderLeftContent()), "\n")
+		if !strings.HasPrefix(lines[1], "▸ git") {
+			t.Errorf("focus %v: selected row = %q, want ▸ marker on git", f, lines[1])
+		}
+		if strings.Contains(lines[0], "▸") {
+			t.Errorf("focus %v: unselected row = %q, should carry no marker", f, lines[0])
+		}
+	}
+}
+
+// TestRenderLeftContentStatusEdge verifies the marker column: ▎ edge on
+// trying/inactive rows, plain space on active rows, and the ▸ marker
+// displacing the edge on the selected row.
+func TestRenderLeftContentStatusEdge(t *testing.T) {
+	m := New([]loader.ToolMeta{
+		{Name: "fzf", Status: loader.StatusActive},
+		{Name: "git", Status: loader.StatusTrying},
+		{Name: "ripgrep", Status: loader.StatusInactive},
+	})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(Model)
+	m.focus = focusTools
+	m.metaSelected = 0
+
+	lines := strings.Split(stripANSI(m.renderLeftContent()), "\n")
+	if !strings.HasPrefix(lines[0], "▸ fzf") {
+		t.Errorf("selected active row = %q, want ▸ marker", lines[0])
+	}
+	if !strings.HasPrefix(lines[1], "▎ git") {
+		t.Errorf("trying row = %q, want ▎ edge", lines[1])
+	}
+	if !strings.HasPrefix(lines[2], "▎ ripgrep") {
+		t.Errorf("inactive row = %q, want ▎ edge", lines[2])
+	}
+
+	// The ▸ marker takes priority over the status edge on the selected row,
+	// and the active row it left behind gets a plain-space marker column.
+	m.metaSelected = 1
+	lines = strings.Split(stripANSI(m.renderLeftContent()), "\n")
+	if !strings.HasPrefix(lines[1], "▸ git") {
+		t.Errorf("selected trying row = %q, want ▸ to displace the edge", lines[1])
+	}
+	if !strings.HasPrefix(lines[0], "  fzf") {
+		t.Errorf("active row = %q, want plain space in the marker column", lines[0])
+	}
+}
+
+// TestRenderLeftContentRowWidth verifies the marker column glyphs are all
+// single-cell, so every row keeps the same visible width prefix (1 marker
+// cell + 1 space) regardless of selection or status.
+func TestRenderLeftContentRowWidth(t *testing.T) {
+	m := New([]loader.ToolMeta{
+		{Name: "aa", Status: loader.StatusActive},
+		{Name: "bb", Status: loader.StatusTrying},
+		{Name: "cc", Status: loader.StatusInactive},
+	})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(Model)
+	m.focus = focusTools
+	m.metaSelected = 0
+
+	for i, line := range strings.Split(strings.TrimRight(stripANSI(m.renderLeftContent()), "\n"), "\n") {
+		if w := lipgloss.Width(line); w != 4 { // marker + space + 2-rune name
+			t.Errorf("row %d = %q, visible width = %d, want 4", i, line, w)
+		}
 	}
 }
 

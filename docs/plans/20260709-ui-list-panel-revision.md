@@ -91,11 +91,11 @@ UI-ревизия TUI по итогам brainstorm-сессии (кадры сн
 - Modify: `internal/ui/styles.go`
 - Modify: `internal/ui/status.go`
 
-- [ ] `StatusColorInactive = ColorMuted`, `StatusStyleInactive`; удалить forgotten/archived стили и цвета
-- [ ] обновить switch в `ui/status.go` (`StatusInactive` → `StatusStyleInactive`); default-ветка остаётся `StatusStyleTrying` (как сейчас — «неизвестный статус выглядит как пробуемый»)
-- [ ] добавить `SelectionBarDimStyle` (приглушённый маркер при потере фокуса) и стиль жирного персикового имени выбранной строки
-- [ ] написать/обновить тесты на `StatusStyle` (все три статуса + default-ветка)
-- [ ] прогнать `go test -race ./...` — must pass before task 3
+- [x] `StatusColorInactive = ColorMuted`, `StatusStyleInactive`; удалить forgotten/archived стили и цвета (сделано минимальной правкой ещё в Task 1; остатков forgotten/archived в пакете нет)
+- [x] обновить switch в `ui/status.go` (`StatusInactive` → `StatusStyleInactive`); default-ветка остаётся `StatusStyleTrying` (как сейчас — «неизвестный статус выглядит как пробуемый»)
+- [x] добавить `SelectionBarDimStyle` (приглушённый маркер при потере фокуса) и стиль жирного персикового имени выбранной строки (`SelectedNameStyle`)
+- [x] написать/обновить тесты на `StatusStyle` (все три статуса + default-ветка) — новый `internal/ui/status_test.go`
+- [x] прогнать `go test -race ./...` — must pass before task 3
 
 ### Task 3: Список — маркер ▸, не исчезающий при смене фокуса, кромка ▎
 

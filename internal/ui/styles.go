@@ -26,9 +26,20 @@ var (
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(ColorPrimary)
 
-	// SelectionBarStyle renders the ● circle indicator on selected rows
+	// SelectionBarStyle renders the ▸ marker on the selected row while the
+	// tools panel is focused; SelectionBarDimStyle keeps the marker visible
+	// (but muted) when focus moves to the brief/help panels.
 	SelectionBarStyle = lipgloss.NewStyle().
 				Foreground(ColorPrimary)
+
+	SelectionBarDimStyle = lipgloss.NewStyle().
+				Foreground(ColorDim)
+
+	// SelectedNameStyle highlights the selected tool's name when the tools
+	// panel is focused.
+	SelectedNameStyle = lipgloss.NewStyle().
+				Foreground(ColorPrimary).
+				Bold(true)
 
 	DescStyle = lipgloss.NewStyle().
 			Foreground(ColorText)

@@ -394,6 +394,59 @@ func TestRenderLeftContentRowWidth(t *testing.T) {
 	}
 }
 
+// TestRenderHelpTitle verifies the help panel's top border carries the mode
+// title (--help / man) without changing the border's visible width, and that
+// the tools/brief panels stay untitled.
+func TestRenderHelpTitle(t *testing.T) {
+	m := New([]loader.ToolMeta{{Name: "fzf", Status: loader.StatusActive}})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	m = updated.(Model)
+
+	m.helpMode = helpModeHelp
+	top := stripANSI(strings.SplitN(m.renderHelp(), "\n", 2)[0])
+	if !strings.Contains(top, " --help ") {
+		t.Errorf("help-mode top border = %q, want --help title", top)
+	}
+
+	m.helpMode = helpModeMan
+	lines := strings.Split(m.renderHelp(), "\n")
+	topMan := stripANSI(lines[0])
+	if !strings.Contains(topMan, " man ") || strings.Contains(topMan, "help") {
+		t.Errorf("man-mode top border = %q, want man title", topMan)
+	}
+	if bottom := stripANSI(lines[len(lines)-1]); lipgloss.Width(topMan) != lipgloss.Width(bottom) {
+		t.Errorf("top border width = %d, want %d (unchanged)", lipgloss.Width(topMan), lipgloss.Width(bottom))
+	}
+
+	for name, panel := range map[string]string{"tools": m.renderTools(), "brief": m.renderBrief()} {
+		if got := stripANSI(strings.SplitN(panel, "\n", 2)[0]); strings.ContainsAny(got, "-abcdefghijklmnopqrstuvwxyz") {
+			t.Errorf("%s top border = %q, want no title", name, got)
+		}
+	}
+}
+
+// TestInsetPanelTitle exercises the splice helper directly: a too-narrow
+// panel is returned unchanged (no panic), and a partial fit truncates the
+// title while preserving the top line's visible width.
+func TestInsetPanelTitle(t *testing.T) {
+	narrow := "╭─╮\n│ │\n╰─╯"
+	if got := insetPanelTitle(narrow, "--help", false); got != narrow {
+		t.Errorf("narrow panel = %q, want unchanged", got)
+	}
+	if got := insetPanelTitle("", "--help", false); got != "" {
+		t.Errorf("empty panel = %q, want unchanged", got)
+	}
+
+	partial := "╭────╮\n│    │\n╰────╯"
+	top := stripANSI(strings.SplitN(insetPanelTitle(partial, "--help", true), "\n", 2)[0])
+	if len([]rune(top)) != 6 {
+		t.Errorf("truncated top = %q, visible width = %d, want 6", top, len([]rune(top)))
+	}
+	if !strings.HasPrefix(top, "╭─ --") || !strings.HasSuffix(top, "╮") {
+		t.Errorf("truncated top = %q, want truncated title with corners intact", top)
+	}
+}
+
 func TestRenderStatusBarGauge(t *testing.T) {
 	known := version.RateLimit{Known: true, Remaining: 15, Limit: 60} // used 45/60
 

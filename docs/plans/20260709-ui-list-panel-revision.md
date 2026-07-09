@@ -127,10 +127,10 @@ UI-ревизия TUI по итогам brainstorm-сессии (кадры сн
 - Modify: `internal/model/render.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] локальный хелпер врезки титула в верхнюю строку отрендеренной рамки (ANSI-безопасно; `truncateVisible` из `ui/overlay.go` неэкспортируемый — писать свой на базе `stripANSI`, см. Technical Details); титул в цвете рамки (фокус/нет)
-- [ ] `renderHelp` использует хелпер: титул `--help` или `man` по `m.helpMode`; brief и tools не трогать
-- [ ] тесты: титул присутствует и соответствует helpMode; ширина верхней строки рамки не изменилась (stripANSI-длина); слишком узкая панель не паникует (титул обрезается/опускается)
-- [ ] прогнать `go test -race ./...` — must pass before task 6
+- [x] локальный хелпер врезки титула в верхнюю строку отрендеренной рамки (ANSI-безопасно; `truncateVisible` из `ui/overlay.go` неэкспортируемый — писать свой на базе `stripANSI`, см. Technical Details); титул в цвете рамки (фокус/нет) — `insetPanelTitle` в render.go
+- [x] `renderHelp` использует хелпер: титул `--help` или `man` по `m.helpMode`; brief и tools не трогать
+- [x] тесты: титул присутствует и соответствует helpMode; ширина верхней строки рамки не изменилась (stripANSI-длина); слишком узкая панель не паникует (титул обрезается/опускается) — `TestRenderHelpTitle`, `TestInsetPanelTitle`
+- [x] прогнать `go test -race ./...` — must pass before task 6
 
 ### Task 6: Поиск — теги, подсветка матча, счётчик
 

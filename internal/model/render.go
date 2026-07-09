@@ -480,15 +480,54 @@ func (m Model) renderBrief() string {
 }
 
 func (m Model) renderHelp() string {
+	focused := m.focus == focusHelp
 	panelStyle := ui.PanelBorder
-	if m.focus == focusHelp {
+	if focused {
 		panelStyle = ui.PanelBorderFocused
 	}
 
-	return panelStyle.
+	title := "--help"
+	if m.helpMode == helpModeMan {
+		title = "man"
+	}
+	panel := panelStyle.
 		Width(m.helpW).
 		Height(max(m.height-7, 1)).
-		Render(withScrollbar(m.helpViewport, m.helpW, m.focus == focusHelp))
+		Render(withScrollbar(m.helpViewport, m.helpW, focused))
+	return insetPanelTitle(panel, title, focused)
+}
+
+// insetPanelTitle splices " title " into the top border line of a rendered
+// panel, starting at the 3rd visible cell. The top border is a homogeneously
+// colored run of single-width runes, so instead of ANSI-aware splicing the
+// line is rebuilt from its stripANSI text and repainted whole with the border
+// color (peach when focused). A title that does not fit is truncated to the
+// available run; when no room remains the panel is returned unchanged.
+func insetPanelTitle(panel, title string, focused bool) string {
+	if title == "" {
+		return panel
+	}
+	lines := strings.SplitN(panel, "\n", 2)
+	top := []rune(stripANSI(lines[0]))
+	label := []rune(" " + title + " ")
+	const start = 2               // keep the corner + one ─ cell
+	avail := len(top) - start - 1 // keep the closing corner
+	if avail <= 0 {
+		return panel
+	}
+	if len(label) > avail {
+		label = label[:avail]
+	}
+	rebuilt := make([]rune, 0, len(top))
+	rebuilt = append(rebuilt, top[:start]...)
+	rebuilt = append(rebuilt, label...)
+	rebuilt = append(rebuilt, top[start+len(label):]...)
+	color := ui.ColorBorder
+	if focused {
+		color = ui.ColorPrimary
+	}
+	lines[0] = lipgloss.NewStyle().Foreground(color).Render(string(rebuilt))
+	return strings.Join(lines, "\n")
 }
 
 // withScrollbar renders a viewport with a 1-col scrollbar gutter on its right

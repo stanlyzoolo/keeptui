@@ -1935,3 +1935,89 @@ func TestRenderCardSpinner(t *testing.T) {
 		t.Errorf("idle card = %q, want the about shown when not refreshing", noSpin)
 	}
 }
+
+// TestRenderCardInstalledLatest covers the [info] version lines: installed:
+// renders whenever the section is open (dim "not found" when local detection
+// came up empty), the section opens for a GitHub-less tool once an installed
+// version is known, and latest: gains the update highlight + ↑ only when the
+// installed version is older.
+func TestRenderCardInstalledLatest(t *testing.T) {
+	newCardModel := func(github string) Model {
+		m := Model{
+			meta:          []loader.ToolMeta{{Name: "gh", GitHub: github}},
+			versions:      map[string]VersionInfo{},
+			repoStatus:    map[string]string{},
+			repoCards:     map[string]version.RepoCard{},
+			changelogData: map[string]changelogMsg{},
+		}
+		m.tools = loader.ToolsFromMeta(m.meta)
+		return m
+	}
+
+	t.Run("up to date: both lines, no arrow", func(t *testing.T) {
+		m := newCardModel("cli/cli")
+		m.versions["gh"] = VersionInfo{Installed: "v2.0.0", Latest: "v2.0.0"}
+		m.repoCards["gh"] = version.RepoCard{Latest: "v2.0.0"}
+		card := stripANSI(m.renderCard())
+		if !strings.Contains(card, "installed: v2.0.0") {
+			t.Errorf("card missing installed line; got:\n%s", card)
+		}
+		if !strings.Contains(card, "latest: v2.0.0") {
+			t.Errorf("card missing latest line; got:\n%s", card)
+		}
+		if strings.Contains(card, "↑") {
+			t.Errorf("up-to-date card shows update arrow; got:\n%s", card)
+		}
+	})
+
+	t.Run("update available: arrow and date suffix", func(t *testing.T) {
+		m := newCardModel("cli/cli")
+		m.versions["gh"] = VersionInfo{Installed: "v1.0.0", Latest: "v2.0.0"}
+		m.repoCards["gh"] = version.RepoCard{Latest: "v2.0.0", PublishedAt: "2026-01-02T15:04:05Z"}
+		card := stripANSI(m.renderCard())
+		if !strings.Contains(card, "latest: v2.0.0 ↑ (2026-01-02)") {
+			t.Errorf("card missing highlighted latest with arrow; got:\n%s", card)
+		}
+		if !strings.Contains(card, "installed: v1.0.0") {
+			t.Errorf("card missing installed line; got:\n%s", card)
+		}
+	})
+
+	t.Run("no installed version: not found", func(t *testing.T) {
+		m := newCardModel("cli/cli")
+		m.versions["gh"] = VersionInfo{Latest: "v2.0.0"}
+		m.repoCards["gh"] = version.RepoCard{Latest: "v2.0.0"}
+		card := stripANSI(m.renderCard())
+		if !strings.Contains(card, "installed: not found") {
+			t.Errorf("card missing installed fallback; got:\n%s", card)
+		}
+	})
+
+	t.Run("no version data at all: not found, no latest", func(t *testing.T) {
+		m := newCardModel("cli/cli")
+		card := stripANSI(m.renderCard())
+		if !strings.Contains(card, "installed: not found") {
+			t.Errorf("card missing installed fallback; got:\n%s", card)
+		}
+		if strings.Contains(card, "latest:") {
+			t.Errorf("card shows latest with no card data; got:\n%s", card)
+		}
+	})
+
+	t.Run("no github with installed: info section opens", func(t *testing.T) {
+		m := newCardModel("")
+		m.versions["gh"] = VersionInfo{Installed: "v1.0.0"}
+		card := stripANSI(m.renderCard())
+		if !strings.Contains(card, "[info]") || !strings.Contains(card, "installed: v1.0.0") {
+			t.Errorf("card missing [info]/installed for GitHub-less tool; got:\n%s", card)
+		}
+	})
+
+	t.Run("no github no installed: no info section", func(t *testing.T) {
+		m := newCardModel("")
+		card := stripANSI(m.renderCard())
+		if strings.Contains(card, "[info]") || strings.Contains(card, "installed:") {
+			t.Errorf("card renders [info] with nothing to show; got:\n%s", card)
+		}
+	})
+}

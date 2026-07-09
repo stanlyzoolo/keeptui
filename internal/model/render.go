@@ -569,8 +569,11 @@ func (m Model) renderCard() string {
 	}
 	sb.WriteString(title + "\n")
 
-	// [info] section: repo / stars / latest / languages / repo status.
-	hasInfo := t.GitHub != "" ||
+	// [info] section: repo / stars / installed / latest / languages / repo
+	// status. Local detection alone (installed version, no GitHub ref and no
+	// card) is enough to open the section.
+	installed := m.versions[t.Name].Installed
+	hasInfo := t.GitHub != "" || installed != "" ||
 		(hasCard && (card.Stars > 0 || card.Latest != "" || len(card.Languages) > 0 || card.RepoStatus != ""))
 	if hasInfo {
 		sb.WriteString(m.sectionDivider("info"))
@@ -580,20 +583,31 @@ func (m Model) renderCard() string {
 				sb.WriteString(ui.WarnStyle.Render("rate limited — press [L]") + "\n")
 			}
 		}
+		if hasCard && card.Stars > 0 {
+			sb.WriteString(ui.InfoStyle.Render(fmt.Sprintf("stars: %s", formatStars(card.Stars))) + "\n")
+		}
+		if installed != "" {
+			sb.WriteString(ui.InfoStyle.Render("installed: "+installed) + "\n")
+		} else {
+			sb.WriteString(ui.DescStyle.Render("installed: not found") + "\n")
+		}
 		if hasCard {
-			if card.Stars > 0 {
-				sb.WriteString(ui.InfoStyle.Render(fmt.Sprintf("stars: %s", formatStars(card.Stars))) + "\n")
-			}
 			if card.Latest != "" {
-				line := "latest: " + card.Latest
+				var suffix string
 				if card.PublishedAt != "" {
 					date := card.PublishedAt
 					if len(date) > 10 {
 						date = date[:10]
 					}
-					line += " (" + date + ")"
+					suffix = " (" + date + ")"
 				}
-				sb.WriteString(ui.InfoStyle.Render(line) + "\n")
+				if m.hasUpdate(t.Name) {
+					sb.WriteString(ui.InfoStyle.Render("latest: ") +
+						ui.UpdateAvailableStyle.Render(card.Latest+" ↑") +
+						ui.InfoStyle.Render(suffix) + "\n")
+				} else {
+					sb.WriteString(ui.InfoStyle.Render("latest: "+card.Latest+suffix) + "\n")
+				}
 			}
 			if len(card.Languages) > 0 {
 				label := "languages: "

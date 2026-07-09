@@ -115,11 +115,11 @@ UI-ревизия TUI по итогам brainstorm-сессии (кадры сн
 - Modify: `internal/model/render.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] в `renderCard` добавить строку `installed: <m.versions[name].Installed>` рядом с `latest:`; пустая → `installed: not found` тускло
-- [ ] расширить гейт `hasInfo` (render.go:551), чтобы `installed:` рендерился и у инструмента без GitHub-ссылки (локально установлен, card-данных нет)
-- [ ] при `hasUpdate(name)` рендерить значение `latest:` стилем `UpdateAvailableStyle` + ` ↑`; без апдейта — как сейчас
-- [ ] тесты: карточка с installed+latest (равны — без подсветки), с апдейтом (подсветка + ↑), без установленной версии (not found), без данных версий вовсе, инструмент без GitHub но с installed (строка присутствует)
-- [ ] прогнать `go test -race ./...` — must pass before task 5
+- [x] в `renderCard` добавить строку `installed: <m.versions[name].Installed>` рядом с `latest:`; пустая → `installed: not found` тускло
+- [x] расширить гейт `hasInfo` (render.go:551), чтобы `installed:` рендерился и у инструмента без GitHub-ссылки (локально установлен, card-данных нет)
+- [x] при `hasUpdate(name)` рендерить значение `latest:` стилем `UpdateAvailableStyle` + ` ↑`; без апдейта — как сейчас
+- [x] тесты: карточка с installed+latest (равны — без подсветки), с апдейтом (подсветка + ↑), без установленной версии (not found), без данных версий вовсе, инструмент без GitHub но с installed (строка присутствует) — `TestRenderCardInstalledLatest` (+ кейс «нет GitHub и нет installed → секции [info] нет»)
+- [x] прогнать `go test -race ./...` — must pass before task 5
 
 ### Task 5: Титул help-панели (--help / man) в рамке
 

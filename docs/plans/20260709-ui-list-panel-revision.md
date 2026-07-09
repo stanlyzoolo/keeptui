@@ -140,12 +140,12 @@ UI-ревизия TUI по итогам brainstorm-сессии (кадры сн
 - Modify: `internal/model/mode_test.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] `filteredMeta`: матч по имени ИЛИ по любому тегу (lowercase substring); не ломать существующие вызовы (подсчёт, выбор, ремап курсора)
-- [ ] прокинуть в рендер признак «матч только по тегу» + сам тег (минимальная структура рядом с `filteredMeta`)
-- [ ] `renderLeftContent` в `modeSearch`: подсветка совпавшей подстроки имени (жирный + персиковый); у tag-only матчей справа тусклый `#<tag>`
-- [ ] статус-бар поиска: счётчик `N/M` после запроса (`/ > tui   3/17  [enter] open …`)
-- [ ] тесты: матч по тегу попадает в фильтр; tag-only строка помечена тегом; подсветка подстроки в выводе; счётчик в статус-баре (включая `0/M`); commit/rollback-семантика не изменилась (существующие тесты mode_test.go проходят без правок логики)
-- [ ] прогнать `go test -race ./...` — must pass before task 7
+- [x] `filteredMeta`: матч по имени ИЛИ по любому тегу (lowercase substring); не ломать существующие вызовы (подсчёт, выбор, ремап курсора) — предикат вынесен в `searchMatches()`, `filteredMeta` — проекция
+- [x] прокинуть в рендер признак «матч только по тегу» + сам тег (структура `searchMatch{meta, byTagOnly, tag}` рядом с `filteredMeta` в model.go)
+- [x] `renderLeftContent` в `modeSearch`: подсветка совпавшей подстроки имени (жирный + персиковый, `highlightNameMatch` — существующий `highlightMatch` в textutil.go принадлежит help-поиску); у tag-only матчей справа тусклый `#<tag>` (опускается, если не влезает в бюджет строки без переноса)
+- [x] статус-бар поиска: счётчик `N/M` после запроса (`/ > tui   3/17  [enter] open …`)
+- [x] тесты: матч по тегу попадает в фильтр; tag-only строка помечена тегом; подсветка подстроки в выводе; счётчик в статус-баре (включая `0/M`); commit/rollback-семантика не изменилась (существующие тесты mode_test.go проходят без правок логики) — `TestSearchMatchesByTag`, `TestSearchNameMatchNotTagFlagged`, `TestRenderLeftContentTagMatchSuffix`, `TestRenderLeftContentSearchHighlight`, `TestHighlightNameMatch`, `TestRenderStatusBarSearchCounter`
+- [x] прогнать `go test -race ./...` — must pass before task 7
 
 ### Task 7: Verify acceptance criteria
 

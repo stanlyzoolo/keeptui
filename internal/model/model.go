@@ -771,22 +771,65 @@ func (m Model) selectedTool() (loader.Tool, bool) {
 	return loader.Tool{}, false
 }
 
-func (m Model) filteredMeta() []loader.ToolMeta {
-	source := m.meta
+// searchQuery returns the normalized (lowercase, trimmed) live query, or ""
+// when the tool-list search is not active — the empty string doubles as the
+// "no filter" signal for searchMatches and the list renderer.
+func (m Model) searchQuery() string {
+	if m.mode != modeSearch {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(m.search.Value()))
+}
 
-	if m.mode == modeSearch {
-		query := strings.ToLower(strings.TrimSpace(m.search.Value()))
-		if query != "" {
-			var out []loader.ToolMeta
-			for _, mt := range source {
-				if strings.Contains(strings.ToLower(mt.Name), query) {
-					out = append(out, mt)
-				}
-			}
-			return out
+// searchMatch pairs a tool that passed the search filter with how the query
+// matched it: byTagOnly flags rows whose name did not match (a tag did), and
+// tag carries the first matching tag so the renderer can show what earned the
+// row its place in the list.
+type searchMatch struct {
+	meta      loader.ToolMeta
+	byTagOnly bool
+	tag       string
+}
+
+// searchMatches is the search predicate: a tool matches when its name OR any
+// of its tags contains the query (case-insensitive substring). With no active
+// query every tool passes unmarked. filteredMeta projects this to the plain
+// meta slice for callers that only need the filtered list.
+func (m Model) searchMatches() []searchMatch {
+	query := m.searchQuery()
+	out := make([]searchMatch, 0, len(m.meta))
+	for _, mt := range m.meta {
+		if query == "" {
+			out = append(out, searchMatch{meta: mt})
+			continue
+		}
+		nameHit := strings.Contains(strings.ToLower(mt.Name), query)
+		tag := matchingTag(mt.Tags, query)
+		if !nameHit && tag == "" {
+			continue
+		}
+		out = append(out, searchMatch{meta: mt, byTagOnly: !nameHit, tag: tag})
+	}
+	return out
+}
+
+// matchingTag returns the first tag containing the query, or "".
+func matchingTag(tags []string, query string) string {
+	for _, tag := range tags {
+		if strings.Contains(strings.ToLower(tag), query) {
+			return tag
 		}
 	}
-	return source
+	return ""
+}
+
+func (m Model) filteredMeta() []loader.ToolMeta {
+	matches := m.searchMatches()
+	out := make([]loader.ToolMeta, len(matches))
+	for i, sm := range matches {
+		out[i] = sm.meta
+	}
+	return out
 }
 
 // selectMeta moves the cursor to idx in the current (possibly filtered) list

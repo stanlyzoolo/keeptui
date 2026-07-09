@@ -54,9 +54,11 @@ func (m Model) renderStatusBar() string {
 	}
 	if m.mode == modeSearch {
 		return style.Render(fmt.Sprintf(
-			"%s %s  %s open  %s move  %s cancel",
+			"%s %s  %d/%d  %s open  %s move  %s cancel",
 			ui.SearchPromptStyle.Render("/"),
 			m.search.View(),
+			len(m.filteredMeta()),
+			len(m.meta),
 			keyHint("enter"),
 			keyHint("↑/↓"),
 			keyHint("esc"),
@@ -379,17 +381,36 @@ func (m Model) calcPanelWidths() (toolsW, briefW, helpW int) {
 
 func (m Model) renderLeftContent() string {
 	var sb strings.Builder
-	filtered := m.filteredMeta()
+	matches := m.searchMatches()
+	query := m.searchQuery()
 	maxName := m.toolsW - 5
 
-	for i, mt := range filtered {
+	for i, sm := range matches {
+		mt := sm.meta
 		name := wrapText(mt.Name, maxName)
 		name = strings.TrimRight(name, "\n")
+		plainNameW := lipgloss.Width(name)
 
-		hasUpdate := m.hasUpdate(mt.Name)
-		updateMark := ""
-		if hasUpdate {
-			updateMark = " " + ui.UpdateAvailableStyle.Render("↑")
+		updateMark, updateW := "", 0
+		if m.hasUpdate(mt.Name) {
+			updateMark, updateW = " "+ui.UpdateAvailableStyle.Render("↑"), 2
+		}
+
+		// While searching, highlight the matched substring of the name —
+		// except on the focused selected row, whose whole name is about to
+		// get the same peach-bold style anyway (nesting the ANSI would only
+		// corrupt it).
+		selected := i == m.metaSelected
+		if query != "" && !(selected && m.focus == focusTools) {
+			name = highlightNameMatch(name, query)
+		}
+
+		// Rows that matched only by tag show the tag that earned them the
+		// spot, dimmed, right of the name — skipped when the row's full
+		// budget (marker column + name column + update mark, see maxName)
+		// cannot absorb it without wrapping.
+		if tagW := lipgloss.Width("#" + sm.tag); sm.byTagOnly && plainNameW+tagW+updateW <= maxName+1 {
+			name += " " + ui.MetaNoteStyle.Render("#"+sm.tag)
 		}
 
 		// Marker column (width 1): ▸ on the selected row — peach while the
@@ -401,10 +422,10 @@ func (m Model) renderLeftContent() string {
 		// (arrows move the highlight through the matches).
 		var mark string
 		switch {
-		case i == m.metaSelected && m.focus == focusTools:
+		case selected && m.focus == focusTools:
 			mark = ui.SelectionBarStyle.Render("▸")
 			name = ui.SelectedNameStyle.Render(name)
-		case i == m.metaSelected:
+		case selected:
 			mark = ui.SelectionBarDimStyle.Render("▸")
 		default:
 			mark = statusEdge(mt.Status)
@@ -412,7 +433,7 @@ func (m Model) renderLeftContent() string {
 		sb.WriteString(mark + " " + name + updateMark + "\n")
 	}
 
-	if len(filtered) == 0 {
+	if len(matches) == 0 {
 		if m.mode == modeSearch {
 			sb.WriteString(ui.DescStyle.Render("  No matches.") + "\n")
 		} else {
@@ -421,6 +442,24 @@ func (m Model) renderLeftContent() string {
 	}
 
 	return sb.String()
+}
+
+// highlightNameMatch renders the query substring inside the (possibly
+// wrapped) tool name peach-bold — distinct from highlightMatch (textutil.go),
+// the single-line ColorKey highlighter of the help search. Matching is
+// case-insensitive and per-line: a match split across a wrap boundary stays
+// unhighlighted. query must already be lowercase (searchQuery normalizes it).
+func highlightNameMatch(name, query string) string {
+	lines := strings.Split(name, "\n")
+	for i, line := range lines {
+		idx := strings.Index(strings.ToLower(line), query)
+		if idx < 0 {
+			continue
+		}
+		end := idx + len(query)
+		lines[i] = line[:idx] + ui.SelectedNameStyle.Render(line[idx:end]) + line[end:]
+	}
+	return strings.Join(lines, "\n")
 }
 
 // statusEdge marks non-active tools with a colored left edge in the marker

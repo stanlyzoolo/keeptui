@@ -284,6 +284,25 @@ func TestRenderStatusBarSearch(t *testing.T) {
 	}
 }
 
+// TestRenderStatusBarSearchCounter verifies the N/M match counter in the
+// search bar: matches over the full list size, including 0/M when the query
+// filters everything out.
+func TestRenderStatusBarSearchCounter(t *testing.T) {
+	m := newSearchTestModel() // fzf, git, ripgrep
+	updated, _ := m.Update(keyRunes("/"))
+	m = updated.(Model)
+
+	m = typeRunes(t, m, "rip")
+	if got := m.renderStatusBar(); !strings.Contains(got, "1/3") {
+		t.Errorf("search status bar = %q, want counter 1/3", got)
+	}
+
+	m = typeRunes(t, m, "zzz")
+	if got := m.renderStatusBar(); !strings.Contains(got, "0/3") {
+		t.Errorf("search status bar = %q, want counter 0/3", got)
+	}
+}
+
 // TestRenderLeftContentSearchMarker verifies the selection marker stays
 // visible while searching and follows the arrow-moved highlight through the
 // filtered list.
@@ -309,6 +328,81 @@ func TestRenderLeftContentSearchMarker(t *testing.T) {
 	}
 	if !strings.Contains(lines[1], "▸") || !strings.Contains(lines[1], "ripgrep") {
 		t.Errorf("second match row = %q, want marker on ripgrep", lines[1])
+	}
+}
+
+// TestRenderLeftContentTagMatchSuffix verifies rows that matched only by tag
+// show the dim #tag suffix, name-matched rows do not, and the suffix is
+// dropped (without panicking) when the name column is too narrow for it.
+func TestRenderLeftContentTagMatchSuffix(t *testing.T) {
+	m := New([]loader.ToolMeta{
+		{Name: "gitui", Tags: []string{"git"}},
+		{Name: "lazygit", Tags: []string{"tui"}},
+	})
+	// 100 cols → toolsW 18: wide enough for "lazygit #tui" (at 80 the layout
+	// minimums squeeze toolsW to 14 and the suffix is legitimately dropped).
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m = updated.(Model)
+	m.focus = focusTools
+	updated, _ = m.Update(keyRunes("/"))
+	m = updated.(Model)
+	m = typeRunes(t, m, "tui") // gitui matches by name, lazygit only by tag
+
+	lines := strings.Split(stripANSI(m.renderLeftContent()), "\n")
+	if !strings.Contains(lines[1], "lazygit") || !strings.Contains(lines[1], "#tui") {
+		t.Errorf("tag-only row = %q, want lazygit with #tui suffix", lines[1])
+	}
+	if strings.Contains(lines[0], "#") {
+		t.Errorf("name-match row = %q, want no tag suffix", lines[0])
+	}
+
+	// A name column too narrow for the suffix drops it instead of wrapping
+	// the row.
+	m.toolsW = 8 // maxName = 3
+	lines = strings.Split(stripANSI(m.renderLeftContent()), "\n")
+	for i, line := range lines {
+		if strings.Contains(line, "#") {
+			t.Errorf("narrow row %d = %q, want tag suffix dropped", i, line)
+		}
+	}
+}
+
+// TestRenderLeftContentSearchHighlight verifies the matched substring of a
+// non-selected row's name is wrapped in the peach-bold highlight while
+// searching.
+func TestRenderLeftContentSearchHighlight(t *testing.T) {
+	forceColorProfile(t)
+	m := newSearchTestModel() // fzf, git, ripgrep
+	updated, _ := m.Update(keyRunes("/"))
+	m = updated.(Model)
+	m = typeRunes(t, m, "i") // matches git (selected) and ripgrep
+
+	lines := strings.Split(m.renderLeftContent(), "\n")
+	if want := ui.SelectedNameStyle.Render("i"); !strings.Contains(lines[1], want) {
+		t.Errorf("non-selected match row = %q, want highlighted substring %q", lines[1], want)
+	}
+	if !strings.Contains(stripANSI(lines[1]), "ripgrep") {
+		t.Errorf("non-selected match row = %q, highlight corrupted the name", stripANSI(lines[1]))
+	}
+}
+
+// TestHighlightNameMatch pins the helper: case-insensitive match, untouched
+// non-match, and per-line behavior (a match split across a wrap boundary is
+// left unhighlighted).
+func TestHighlightNameMatch(t *testing.T) {
+	forceColorProfile(t)
+	styled := ui.SelectedNameStyle.Render("ip")
+	if got := highlightNameMatch("ripgrep", "ip"); got != "r"+styled+"grep" {
+		t.Errorf("highlightNameMatch(ripgrep, ip) = %q, want %q", got, "r"+styled+"grep")
+	}
+	if got := highlightNameMatch("RipGrep", "ipg"); got != "R"+ui.SelectedNameStyle.Render("ipG")+"rep" {
+		t.Errorf("highlightNameMatch(RipGrep, ipg) = %q, case-insensitive match expected", got)
+	}
+	if got := highlightNameMatch("ripgrep", "zz"); got != "ripgrep" {
+		t.Errorf("highlightNameMatch(ripgrep, zz) = %q, want untouched", got)
+	}
+	if got := highlightNameMatch("ab\ncd", "bc"); got != "ab\ncd" {
+		t.Errorf("highlightNameMatch(ab\\ncd, bc) = %q, want untouched across the wrap boundary", got)
 	}
 }
 

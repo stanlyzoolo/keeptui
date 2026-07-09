@@ -617,6 +617,61 @@ func TestSearchSingleMatchWrapAround(t *testing.T) {
 	}
 }
 
+// TestSearchMatchesByTag verifies the search predicate matches tags in
+// addition to names: a tag-only match enters the filter flagged byTagOnly
+// with the (case-insensitively) matching tag, and filteredMeta projects the
+// same filtered list.
+func TestSearchMatchesByTag(t *testing.T) {
+	m := New([]loader.ToolMeta{
+		{Name: "fzf", Tags: []string{"fuzzy", "finder"}},
+		{Name: "lazygit", Tags: []string{"git", "TUI"}},
+		{Name: "ripgrep"},
+	})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(Model)
+	m.focus = focusTools
+
+	updated, _ = m.Update(keyRunes("/"))
+	m = updated.(Model)
+	m = typeRunes(t, m, "tui") // lazygit matches only via its TUI tag
+
+	matches := m.searchMatches()
+	if len(matches) != 1 {
+		t.Fatalf("searchMatches = %d entries, want 1", len(matches))
+	}
+	if got := matches[0]; got.meta.Name != "lazygit" || !got.byTagOnly || got.tag != "TUI" {
+		t.Errorf("match = {%s byTagOnly=%v tag=%q}, want lazygit tag-only via TUI",
+			got.meta.Name, got.byTagOnly, got.tag)
+	}
+	if got := m.filteredMeta(); len(got) != 1 || got[0].Name != "lazygit" {
+		t.Errorf("filteredMeta = %v, want [lazygit]", got)
+	}
+}
+
+// TestSearchNameMatchNotTagFlagged verifies a row whose name matches is never
+// flagged byTagOnly, even when one of its tags matches the query too.
+func TestSearchNameMatchNotTagFlagged(t *testing.T) {
+	m := New([]loader.ToolMeta{
+		{Name: "lazygit", Tags: []string{"git"}},
+	})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(Model)
+	m.focus = focusTools
+
+	updated, _ = m.Update(keyRunes("/"))
+	m = updated.(Model)
+	m = typeRunes(t, m, "git") // name and tag both contain "git"
+
+	matches := m.searchMatches()
+	if len(matches) != 1 {
+		t.Fatalf("searchMatches = %d entries, want 1", len(matches))
+	}
+	if got := matches[0]; got.byTagOnly {
+		t.Errorf("match = {%s byTagOnly=%v tag=%q}, name match must win over the tag",
+			got.meta.Name, got.byTagOnly, got.tag)
+	}
+}
+
 // TestSearchLetterKeyTypesIntoQuery verifies a letter that doubles as a nav
 // key in modeNormal (j) lands in the query while searching and does not act
 // as navigation — and that typing a query-changing rune resets an

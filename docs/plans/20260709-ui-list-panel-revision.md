@@ -149,11 +149,11 @@ UI-ревизия TUI по итогам brainstorm-сессии (кадры сн
 
 ### Task 7: Verify acceptance criteria
 
-- [ ] пройтись по Overview: A (маркер виден при любом фокусе), B (3 статуса, миграция, installed/latest), C (титул help-панели), D (теги, подсветка, счётчик)
-- [ ] edge-cases: пустой список, инструмент без GitHub, узкая панель, поиск без матчей
-- [ ] `go build .` + `go vet ./...` + `golangci-lint run`
-- [ ] полный прогон: `go test -race ./...`
-- [ ] живой прогон в tmux (см. Post-Completion) — визуальная сверка кадров с дизайном
+- [x] пройтись по Overview: A (маркер виден при любом фокусе), B (3 статуса, миграция, installed/latest), C (титул help-панели), D (теги, подсветка, счётчик) — все четыре сверены живьём в tmux
+- [x] edge-cases: пустой список, инструмент без GitHub, узкая панель, поиск без матчей — покрыты юнит-тестами (mode_test.go:557/451, TestInsetPanelTitle, TestRenderCardInstalledLatest); поиск без матчей дополнительно проверен живьём (`No matches.` + `0/17`)
+- [x] `go build .` + `go vet ./...` — чисто; `golangci-lint run` в окружении не запускается (golangci-lint собран Go 1.24, проект таргетит 1.25 — несовпадение среды, зафиксировано ещё в Task 1)
+- [x] полный прогон: `go test -race ./...` — все пакеты ok
+- [x] живой прогон в tmux (см. Post-Completion): dim-маркер `▸` при фокусе на brief, кромки `▎`, `installed:`/`latest:` с `↑`, титулы `--help`/`man` в рамке, tag-only матч с тусклым `#TUI`, подсветка подстроки, счётчик `2/17` и `0/17`
 
 ### Task 8: [Final] Update documentation
 

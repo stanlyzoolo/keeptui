@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -284,6 +285,25 @@ func TestRenderStatusBarSearch(t *testing.T) {
 	}
 }
 
+// TestRenderStatusBarSearchCounter verifies the N/M match counter in the
+// search bar: matches over the full list size, including 0/M when the query
+// filters everything out.
+func TestRenderStatusBarSearchCounter(t *testing.T) {
+	m := newSearchTestModel() // fzf, git, ripgrep
+	updated, _ := m.Update(keyRunes("/"))
+	m = updated.(Model)
+
+	m = typeRunes(t, m, "rip")
+	if got := m.renderStatusBar(); !strings.Contains(got, "1/3") {
+		t.Errorf("search status bar = %q, want counter 1/3", got)
+	}
+
+	m = typeRunes(t, m, "zzz")
+	if got := m.renderStatusBar(); !strings.Contains(got, "0/3") {
+		t.Errorf("search status bar = %q, want counter 0/3", got)
+	}
+}
+
 // TestRenderLeftContentSearchMarker verifies the selection marker stays
 // visible while searching and follows the arrow-moved highlight through the
 // filtered list.
@@ -297,18 +317,253 @@ func TestRenderLeftContentSearchMarker(t *testing.T) {
 	if len(lines) < 2 {
 		t.Fatalf("renderLeftContent = %q, want at least 2 rows", lines)
 	}
-	if !strings.Contains(lines[0], "●") || !strings.Contains(lines[0], "git") {
+	if !strings.Contains(lines[0], "▸") || !strings.Contains(lines[0], "git") {
 		t.Errorf("first match row = %q, want marker on git", lines[0])
 	}
 
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m = updated.(Model)
 	lines = strings.Split(m.renderLeftContent(), "\n")
-	if strings.Contains(lines[0], "●") {
+	if strings.Contains(lines[0], "▸") {
 		t.Errorf("first row = %q, marker should move away after down", lines[0])
 	}
-	if !strings.Contains(lines[1], "●") || !strings.Contains(lines[1], "ripgrep") {
+	if !strings.Contains(lines[1], "▸") || !strings.Contains(lines[1], "ripgrep") {
 		t.Errorf("second match row = %q, want marker on ripgrep", lines[1])
+	}
+}
+
+// TestRenderLeftContentTagMatchSuffix verifies rows that matched only by tag
+// show the dim #tag suffix, name-matched rows do not, and the suffix is
+// dropped (without panicking) when the name column is too narrow for it.
+func TestRenderLeftContentTagMatchSuffix(t *testing.T) {
+	m := New([]loader.ToolMeta{
+		{Name: "gitui", Tags: []string{"git"}},
+		{Name: "lazygit", Tags: []string{"tui"}},
+	})
+	// 100 cols → toolsW 18: wide enough for "lazygit #tui" (at 80 the layout
+	// minimums squeeze toolsW to 14 and the suffix is legitimately dropped).
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	m = updated.(Model)
+	m.focus = focusTools
+	updated, _ = m.Update(keyRunes("/"))
+	m = updated.(Model)
+	m = typeRunes(t, m, "tui") // gitui matches by name, lazygit only by tag
+
+	lines := strings.Split(stripANSI(m.renderLeftContent()), "\n")
+	if !strings.Contains(lines[1], "lazygit") || !strings.Contains(lines[1], "#tui") {
+		t.Errorf("tag-only row = %q, want lazygit with #tui suffix", lines[1])
+	}
+	if strings.Contains(lines[0], "#") {
+		t.Errorf("name-match row = %q, want no tag suffix", lines[0])
+	}
+
+	// A name column too narrow for the suffix drops it instead of wrapping
+	// the row.
+	m.toolsW = 8 // maxName = 3
+	lines = strings.Split(stripANSI(m.renderLeftContent()), "\n")
+	for i, line := range lines {
+		if strings.Contains(line, "#") {
+			t.Errorf("narrow row %d = %q, want tag suffix dropped", i, line)
+		}
+	}
+}
+
+// TestRenderLeftContentSearchHighlight verifies the matched substring of a
+// non-selected row's name is wrapped in the peach-bold highlight while
+// searching.
+func TestRenderLeftContentSearchHighlight(t *testing.T) {
+	forceColorProfile(t)
+	m := newSearchTestModel() // fzf, git, ripgrep
+	updated, _ := m.Update(keyRunes("/"))
+	m = updated.(Model)
+	m = typeRunes(t, m, "i") // matches git (selected) and ripgrep
+
+	lines := strings.Split(m.renderLeftContent(), "\n")
+	if want := ui.SelectedNameStyle.Render("i"); !strings.Contains(lines[1], want) {
+		t.Errorf("non-selected match row = %q, want highlighted substring %q", lines[1], want)
+	}
+	if !strings.Contains(stripANSI(lines[1]), "ripgrep") {
+		t.Errorf("non-selected match row = %q, highlight corrupted the name", stripANSI(lines[1]))
+	}
+}
+
+// TestHighlightNameMatch pins the helper: case-insensitive match, untouched
+// non-match, and per-line behavior (a match split across a wrap boundary is
+// left unhighlighted).
+func TestHighlightNameMatch(t *testing.T) {
+	forceColorProfile(t)
+	styled := ui.SelectedNameStyle.Render("ip")
+	if got := highlightNameMatch("ripgrep", "ip"); got != "r"+styled+"grep" {
+		t.Errorf("highlightNameMatch(ripgrep, ip) = %q, want %q", got, "r"+styled+"grep")
+	}
+	if got := highlightNameMatch("RipGrep", "ipg"); got != "R"+ui.SelectedNameStyle.Render("ipG")+"rep" {
+		t.Errorf("highlightNameMatch(RipGrep, ipg) = %q, case-insensitive match expected", got)
+	}
+	if got := highlightNameMatch("ripgrep", "zz"); got != "ripgrep" {
+		t.Errorf("highlightNameMatch(ripgrep, zz) = %q, want untouched", got)
+	}
+	if got := highlightNameMatch("ab\ncd", "bc"); got != "ab\ncd" {
+		t.Errorf("highlightNameMatch(ab\\ncd, bc) = %q, want untouched across the wrap boundary", got)
+	}
+	// Only the first occurrence per line is highlighted.
+	if got := highlightNameMatch("gogo", "go"); got != ui.SelectedNameStyle.Render("go")+"go" {
+		t.Errorf("highlightNameMatch(gogo, go) = %q, want only the first occurrence styled", got)
+	}
+	// Rune safety: Ⱥ (2 bytes) lowercases to ⱥ (3 bytes), so byte offsets
+	// found in strings.ToLower(line) would slice the original out of range.
+	if got := highlightNameMatch("Ⱥx", "x"); stripANSI(got) != "Ⱥx" || !utf8.ValidString(got) {
+		t.Errorf("highlightNameMatch(Ⱥx, x) = %q, want the name intact and valid UTF-8", got)
+	}
+	if got := highlightNameMatch("Ⱥx", "ⱥ"); stripANSI(got) != "Ⱥx" || !strings.Contains(got, "Ⱥ") {
+		t.Errorf("highlightNameMatch(Ⱥx, ⱥ) = %q, want case-insensitive match on the original rune", got)
+	}
+}
+
+// TestRenderLeftContentMarkerSurvivesFocus verifies the ▸ marker on the
+// selected row does not disappear when focus moves to the brief/help panels
+// (it renders dim there, but stays in the output).
+func TestRenderLeftContentMarkerSurvivesFocus(t *testing.T) {
+	m := New([]loader.ToolMeta{
+		{Name: "fzf", Status: loader.StatusActive},
+		{Name: "git", Status: loader.StatusActive},
+	})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(Model)
+	m.metaSelected = 1
+
+	for _, f := range []int{focusTools, focusBrief, focusHelp} {
+		m.focus = f
+		lines := strings.Split(stripANSI(m.renderLeftContent()), "\n")
+		if !strings.HasPrefix(lines[1], "▸ git") {
+			t.Errorf("focus %v: selected row = %q, want ▸ marker on git", f, lines[1])
+		}
+		if strings.Contains(lines[0], "▸") {
+			t.Errorf("focus %v: unselected row = %q, should carry no marker", f, lines[0])
+		}
+	}
+}
+
+// TestRenderLeftContentStatusEdge verifies the marker column: ▎ edge on
+// trying/inactive rows, plain space on active rows and on unknown statuses
+// (hand-edited meta.yaml values reach the renderer untouched), and the ▸
+// marker displacing the edge on the selected row.
+func TestRenderLeftContentStatusEdge(t *testing.T) {
+	m := New([]loader.ToolMeta{
+		{Name: "fzf", Status: loader.StatusActive},
+		{Name: "git", Status: loader.StatusTrying},
+		{Name: "ripgrep", Status: loader.StatusInactive},
+		{Name: "yq", Status: loader.Status("bogus")},
+	})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(Model)
+	m.focus = focusTools
+	m.metaSelected = 0
+
+	lines := strings.Split(stripANSI(m.renderLeftContent()), "\n")
+	if !strings.HasPrefix(lines[0], "▸ fzf") {
+		t.Errorf("selected active row = %q, want ▸ marker", lines[0])
+	}
+	if !strings.HasPrefix(lines[1], "▎ git") {
+		t.Errorf("trying row = %q, want ▎ edge", lines[1])
+	}
+	if !strings.HasPrefix(lines[2], "▎ ripgrep") {
+		t.Errorf("inactive row = %q, want ▎ edge", lines[2])
+	}
+	if !strings.HasPrefix(lines[3], "  yq") {
+		t.Errorf("unknown-status row = %q, want plain space in the marker column", lines[3])
+	}
+
+	// The ▸ marker takes priority over the status edge on the selected row,
+	// and the active row it left behind gets a plain-space marker column.
+	m.metaSelected = 1
+	lines = strings.Split(stripANSI(m.renderLeftContent()), "\n")
+	if !strings.HasPrefix(lines[1], "▸ git") {
+		t.Errorf("selected trying row = %q, want ▸ to displace the edge", lines[1])
+	}
+	if !strings.HasPrefix(lines[0], "  fzf") {
+		t.Errorf("active row = %q, want plain space in the marker column", lines[0])
+	}
+}
+
+// TestRenderLeftContentRowWidth verifies the marker column glyphs are all
+// single-cell, so every row keeps the same visible width prefix (1 marker
+// cell + 1 space) regardless of selection or status.
+func TestRenderLeftContentRowWidth(t *testing.T) {
+	m := New([]loader.ToolMeta{
+		{Name: "aa", Status: loader.StatusActive},
+		{Name: "bb", Status: loader.StatusTrying},
+		{Name: "cc", Status: loader.StatusInactive},
+		{Name: "dd", Status: loader.Status("bogus")},
+	})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(Model)
+	m.focus = focusTools
+	m.metaSelected = 0
+
+	for i, line := range strings.Split(strings.TrimRight(stripANSI(m.renderLeftContent()), "\n"), "\n") {
+		if w := lipgloss.Width(line); w != 4 { // marker + space + 2-rune name
+			t.Errorf("row %d = %q, visible width = %d, want 4", i, line, w)
+		}
+	}
+}
+
+// TestRenderHelpTitle verifies the help panel's top border carries the mode
+// title (--help / man) without changing the border's visible width, and that
+// the tools/brief panels stay untitled.
+func TestRenderHelpTitle(t *testing.T) {
+	m := New([]loader.ToolMeta{{Name: "fzf", Status: loader.StatusActive}})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	m = updated.(Model)
+
+	m.helpMode = helpModeHelp
+	top := stripANSI(strings.SplitN(m.renderHelp(), "\n", 2)[0])
+	if !strings.Contains(top, " --help ") {
+		t.Errorf("help-mode top border = %q, want --help title", top)
+	}
+
+	m.helpMode = helpModeMan
+	lines := strings.Split(m.renderHelp(), "\n")
+	topMan := stripANSI(lines[0])
+	if !strings.Contains(topMan, " man ") || strings.Contains(topMan, "help") {
+		t.Errorf("man-mode top border = %q, want man title", topMan)
+	}
+	if bottom := stripANSI(lines[len(lines)-1]); lipgloss.Width(topMan) != lipgloss.Width(bottom) {
+		t.Errorf("top border width = %d, want %d (unchanged)", lipgloss.Width(topMan), lipgloss.Width(bottom))
+	}
+
+	for name, panel := range map[string]string{"tools": m.renderTools(), "brief": m.renderBrief()} {
+		if got := stripANSI(strings.SplitN(panel, "\n", 2)[0]); strings.ContainsAny(got, "-abcdefghijklmnopqrstuvwxyz") {
+			t.Errorf("%s top border = %q, want no title", name, got)
+		}
+	}
+}
+
+// TestInsetPanelTitle exercises the splice helper directly: a too-narrow
+// panel is returned unchanged (no panic), a title that does not fit whole is
+// dropped rather than truncated, and a fitting title is inset without
+// changing the top line's visible width.
+func TestInsetPanelTitle(t *testing.T) {
+	narrow := "╭─╮\n│ │\n╰─╯"
+	if got := insetPanelTitle(narrow, "--help", false); got != narrow {
+		t.Errorf("narrow panel = %q, want unchanged", got)
+	}
+	if got := insetPanelTitle("", "--help", false); got != "" {
+		t.Errorf("empty panel = %q, want unchanged", got)
+	}
+
+	// " --help " needs 8 cells; this top offers 3 — dropped whole, not chopped.
+	partial := "╭────╮\n│    │\n╰────╯"
+	if got := insetPanelTitle(partial, "--help", true); got != partial {
+		t.Errorf("partial-fit panel = %q, want unchanged (title dropped whole)", got)
+	}
+
+	fits := "╭──────────╮\n│          │\n╰──────────╯"
+	top := stripANSI(strings.SplitN(insetPanelTitle(fits, "--help", true), "\n", 2)[0])
+	if len([]rune(top)) != 12 {
+		t.Errorf("titled top = %q, visible width = %d, want 12", top, len([]rune(top)))
+	}
+	if !strings.HasPrefix(top, "╭─ --help ") || !strings.HasSuffix(top, "╮") {
+		t.Errorf("titled top = %q, want inset title with corners intact", top)
 	}
 }
 
@@ -987,8 +1242,7 @@ func TestUpdateBriefStatusCycle(t *testing.T) {
 
 		want := []loader.Status{
 			loader.StatusTrying,
-			loader.StatusForgotten,
-			loader.StatusArchived,
+			loader.StatusInactive,
 			loader.StatusActive,
 		}
 
@@ -1853,4 +2107,99 @@ func TestRenderCardSpinner(t *testing.T) {
 	if !strings.Contains(noSpin, "a fine tool") {
 		t.Errorf("idle card = %q, want the about shown when not refreshing", noSpin)
 	}
+}
+
+// TestRenderCardInstalledLatest covers the [info] version lines: installed:
+// renders whenever the section is open (dim "detecting…" while the local
+// probe is in flight, dim "not found" once it reported empty), the section
+// opens for a GitHub-less tool once an installed version is known, and
+// latest: gains the update highlight + ↑ only when the installed version is
+// older. The model goes through New + WindowSizeMsg so renderCard sees the
+// same initialized state (spinner, widths) as the running app.
+func TestRenderCardInstalledLatest(t *testing.T) {
+	newCardModel := func(github string) Model {
+		m := New([]loader.ToolMeta{{Name: "gh", GitHub: github}})
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+		return updated.(Model)
+	}
+
+	t.Run("up to date: both lines, no arrow", func(t *testing.T) {
+		m := newCardModel("cli/cli")
+		m.versions["gh"] = VersionInfo{Installed: "v2.0.0", Latest: "v2.0.0", InstalledKnown: true}
+		m.repoCards["gh"] = version.RepoCard{Latest: "v2.0.0"}
+		card := stripANSI(m.renderCard())
+		if !strings.Contains(card, "installed: v2.0.0") {
+			t.Errorf("card missing installed line; got:\n%s", card)
+		}
+		if !strings.Contains(card, "latest: v2.0.0") {
+			t.Errorf("card missing latest line; got:\n%s", card)
+		}
+		if strings.Contains(card, "↑") {
+			t.Errorf("up-to-date card shows update arrow; got:\n%s", card)
+		}
+	})
+
+	t.Run("update available: arrow and date suffix", func(t *testing.T) {
+		m := newCardModel("cli/cli")
+		m.versions["gh"] = VersionInfo{Installed: "v1.0.0", Latest: "v2.0.0", InstalledKnown: true}
+		m.repoCards["gh"] = version.RepoCard{Latest: "v2.0.0", PublishedAt: "2026-01-02T15:04:05Z"}
+		card := stripANSI(m.renderCard())
+		if !strings.Contains(card, "latest: v2.0.0 ↑ (2026-01-02)") {
+			t.Errorf("card missing highlighted latest with arrow; got:\n%s", card)
+		}
+		if !strings.Contains(card, "installed: v1.0.0") {
+			t.Errorf("card missing installed line; got:\n%s", card)
+		}
+	})
+
+	t.Run("detection reported empty: not found", func(t *testing.T) {
+		m := newCardModel("cli/cli")
+		m.versions["gh"] = VersionInfo{Latest: "v2.0.0", InstalledKnown: true}
+		m.repoCards["gh"] = version.RepoCard{Latest: "v2.0.0"}
+		card := stripANSI(m.renderCard())
+		if !strings.Contains(card, "installed: not found") {
+			t.Errorf("card missing installed fallback; got:\n%s", card)
+		}
+	})
+
+	t.Run("detection pending: detecting, not \"not found\"", func(t *testing.T) {
+		m := newCardModel("cli/cli")
+		m.versions["gh"] = VersionInfo{Latest: "v2.0.0"}
+		m.repoCards["gh"] = version.RepoCard{Latest: "v2.0.0"}
+		card := stripANSI(m.renderCard())
+		if !strings.Contains(card, "installed: detecting…") {
+			t.Errorf("card missing pending installed line; got:\n%s", card)
+		}
+		if strings.Contains(card, "not found") {
+			t.Errorf("card claims not found before detection finished; got:\n%s", card)
+		}
+	})
+
+	t.Run("no version data at all: detecting, no latest", func(t *testing.T) {
+		m := newCardModel("cli/cli")
+		card := stripANSI(m.renderCard())
+		if !strings.Contains(card, "installed: detecting…") {
+			t.Errorf("card missing pending installed line; got:\n%s", card)
+		}
+		if strings.Contains(card, "latest:") {
+			t.Errorf("card shows latest with no card data; got:\n%s", card)
+		}
+	})
+
+	t.Run("no github with installed: info section opens", func(t *testing.T) {
+		m := newCardModel("")
+		m.versions["gh"] = VersionInfo{Installed: "v1.0.0", InstalledKnown: true}
+		card := stripANSI(m.renderCard())
+		if !strings.Contains(card, "[info]") || !strings.Contains(card, "installed: v1.0.0") {
+			t.Errorf("card missing [info]/installed for GitHub-less tool; got:\n%s", card)
+		}
+	})
+
+	t.Run("no github no installed: no info section", func(t *testing.T) {
+		m := newCardModel("")
+		card := stripANSI(m.renderCard())
+		if strings.Contains(card, "[info]") || strings.Contains(card, "installed:") {
+			t.Errorf("card renders [info] with nothing to show; got:\n%s", card)
+		}
+	})
 }

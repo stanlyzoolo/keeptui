@@ -54,9 +54,11 @@ func (m Model) renderStatusBar() string {
 	}
 	if m.mode == modeSearch {
 		return style.Render(fmt.Sprintf(
-			"%s %s  %s open  %s move  %s cancel",
+			"%s %s  %d/%d  %s open  %s move  %s cancel",
 			ui.SearchPromptStyle.Render("/"),
 			m.search.View(),
+			len(m.searchMatches()),
+			len(m.meta),
 			keyHint("enter"),
 			keyHint("↑/↓"),
 			keyHint("esc"),
@@ -379,31 +381,62 @@ func (m Model) calcPanelWidths() (toolsW, briefW, helpW int) {
 
 func (m Model) renderLeftContent() string {
 	var sb strings.Builder
-	filtered := m.filteredMeta()
+	matches := m.searchMatches()
+	query := m.searchQuery()
 	maxName := m.toolsW - 5
 
-	for i, mt := range filtered {
+	for i, sm := range matches {
+		mt := sm.meta
 		name := wrapText(mt.Name, maxName)
 		name = strings.TrimRight(name, "\n")
+		plainNameW := lipgloss.Width(name)
 
-		hasUpdate := m.hasUpdate(mt.Name)
-		updateMark := ""
-		if hasUpdate {
+		updateMark, updateW := "", 0
+		if m.hasUpdate(mt.Name) {
 			updateMark = " " + ui.UpdateAvailableStyle.Render("↑")
+			updateW = lipgloss.Width(updateMark)
 		}
 
-		// The marker stays visible in modeSearch: the cursor there is
-		// user-controlled (arrows move the highlight through the matches).
-		isSelected := i == m.metaSelected && m.focus == focusTools
-		if isSelected {
-			circle := ui.SelectionBarStyle.Render("●")
-			sb.WriteString(circle + " " + name + updateMark + "\n")
-		} else {
-			sb.WriteString("  " + name + updateMark + "\n")
+		// While searching, highlight the matched substring of the name —
+		// except on the focused selected row, whose whole name is about to
+		// get the same peach-bold style anyway (nesting the ANSI would only
+		// corrupt it).
+		selected := i == m.metaSelected
+		if query != "" && (!selected || m.focus != focusTools) {
+			name = highlightNameMatch(name, query)
 		}
+
+		// Rows that matched only by tag show the tag that earned them the
+		// spot, dimmed, right of the name — skipped when the row's full
+		// budget (marker column + name column + update mark, see maxName)
+		// cannot absorb it without wrapping.
+		if sm.byTagOnly {
+			if tagW := lipgloss.Width("#" + sm.tag); plainNameW+tagW+updateW <= maxName+1 {
+				name += " " + ui.MetaNoteStyle.Render("#"+sm.tag)
+			}
+		}
+
+		// Marker column (width 1): ▸ on the selected row — peach while the
+		// tools panel is focused, dim otherwise so the selection never
+		// disappears when focus moves to brief/help. Non-selected rows carry
+		// a status edge ▎ when the tool deviates from active; the ▸ takes
+		// priority over the edge on the selected row. The marker stays
+		// visible in modeSearch too: the cursor there is user-controlled
+		// (arrows move the highlight through the matches).
+		var mark string
+		switch {
+		case selected && m.focus == focusTools:
+			mark = ui.SelectionBarStyle.Render("▸")
+			name = ui.SelectedNameStyle.Render(name)
+		case selected:
+			mark = ui.SelectionBarDimStyle.Render("▸")
+		default:
+			mark = statusEdge(mt.Status)
+		}
+		sb.WriteString(mark + " " + name + updateMark + "\n")
 	}
 
-	if len(filtered) == 0 {
+	if len(matches) == 0 {
 		if m.mode == modeSearch {
 			sb.WriteString(ui.DescStyle.Render("  No matches.") + "\n")
 		} else {
@@ -412,6 +445,41 @@ func (m Model) renderLeftContent() string {
 	}
 
 	return sb.String()
+}
+
+// highlightNameMatch renders the first occurrence of the query inside the
+// (possibly wrapped) tool name peach-bold — distinct from highlightMatch
+// (textutil.go), the single-line ColorKey highlighter of the help search.
+// Matching is case-insensitive (rune-wise via runeIndexFold, so names whose
+// lowercase form has a different byte length cannot desync the slice offsets)
+// and per-line: a match split across a wrap boundary stays unhighlighted.
+// query must already be lowercase (searchQuery normalizes it).
+func highlightNameMatch(name, query string) string {
+	lines := strings.Split(name, "\n")
+	qr := []rune(query)
+	for i, line := range lines {
+		lr := []rune(line)
+		idx := runeIndexFold(lr, qr)
+		if idx < 0 {
+			continue
+		}
+		end := idx + len(qr)
+		lines[i] = string(lr[:idx]) + ui.SelectedNameStyle.Render(string(lr[idx:end])) + string(lr[end:])
+	}
+	return strings.Join(lines, "\n")
+}
+
+// statusEdge marks non-active tools with a colored left edge in the marker
+// column; active is the norm and gets a plain space.
+func statusEdge(s loader.Status) string {
+	switch s {
+	case loader.StatusTrying:
+		return ui.StatusStyleTrying.Render("▎")
+	case loader.StatusInactive:
+		return ui.StatusStyleInactive.Render("▎")
+	default:
+		return " "
+	}
 }
 
 // syncToolsViewport adjusts YOffset so that metaSelected is visible.
@@ -458,15 +526,48 @@ func (m Model) renderBrief() string {
 }
 
 func (m Model) renderHelp() string {
+	focused := m.focus == focusHelp
 	panelStyle := ui.PanelBorder
-	if m.focus == focusHelp {
+	if focused {
 		panelStyle = ui.PanelBorderFocused
 	}
 
-	return panelStyle.
+	title := "--help"
+	if m.helpMode == helpModeMan {
+		title = "man"
+	}
+	panel := panelStyle.
 		Width(m.helpW).
 		Height(max(m.height-7, 1)).
-		Render(withScrollbar(m.helpViewport, m.helpW, m.focus == focusHelp))
+		Render(withScrollbar(m.helpViewport, m.helpW, focused))
+	return insetPanelTitle(panel, title, focused)
+}
+
+// insetPanelTitle splices " title " into the top border line of a rendered
+// panel, starting at the 3rd visible cell. The top border is a homogeneously
+// colored run of single-width runes, so instead of ANSI-aware splicing the
+// line is rebuilt from its stripANSI text and repainted whole with the border
+// color (peach when focused). A title that does not fit is dropped whole —
+// the panel is returned unchanged (a chopped title reads worse than none).
+func insetPanelTitle(panel, title string, focused bool) string {
+	lines := strings.SplitN(panel, "\n", 2)
+	top := []rune(stripANSI(lines[0]))
+	label := []rune(" " + title + " ")
+	const start = 2               // keep the corner + one ─ cell
+	avail := len(top) - start - 1 // keep the closing corner
+	if len(label) > avail {
+		return panel
+	}
+	rebuilt := make([]rune, 0, len(top))
+	rebuilt = append(rebuilt, top[:start]...)
+	rebuilt = append(rebuilt, label...)
+	rebuilt = append(rebuilt, top[start+len(label):]...)
+	color := ui.ColorBorder
+	if focused {
+		color = ui.ColorPrimary
+	}
+	lines[0] = lipgloss.NewStyle().Foreground(color).Render(string(rebuilt))
+	return strings.Join(lines, "\n")
 }
 
 // withScrollbar renders a viewport with a 1-col scrollbar gutter on its right
@@ -547,8 +648,12 @@ func (m Model) renderCard() string {
 	}
 	sb.WriteString(title + "\n")
 
-	// [info] section: repo / stars / latest / languages / repo status.
-	hasInfo := t.GitHub != "" ||
+	// [info] section: repo / stars / installed / latest / languages / repo
+	// status. Local detection alone (installed version, no GitHub ref and no
+	// card) is enough to open the section.
+	vinfo := m.versions[t.Name]
+	installed := vinfo.Installed
+	hasInfo := t.GitHub != "" || installed != "" ||
 		(hasCard && (card.Stars > 0 || card.Latest != "" || len(card.Languages) > 0 || card.RepoStatus != ""))
 	if hasInfo {
 		sb.WriteString(m.sectionDivider("info"))
@@ -558,20 +663,36 @@ func (m Model) renderCard() string {
 				sb.WriteString(ui.WarnStyle.Render("rate limited — press [L]") + "\n")
 			}
 		}
+		if hasCard && card.Stars > 0 {
+			sb.WriteString(ui.InfoStyle.Render(fmt.Sprintf("stars: %s", formatStars(card.Stars))) + "\n")
+		}
+		// "not found" only once the local probe reported back — before that
+		// an empty Installed just means the detection is still in flight.
+		switch {
+		case installed != "":
+			sb.WriteString(ui.InfoStyle.Render("installed: "+installed) + "\n")
+		case vinfo.InstalledKnown:
+			sb.WriteString(ui.DescStyle.Render("installed: not found") + "\n")
+		default:
+			sb.WriteString(ui.DescStyle.Render("installed: detecting…") + "\n")
+		}
 		if hasCard {
-			if card.Stars > 0 {
-				sb.WriteString(ui.InfoStyle.Render(fmt.Sprintf("stars: %s", formatStars(card.Stars))) + "\n")
-			}
 			if card.Latest != "" {
-				line := "latest: " + card.Latest
+				var suffix string
 				if card.PublishedAt != "" {
 					date := card.PublishedAt
 					if len(date) > 10 {
 						date = date[:10]
 					}
-					line += " (" + date + ")"
+					suffix = " (" + date + ")"
 				}
-				sb.WriteString(ui.InfoStyle.Render(line) + "\n")
+				if m.hasUpdate(t.Name) {
+					sb.WriteString(ui.InfoStyle.Render("latest: ") +
+						ui.UpdateAvailableStyle.Render(card.Latest+" ↑") +
+						ui.InfoStyle.Render(suffix) + "\n")
+				} else {
+					sb.WriteString(ui.InfoStyle.Render("latest: "+card.Latest+suffix) + "\n")
+				}
 			}
 			if len(card.Languages) > 0 {
 				label := "languages: "

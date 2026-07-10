@@ -24,6 +24,11 @@ const (
 type VersionInfo struct {
 	Installed string
 	Latest    string
+	// InstalledKnown separates "local detection ran and found nothing"
+	// (Installed == "", InstalledKnown == true) from "detection still in
+	// flight" — only the installedMsg handler sets it, so the card can show
+	// a pending state instead of a premature "not found".
+	InstalledKnown bool
 }
 
 // installedMsg carries the locally detected installed version for a tool.
@@ -235,6 +240,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case installedMsg:
 		info := m.versions[msg.toolName]
 		info.Installed = msg.installed
+		info.InstalledKnown = true
 		m.versions[msg.toolName] = info
 		m.toolsViewport.SetContent(m.renderLeftContent())
 		m.briefViewport.SetContent(m.renderCard())
@@ -771,22 +777,70 @@ func (m Model) selectedTool() (loader.Tool, bool) {
 	return loader.Tool{}, false
 }
 
-func (m Model) filteredMeta() []loader.ToolMeta {
-	source := m.meta
+// searchQuery returns the normalized (lowercase, trimmed) live query, or ""
+// when the tool-list search is not active — the empty string doubles as the
+// "no filter" signal for searchMatches and the list renderer.
+func (m Model) searchQuery() string {
+	if m.mode != modeSearch {
+		return ""
+	}
+	return strings.ToLower(strings.TrimSpace(m.search.Value()))
+}
 
-	if m.mode == modeSearch {
-		query := strings.ToLower(strings.TrimSpace(m.search.Value()))
-		if query != "" {
-			var out []loader.ToolMeta
-			for _, mt := range source {
-				if strings.Contains(strings.ToLower(mt.Name), query) {
-					out = append(out, mt)
-				}
+// searchMatch pairs a tool that passed the search filter with how the query
+// matched it: byTagOnly flags rows whose name did not match (a tag did), and
+// tag carries the first matching tag of such a row so the renderer can show
+// what earned it a place in the list (empty on name matches).
+type searchMatch struct {
+	meta      loader.ToolMeta
+	byTagOnly bool
+	tag       string
+}
+
+// searchMatches is the search predicate: a tool matches when its name OR any
+// of its tags contains the query (case-insensitive substring). With no active
+// query every tool passes unmarked. filteredMeta projects this to the plain
+// meta slice for callers that only need the filtered list.
+func (m Model) searchMatches() []searchMatch {
+	query := m.searchQuery()
+	out := make([]searchMatch, 0, len(m.meta))
+	for _, mt := range m.meta {
+		if query == "" {
+			out = append(out, searchMatch{meta: mt})
+			continue
+		}
+		nameHit := strings.Contains(strings.ToLower(mt.Name), query)
+		var tag string
+		if !nameHit {
+			if tag = matchingTag(mt.Tags, query); tag == "" {
+				continue
 			}
-			return out
+		}
+		out = append(out, searchMatch{meta: mt, byTagOnly: !nameHit, tag: tag})
+	}
+	return out
+}
+
+// matchingTag returns the first tag containing the query, or "".
+func matchingTag(tags []string, query string) string {
+	for _, tag := range tags {
+		if strings.Contains(strings.ToLower(tag), query) {
+			return tag
 		}
 	}
-	return source
+	return ""
+}
+
+func (m Model) filteredMeta() []loader.ToolMeta {
+	if m.searchQuery() == "" {
+		return m.meta
+	}
+	matches := m.searchMatches()
+	out := make([]loader.ToolMeta, len(matches))
+	for i, sm := range matches {
+		out[i] = sm.meta
+	}
+	return out
 }
 
 // selectMeta moves the cursor to idx in the current (possibly filtered) list

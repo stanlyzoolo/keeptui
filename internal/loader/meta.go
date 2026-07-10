@@ -11,24 +11,21 @@ import (
 type Status string
 
 const (
-	StatusActive    Status = "active"
-	StatusTrying    Status = "trying"
-	StatusForgotten Status = "forgotten"
-	StatusArchived  Status = "archived"
+	StatusActive   Status = "active"
+	StatusTrying   Status = "trying"
+	StatusInactive Status = "inactive"
 )
 
 var StatusSymbol = map[Status]string{
-	StatusActive:    "●",
-	StatusTrying:    "○",
-	StatusForgotten: "~",
-	StatusArchived:  "✕",
+	StatusActive:   "●",
+	StatusTrying:   "○",
+	StatusInactive: "✕",
 }
 
 var StatusCycle = []Status{
 	StatusActive,
 	StatusTrying,
-	StatusForgotten,
-	StatusArchived,
+	StatusInactive,
 }
 
 type ToolMeta struct {
@@ -66,6 +63,15 @@ func LoadMeta() ([]ToolMeta, error) {
 	var meta []ToolMeta
 	if err := yaml.Unmarshal(data, &meta); err != nil {
 		return nil, err
+	}
+	// In-memory migration of retired statuses; the file keeps the old value
+	// until the next SaveMeta. Unknown statuses pass through untouched —
+	// NextStatus already falls back to active for them.
+	for i := range meta {
+		switch meta[i].Status {
+		case "forgotten", "archived":
+			meta[i].Status = StatusInactive
+		}
 	}
 	return meta, nil
 }

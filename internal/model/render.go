@@ -402,7 +402,7 @@ func (m Model) renderLeftContent() string {
 		// get the same peach-bold style anyway (nesting the ANSI would only
 		// corrupt it).
 		selected := i == m.metaSelected
-		if query != "" && !(selected && m.focus == focusTools) {
+		if query != "" && (!selected || m.focus != focusTools) {
 			name = highlightNameMatch(name, query)
 		}
 

@@ -8,6 +8,9 @@ import (
 )
 
 func TestStatusStyle(t *testing.T) {
+	// Without a forced profile a non-TTY run renders every style to the bare
+	// text, and all comparisons pass vacuously.
+	forceColorProfile(t)
 	tests := []struct {
 		name   string
 		status loader.Status
@@ -26,10 +29,11 @@ func TestStatusStyle(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestStatusStyleInactiveIsMuted(t *testing.T) {
-	if StatusColorInactive != ColorMuted {
-		t.Errorf("StatusColorInactive = %v, want ColorMuted (%v)", StatusColorInactive, ColorMuted)
+	// The three styles must be pairwise distinct, or the comparisons above
+	// prove nothing even with a real color profile.
+	if StatusStyleActive.Render("x") == StatusStyleTrying.Render("x") ||
+		StatusStyleTrying.Render("x") == StatusStyleInactive.Render("x") ||
+		StatusStyleActive.Render("x") == StatusStyleInactive.Render("x") {
+		t.Error("status styles are not pairwise distinct; the mapping assertions are vacuous")
 	}
 }

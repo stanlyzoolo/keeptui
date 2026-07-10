@@ -57,7 +57,7 @@ func (m Model) renderStatusBar() string {
 			"%s %s  %d/%d  %s open  %s move  %s cancel",
 			ui.SearchPromptStyle.Render("/"),
 			m.search.View(),
-			len(m.filteredMeta()),
+			len(m.searchMatches()),
 			len(m.meta),
 			keyHint("enter"),
 			keyHint("↑/↓"),
@@ -393,7 +393,8 @@ func (m Model) renderLeftContent() string {
 
 		updateMark, updateW := "", 0
 		if m.hasUpdate(mt.Name) {
-			updateMark, updateW = " "+ui.UpdateAvailableStyle.Render("↑"), 2
+			updateMark = " " + ui.UpdateAvailableStyle.Render("↑")
+			updateW = lipgloss.Width(updateMark)
 		}
 
 		// While searching, highlight the matched substring of the name —
@@ -409,8 +410,10 @@ func (m Model) renderLeftContent() string {
 		// spot, dimmed, right of the name — skipped when the row's full
 		// budget (marker column + name column + update mark, see maxName)
 		// cannot absorb it without wrapping.
-		if tagW := lipgloss.Width("#" + sm.tag); sm.byTagOnly && plainNameW+tagW+updateW <= maxName+1 {
-			name += " " + ui.MetaNoteStyle.Render("#"+sm.tag)
+		if sm.byTagOnly {
+			if tagW := lipgloss.Width("#" + sm.tag); plainNameW+tagW+updateW <= maxName+1 {
+				name += " " + ui.MetaNoteStyle.Render("#"+sm.tag)
+			}
 		}
 
 		// Marker column (width 1): ▸ on the selected row — peach while the
@@ -444,20 +447,24 @@ func (m Model) renderLeftContent() string {
 	return sb.String()
 }
 
-// highlightNameMatch renders the query substring inside the (possibly
-// wrapped) tool name peach-bold — distinct from highlightMatch (textutil.go),
-// the single-line ColorKey highlighter of the help search. Matching is
-// case-insensitive and per-line: a match split across a wrap boundary stays
-// unhighlighted. query must already be lowercase (searchQuery normalizes it).
+// highlightNameMatch renders the first occurrence of the query inside the
+// (possibly wrapped) tool name peach-bold — distinct from highlightMatch
+// (textutil.go), the single-line ColorKey highlighter of the help search.
+// Matching is case-insensitive (rune-wise via runeIndexFold, so names whose
+// lowercase form has a different byte length cannot desync the slice offsets)
+// and per-line: a match split across a wrap boundary stays unhighlighted.
+// query must already be lowercase (searchQuery normalizes it).
 func highlightNameMatch(name, query string) string {
 	lines := strings.Split(name, "\n")
+	qr := []rune(query)
 	for i, line := range lines {
-		idx := strings.Index(strings.ToLower(line), query)
+		lr := []rune(line)
+		idx := runeIndexFold(lr, qr)
 		if idx < 0 {
 			continue
 		}
-		end := idx + len(query)
-		lines[i] = line[:idx] + ui.SelectedNameStyle.Render(line[idx:end]) + line[end:]
+		end := idx + len(qr)
+		lines[i] = string(lr[:idx]) + ui.SelectedNameStyle.Render(string(lr[idx:end])) + string(lr[end:])
 	}
 	return strings.Join(lines, "\n")
 }
@@ -540,22 +547,16 @@ func (m Model) renderHelp() string {
 // panel, starting at the 3rd visible cell. The top border is a homogeneously
 // colored run of single-width runes, so instead of ANSI-aware splicing the
 // line is rebuilt from its stripANSI text and repainted whole with the border
-// color (peach when focused). A title that does not fit is truncated to the
-// available run; when no room remains the panel is returned unchanged.
+// color (peach when focused). A title that does not fit is dropped whole —
+// the panel is returned unchanged (a chopped title reads worse than none).
 func insetPanelTitle(panel, title string, focused bool) string {
-	if title == "" {
-		return panel
-	}
 	lines := strings.SplitN(panel, "\n", 2)
 	top := []rune(stripANSI(lines[0]))
 	label := []rune(" " + title + " ")
 	const start = 2               // keep the corner + one ─ cell
 	avail := len(top) - start - 1 // keep the closing corner
-	if avail <= 0 {
-		return panel
-	}
 	if len(label) > avail {
-		label = label[:avail]
+		return panel
 	}
 	rebuilt := make([]rune, 0, len(top))
 	rebuilt = append(rebuilt, top[:start]...)
@@ -650,7 +651,8 @@ func (m Model) renderCard() string {
 	// [info] section: repo / stars / installed / latest / languages / repo
 	// status. Local detection alone (installed version, no GitHub ref and no
 	// card) is enough to open the section.
-	installed := m.versions[t.Name].Installed
+	vinfo := m.versions[t.Name]
+	installed := vinfo.Installed
 	hasInfo := t.GitHub != "" || installed != "" ||
 		(hasCard && (card.Stars > 0 || card.Latest != "" || len(card.Languages) > 0 || card.RepoStatus != ""))
 	if hasInfo {
@@ -664,10 +666,15 @@ func (m Model) renderCard() string {
 		if hasCard && card.Stars > 0 {
 			sb.WriteString(ui.InfoStyle.Render(fmt.Sprintf("stars: %s", formatStars(card.Stars))) + "\n")
 		}
-		if installed != "" {
+		// "not found" only once the local probe reported back — before that
+		// an empty Installed just means the detection is still in flight.
+		switch {
+		case installed != "":
 			sb.WriteString(ui.InfoStyle.Render("installed: "+installed) + "\n")
-		} else {
+		case vinfo.InstalledKnown:
 			sb.WriteString(ui.DescStyle.Render("installed: not found") + "\n")
+		default:
+			sb.WriteString(ui.DescStyle.Render("installed: detecting…") + "\n")
 		}
 		if hasCard {
 			if card.Latest != "" {

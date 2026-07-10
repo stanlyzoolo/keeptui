@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -404,6 +405,18 @@ func TestHighlightNameMatch(t *testing.T) {
 	if got := highlightNameMatch("ab\ncd", "bc"); got != "ab\ncd" {
 		t.Errorf("highlightNameMatch(ab\\ncd, bc) = %q, want untouched across the wrap boundary", got)
 	}
+	// Only the first occurrence per line is highlighted.
+	if got := highlightNameMatch("gogo", "go"); got != ui.SelectedNameStyle.Render("go")+"go" {
+		t.Errorf("highlightNameMatch(gogo, go) = %q, want only the first occurrence styled", got)
+	}
+	// Rune safety: Ⱥ (2 bytes) lowercases to ⱥ (3 bytes), so byte offsets
+	// found in strings.ToLower(line) would slice the original out of range.
+	if got := highlightNameMatch("Ⱥx", "x"); stripANSI(got) != "Ⱥx" || !utf8.ValidString(got) {
+		t.Errorf("highlightNameMatch(Ⱥx, x) = %q, want the name intact and valid UTF-8", got)
+	}
+	if got := highlightNameMatch("Ⱥx", "ⱥ"); stripANSI(got) != "Ⱥx" || !strings.Contains(got, "Ⱥ") {
+		t.Errorf("highlightNameMatch(Ⱥx, ⱥ) = %q, want case-insensitive match on the original rune", got)
+	}
 }
 
 // TestRenderLeftContentMarkerSurvivesFocus verifies the ▸ marker on the
@@ -431,13 +444,15 @@ func TestRenderLeftContentMarkerSurvivesFocus(t *testing.T) {
 }
 
 // TestRenderLeftContentStatusEdge verifies the marker column: ▎ edge on
-// trying/inactive rows, plain space on active rows, and the ▸ marker
-// displacing the edge on the selected row.
+// trying/inactive rows, plain space on active rows and on unknown statuses
+// (hand-edited meta.yaml values reach the renderer untouched), and the ▸
+// marker displacing the edge on the selected row.
 func TestRenderLeftContentStatusEdge(t *testing.T) {
 	m := New([]loader.ToolMeta{
 		{Name: "fzf", Status: loader.StatusActive},
 		{Name: "git", Status: loader.StatusTrying},
 		{Name: "ripgrep", Status: loader.StatusInactive},
+		{Name: "yq", Status: loader.Status("bogus")},
 	})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = updated.(Model)
@@ -453,6 +468,9 @@ func TestRenderLeftContentStatusEdge(t *testing.T) {
 	}
 	if !strings.HasPrefix(lines[2], "▎ ripgrep") {
 		t.Errorf("inactive row = %q, want ▎ edge", lines[2])
+	}
+	if !strings.HasPrefix(lines[3], "  yq") {
+		t.Errorf("unknown-status row = %q, want plain space in the marker column", lines[3])
 	}
 
 	// The ▸ marker takes priority over the status edge on the selected row,
@@ -475,6 +493,7 @@ func TestRenderLeftContentRowWidth(t *testing.T) {
 		{Name: "aa", Status: loader.StatusActive},
 		{Name: "bb", Status: loader.StatusTrying},
 		{Name: "cc", Status: loader.StatusInactive},
+		{Name: "dd", Status: loader.Status("bogus")},
 	})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = updated.(Model)
@@ -520,8 +539,9 @@ func TestRenderHelpTitle(t *testing.T) {
 }
 
 // TestInsetPanelTitle exercises the splice helper directly: a too-narrow
-// panel is returned unchanged (no panic), and a partial fit truncates the
-// title while preserving the top line's visible width.
+// panel is returned unchanged (no panic), a title that does not fit whole is
+// dropped rather than truncated, and a fitting title is inset without
+// changing the top line's visible width.
 func TestInsetPanelTitle(t *testing.T) {
 	narrow := "╭─╮\n│ │\n╰─╯"
 	if got := insetPanelTitle(narrow, "--help", false); got != narrow {
@@ -531,13 +551,19 @@ func TestInsetPanelTitle(t *testing.T) {
 		t.Errorf("empty panel = %q, want unchanged", got)
 	}
 
+	// " --help " needs 8 cells; this top offers 3 — dropped whole, not chopped.
 	partial := "╭────╮\n│    │\n╰────╯"
-	top := stripANSI(strings.SplitN(insetPanelTitle(partial, "--help", true), "\n", 2)[0])
-	if len([]rune(top)) != 6 {
-		t.Errorf("truncated top = %q, visible width = %d, want 6", top, len([]rune(top)))
+	if got := insetPanelTitle(partial, "--help", true); got != partial {
+		t.Errorf("partial-fit panel = %q, want unchanged (title dropped whole)", got)
 	}
-	if !strings.HasPrefix(top, "╭─ --") || !strings.HasSuffix(top, "╮") {
-		t.Errorf("truncated top = %q, want truncated title with corners intact", top)
+
+	fits := "╭──────────╮\n│          │\n╰──────────╯"
+	top := stripANSI(strings.SplitN(insetPanelTitle(fits, "--help", true), "\n", 2)[0])
+	if len([]rune(top)) != 12 {
+		t.Errorf("titled top = %q, visible width = %d, want 12", top, len([]rune(top)))
+	}
+	if !strings.HasPrefix(top, "╭─ --help ") || !strings.HasSuffix(top, "╮") {
+		t.Errorf("titled top = %q, want inset title with corners intact", top)
 	}
 }
 
@@ -2084,26 +2110,22 @@ func TestRenderCardSpinner(t *testing.T) {
 }
 
 // TestRenderCardInstalledLatest covers the [info] version lines: installed:
-// renders whenever the section is open (dim "not found" when local detection
-// came up empty), the section opens for a GitHub-less tool once an installed
-// version is known, and latest: gains the update highlight + ↑ only when the
-// installed version is older.
+// renders whenever the section is open (dim "detecting…" while the local
+// probe is in flight, dim "not found" once it reported empty), the section
+// opens for a GitHub-less tool once an installed version is known, and
+// latest: gains the update highlight + ↑ only when the installed version is
+// older. The model goes through New + WindowSizeMsg so renderCard sees the
+// same initialized state (spinner, widths) as the running app.
 func TestRenderCardInstalledLatest(t *testing.T) {
 	newCardModel := func(github string) Model {
-		m := Model{
-			meta:          []loader.ToolMeta{{Name: "gh", GitHub: github}},
-			versions:      map[string]VersionInfo{},
-			repoStatus:    map[string]string{},
-			repoCards:     map[string]version.RepoCard{},
-			changelogData: map[string]changelogMsg{},
-		}
-		m.tools = loader.ToolsFromMeta(m.meta)
-		return m
+		m := New([]loader.ToolMeta{{Name: "gh", GitHub: github}})
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+		return updated.(Model)
 	}
 
 	t.Run("up to date: both lines, no arrow", func(t *testing.T) {
 		m := newCardModel("cli/cli")
-		m.versions["gh"] = VersionInfo{Installed: "v2.0.0", Latest: "v2.0.0"}
+		m.versions["gh"] = VersionInfo{Installed: "v2.0.0", Latest: "v2.0.0", InstalledKnown: true}
 		m.repoCards["gh"] = version.RepoCard{Latest: "v2.0.0"}
 		card := stripANSI(m.renderCard())
 		if !strings.Contains(card, "installed: v2.0.0") {
@@ -2119,7 +2141,7 @@ func TestRenderCardInstalledLatest(t *testing.T) {
 
 	t.Run("update available: arrow and date suffix", func(t *testing.T) {
 		m := newCardModel("cli/cli")
-		m.versions["gh"] = VersionInfo{Installed: "v1.0.0", Latest: "v2.0.0"}
+		m.versions["gh"] = VersionInfo{Installed: "v1.0.0", Latest: "v2.0.0", InstalledKnown: true}
 		m.repoCards["gh"] = version.RepoCard{Latest: "v2.0.0", PublishedAt: "2026-01-02T15:04:05Z"}
 		card := stripANSI(m.renderCard())
 		if !strings.Contains(card, "latest: v2.0.0 ↑ (2026-01-02)") {
@@ -2130,9 +2152,9 @@ func TestRenderCardInstalledLatest(t *testing.T) {
 		}
 	})
 
-	t.Run("no installed version: not found", func(t *testing.T) {
+	t.Run("detection reported empty: not found", func(t *testing.T) {
 		m := newCardModel("cli/cli")
-		m.versions["gh"] = VersionInfo{Latest: "v2.0.0"}
+		m.versions["gh"] = VersionInfo{Latest: "v2.0.0", InstalledKnown: true}
 		m.repoCards["gh"] = version.RepoCard{Latest: "v2.0.0"}
 		card := stripANSI(m.renderCard())
 		if !strings.Contains(card, "installed: not found") {
@@ -2140,11 +2162,24 @@ func TestRenderCardInstalledLatest(t *testing.T) {
 		}
 	})
 
-	t.Run("no version data at all: not found, no latest", func(t *testing.T) {
+	t.Run("detection pending: detecting, not \"not found\"", func(t *testing.T) {
+		m := newCardModel("cli/cli")
+		m.versions["gh"] = VersionInfo{Latest: "v2.0.0"}
+		m.repoCards["gh"] = version.RepoCard{Latest: "v2.0.0"}
+		card := stripANSI(m.renderCard())
+		if !strings.Contains(card, "installed: detecting…") {
+			t.Errorf("card missing pending installed line; got:\n%s", card)
+		}
+		if strings.Contains(card, "not found") {
+			t.Errorf("card claims not found before detection finished; got:\n%s", card)
+		}
+	})
+
+	t.Run("no version data at all: detecting, no latest", func(t *testing.T) {
 		m := newCardModel("cli/cli")
 		card := stripANSI(m.renderCard())
-		if !strings.Contains(card, "installed: not found") {
-			t.Errorf("card missing installed fallback; got:\n%s", card)
+		if !strings.Contains(card, "installed: detecting…") {
+			t.Errorf("card missing pending installed line; got:\n%s", card)
 		}
 		if strings.Contains(card, "latest:") {
 			t.Errorf("card shows latest with no card data; got:\n%s", card)
@@ -2153,7 +2188,7 @@ func TestRenderCardInstalledLatest(t *testing.T) {
 
 	t.Run("no github with installed: info section opens", func(t *testing.T) {
 		m := newCardModel("")
-		m.versions["gh"] = VersionInfo{Installed: "v1.0.0"}
+		m.versions["gh"] = VersionInfo{Installed: "v1.0.0", InstalledKnown: true}
 		card := stripANSI(m.renderCard())
 		if !strings.Contains(card, "[info]") || !strings.Contains(card, "installed: v1.0.0") {
 			t.Errorf("card missing [info]/installed for GitHub-less tool; got:\n%s", card)

@@ -24,6 +24,11 @@ const (
 type VersionInfo struct {
 	Installed string
 	Latest    string
+	// InstalledKnown separates "local detection ran and found nothing"
+	// (Installed == "", InstalledKnown == true) from "detection still in
+	// flight" — only the installedMsg handler sets it, so the card can show
+	// a pending state instead of a premature "not found".
+	InstalledKnown bool
 }
 
 // installedMsg carries the locally detected installed version for a tool.
@@ -235,6 +240,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case installedMsg:
 		info := m.versions[msg.toolName]
 		info.Installed = msg.installed
+		info.InstalledKnown = true
 		m.versions[msg.toolName] = info
 		m.toolsViewport.SetContent(m.renderLeftContent())
 		m.briefViewport.SetContent(m.renderCard())
@@ -783,8 +789,8 @@ func (m Model) searchQuery() string {
 
 // searchMatch pairs a tool that passed the search filter with how the query
 // matched it: byTagOnly flags rows whose name did not match (a tag did), and
-// tag carries the first matching tag so the renderer can show what earned the
-// row its place in the list.
+// tag carries the first matching tag of such a row so the renderer can show
+// what earned it a place in the list (empty on name matches).
 type searchMatch struct {
 	meta      loader.ToolMeta
 	byTagOnly bool
@@ -804,9 +810,11 @@ func (m Model) searchMatches() []searchMatch {
 			continue
 		}
 		nameHit := strings.Contains(strings.ToLower(mt.Name), query)
-		tag := matchingTag(mt.Tags, query)
-		if !nameHit && tag == "" {
-			continue
+		var tag string
+		if !nameHit {
+			if tag = matchingTag(mt.Tags, query); tag == "" {
+				continue
+			}
 		}
 		out = append(out, searchMatch{meta: mt, byTagOnly: !nameHit, tag: tag})
 	}
@@ -824,6 +832,9 @@ func matchingTag(tags []string, query string) string {
 }
 
 func (m Model) filteredMeta() []loader.ToolMeta {
+	if m.searchQuery() == "" {
+		return m.meta
+	}
 	matches := m.searchMatches()
 	out := make([]loader.ToolMeta, len(matches))
 	for i, sm := range matches {

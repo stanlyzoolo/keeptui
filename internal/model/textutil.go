@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
@@ -269,11 +270,38 @@ func highlightMatch(line, query string) string {
 	if query == "" {
 		return line
 	}
-	ll := strings.ToLower(line)
-	lq := strings.ToLower(query)
-	idx := strings.Index(ll, lq)
+	lr := []rune(line)
+	qr := []rune(strings.ToLower(query))
+	idx := runeIndexFold(lr, qr)
 	if idx < 0 {
 		return line
 	}
-	return line[:idx] + ui.SearchMatchStyle.Render(line[idx:idx+len(query)]) + line[idx+len(query):]
+	end := idx + len(qr)
+	return string(lr[:idx]) + ui.SearchMatchStyle.Render(string(lr[idx:end])) + string(lr[end:])
+}
+
+// runeIndexFold returns the rune index of the first occurrence of query
+// (already lowercase) in line, comparing case-insensitively rune by rune.
+// Working in runes keeps the offsets valid for slicing line itself:
+// strings.Index over strings.ToLower(line) yields byte offsets into the
+// lowered string, which drift — and can slice out of range — when
+// lowercasing changes a rune's UTF-8 length (e.g. Ⱥ U+023A is 2 bytes, its
+// lowercase ⱥ U+2C65 is 3).
+func runeIndexFold(line, query []rune) int {
+	if len(query) == 0 {
+		return -1
+	}
+	for i := 0; i+len(query) <= len(line); i++ {
+		hit := true
+		for j, q := range query {
+			if unicode.ToLower(line[i+j]) != q {
+				hit = false
+				break
+			}
+		}
+		if hit {
+			return i
+		}
+	}
+	return -1
 }

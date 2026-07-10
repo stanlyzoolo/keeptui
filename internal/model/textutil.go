@@ -1,6 +1,7 @@
 package model
 
 import (
+	"bytes"
 	"fmt"
 	"regexp"
 	"sort"
@@ -168,6 +169,15 @@ func stripMarkdown(s string) string {
 
 func stripANSI(s string) string {
 	return ui.StripANSI(s)
+}
+
+// isTUITakeover reports whether captured probe output shows the tool started
+// a full-screen TUI instead of printing help: entering or leaving the
+// alternate screen (ESC[?1049h/l) is the one sequence real help text never
+// contains. The check runs on the RAW capture — cleanTerminalOutput strips
+// exactly this evidence.
+func isTUITakeover(out []byte) bool {
+	return bytes.Contains(out, []byte("\x1b[?1049"))
 }
 
 // cleanTerminalOutput strips ANSI escapes, carriage returns, and backspace

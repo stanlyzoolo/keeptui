@@ -239,6 +239,13 @@ func fetchHelpCmd(name string, mode int) tea.Cmd {
 				proc.DetachTTY(cmd)
 				out, e := cmd.CombinedOutput()
 				err = e
+				// A tool that answered the flag by booting its own TUI leaves
+				// the alt-screen signature in the capture (plus a crash trace,
+				// since DetachTTY cut it off from /dev/tty). That is not help
+				// text — fall through to the "No --help output" message.
+				if isTUITakeover(out) {
+					continue
+				}
 				if len(out) > 0 {
 					output = out
 					break

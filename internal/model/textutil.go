@@ -1,6 +1,7 @@
 package model
 
 import (
+	"bytes"
 	"fmt"
 	"regexp"
 	"sort"
@@ -170,20 +171,36 @@ func stripANSI(s string) string {
 	return ui.StripANSI(s)
 }
 
+// isTUITakeover reports whether captured probe output shows the tool started
+// a full-screen TUI instead of printing help: entering or leaving the
+// alternate screen (ESC[?1049h/l) is the one sequence real help text never
+// contains. The check runs on the RAW capture — cleanTerminalOutput strips
+// exactly this evidence.
+func isTUITakeover(out []byte) bool {
+	return bytes.Contains(out, []byte("\x1b[?1049"))
+}
+
 // cleanTerminalOutput strips ANSI escapes, carriage returns, and backspace
 // overstrike (man pages render bold/underline as "x\bx"/"_\bx"). Leaving the
 // backspaces in makes lipgloss miscount widths and overflow the panel.
+// Remaining control characters (BEL, form feed, a lone ESC from a sequence
+// cut mid-stream by the probe timeout, …) are dropped too — this text goes
+// into a viewport verbatim, so anything non-printable reaches the terminal.
 func cleanTerminalOutput(s string) string {
 	s = stripANSI(s)
 	out := make([]rune, 0, len(s))
 	for _, r := range s {
-		switch r {
-		case '\r':
+		switch {
+		case r == '\r':
 			// drop
-		case '\b':
+		case r == '\b':
 			if len(out) > 0 {
 				out = out[:len(out)-1]
 			}
+		case r == '\n' || r == '\t':
+			out = append(out, r)
+		case r < 0x20 || r == 0x7f:
+			// drop
 		default:
 			out = append(out, r)
 		}

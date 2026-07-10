@@ -10,6 +10,7 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/lepeshko/keys/internal/loader"
+	"github.com/lepeshko/keys/internal/proc"
 )
 
 var versionRe = regexp.MustCompile(`v?(\d+\.\d+[\d.]*)`)
@@ -32,7 +33,11 @@ func InstalledVersion(t loader.Tool) string {
 			continue
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		out, err := exec.CommandContext(ctx, args[0], args[1:]...).CombinedOutput()
+		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+		// Detached from the controlling terminal: a tool that ignores
+		// --version/-V and starts a TUI must not reach keys' screen.
+		proc.DetachTTY(cmd)
+		out, err := cmd.CombinedOutput()
 		cancel()
 		if err != nil {
 			continue

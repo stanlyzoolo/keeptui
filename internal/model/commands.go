@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/lepeshko/keys/internal/loader"
+	"github.com/lepeshko/keys/internal/proc"
 	"github.com/lepeshko/keys/internal/version"
 )
 
@@ -221,17 +222,30 @@ func fetchHelpCmd(name string, mode int) tea.Cmd {
 		// Each mode has exactly one source — no silent cross-fallback — so [m]
 		// and [h] are distinct and a missing page/flag surfaces its own message
 		// instead of masquerading as the other.
+		// Every probe runs detached from the controlling terminal: a tool
+		// that answers --help/-h/help by booting its own TUI would otherwise
+		// grab /dev/tty and shred keys' screen (see internal/proc).
 		if mode == helpModeMan {
 			cmd := exec.CommandContext(ctx, "man", name)
 			cmd.Env = append(os.Environ(), "MANPAGER=cat", "MANWIDTH=80", "TERM=dumb")
+			proc.DetachTTY(cmd)
 			output, err = cmd.Output()
 		} else {
 			for _, args := range [][]string{{"--help"}, {"-h"}, {"help"}} {
 				if ctx.Err() != nil {
 					break
 				}
-				out, e := exec.CommandContext(ctx, name, args...).CombinedOutput()
+				cmd := exec.CommandContext(ctx, name, args...)
+				proc.DetachTTY(cmd)
+				out, e := cmd.CombinedOutput()
 				err = e
+				// A tool that answered the flag by booting its own TUI leaves
+				// the alt-screen signature in the capture (plus a crash trace,
+				// since DetachTTY cut it off from /dev/tty). That is not help
+				// text — fall through to the "No --help output" message.
+				if isTUITakeover(out) {
+					continue
+				}
 				if len(out) > 0 {
 					output = out
 					break

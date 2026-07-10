@@ -1,10 +1,10 @@
 package ui
 
 import (
-	"regexp"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/mattn/go-runewidth"
 )
 
@@ -102,10 +102,12 @@ func dropVisible(s string, w int) string {
 	return b.String()
 }
 
-var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
-
 // StripANSI removes ANSI escape sequences from s. It is the single ANSI-strip
-// helper shared across packages (the model layer delegates to it).
+// helper shared across packages (the model layer delegates to it). It must
+// cover the full escape grammar, not just SGR: captured tool output can carry
+// private-mode CSI (ESC[?1049l — leave alternate screen), OSC, DCS, … which a
+// simple [0-9;]* regex misses; anything left unstripped is re-emitted by the
+// renderer and flips the real terminal's state mid-frame.
 func StripANSI(s string) string {
-	return ansiRe.ReplaceAllString(s, "")
+	return ansi.Strip(s)
 }

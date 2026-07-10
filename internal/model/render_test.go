@@ -103,6 +103,13 @@ func TestCleanTerminalOutput(t *testing.T) {
 		{"bold overstrike (man bold)", "N\bNA\bA", "NA"},
 		{"carriage return dropped", "x\ry", "xy"},
 		{"strips ANSI escapes", "\x1b[1mhi\x1b[0m", "hi"},
+		// A TUI tool probed with --help can leave terminal-state escapes in
+		// its captured output (the inertia incident): re-emitting them from
+		// the help viewport flips the real terminal out of the alt screen.
+		{"strips private-mode CSI (alt screen)", "\x1b[?1049lpanic: boom", "panic: boom"},
+		{"strips OSC title", "\x1b]0;title\x07text", "text"},
+		{"drops stray control chars, keeps \\n and \\t", "a\x07b\fc\nd\te", "abc\nd\te"},
+		{"drops lone ESC from a truncated sequence", "cut\x1b", "cut"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

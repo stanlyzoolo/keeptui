@@ -18,6 +18,19 @@ func TestStripANSI(t *testing.T) {
 	if got := StripANSI("plain"); got != "plain" {
 		t.Errorf("StripANSI(plain) = %q, want %q", got, "plain")
 	}
+	// Full escape grammar, not just SGR: private-mode CSI and OSC show up in
+	// captured tool output and must not survive into rendered content.
+	for in, want := range map[string]string{
+		"\x1b[?1049lx":               "x", // leave alternate screen
+		"\x1b[?25hx":                 "x", // show cursor
+		"\x1b]0;title\x07x":          "x", // OSC window title, BEL-terminated
+		"\x1b]8;;http://e\x1b\\link": "link",
+		"\x1b[38;2;1;2;3mrgb\x1b[0m": "rgb",
+	} {
+		if got := StripANSI(in); got != want {
+			t.Errorf("StripANSI(%q) = %q, want %q", in, got, want)
+		}
+	}
 }
 
 // TestPlaceOverlayCenters verifies the foreground box is spliced into the middle

@@ -2138,7 +2138,7 @@ func TestRenderCardInstalledLatest(t *testing.T) {
 		if !strings.Contains(card, "installed: v2.0.0") {
 			t.Errorf("card missing installed line; got:\n%s", card)
 		}
-		if !strings.Contains(card, "latest: v2.0.0") {
+		if !strings.Contains(card, "latest:  v2.0.0") {
 			t.Errorf("card missing latest line; got:\n%s", card)
 		}
 		if strings.Contains(card, "↑") {
@@ -2151,7 +2151,7 @@ func TestRenderCardInstalledLatest(t *testing.T) {
 		m.versions["gh"] = VersionInfo{Installed: "v1.0.0", Latest: "v2.0.0", InstalledKnown: true}
 		m.repoCards["gh"] = version.RepoCard{Latest: "v2.0.0", PublishedAt: "2026-01-02T15:04:05Z"}
 		card := stripANSI(m.renderCard())
-		if !strings.Contains(card, "latest: v2.0.0 ↑ (2026-01-02)") {
+		if !strings.Contains(card, "latest:  v2.0.0 ↑ (2026-01-02)") {
 			t.Errorf("card missing highlighted latest with arrow; got:\n%s", card)
 		}
 		if !strings.Contains(card, "installed: v1.0.0") {
@@ -2190,6 +2190,25 @@ func TestRenderCardInstalledLatest(t *testing.T) {
 		}
 		if strings.Contains(card, "latest:") {
 			t.Errorf("card shows latest with no card data; got:\n%s", card)
+		}
+	})
+
+	// A repo card can exist with no release at all (repo info + stars fetched,
+	// no tagged release): the latest: line and its tag icon are gated on
+	// card.Latest != "", so neither may appear.
+	t.Run("card without a release: no latest line, no tag icon", func(t *testing.T) {
+		m := newCardModel("cli/cli")
+		m.versions["gh"] = VersionInfo{Installed: "v1.0.0", InstalledKnown: true}
+		m.repoCards["gh"] = version.RepoCard{Stars: 42}
+		card := stripANSI(m.renderCard())
+		if !strings.Contains(card, "installed: v1.0.0") {
+			t.Errorf("card missing installed line; got:\n%s", card)
+		}
+		if strings.Contains(card, "latest:") {
+			t.Errorf("card shows latest line with no release; got:\n%s", card)
+		}
+		if strings.Contains(card, "") {
+			t.Errorf("card shows the tag icon with no release; got:\n%s", card)
 		}
 	})
 

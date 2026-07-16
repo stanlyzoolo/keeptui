@@ -688,10 +688,10 @@ func (m Model) renderCard() string {
 				}
 				if m.hasUpdate(t.Name) {
 					sb.WriteString(ui.InfoStyle.Render("latest: ") +
-						ui.UpdateAvailableStyle.Render(card.Latest+" ↑") +
+						ui.UpdateAvailableStyle.Render(" "+card.Latest+" ↑") +
 						ui.InfoStyle.Render(suffix) + "\n")
 				} else {
-					sb.WriteString(ui.InfoStyle.Render("latest: "+card.Latest+suffix) + "\n")
+					sb.WriteString(ui.InfoStyle.Render("latest:  "+card.Latest+suffix) + "\n")
 				}
 			}
 			if len(card.Languages) > 0 {

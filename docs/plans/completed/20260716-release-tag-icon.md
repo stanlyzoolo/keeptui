@@ -1,7 +1,7 @@
 # Release Tag Icon in the Brief Card
 
 ## Overview
-- Add a Nerd Font tag icon (`` U+F412, nf-oct-tag) to the `latest:` release line in the brief card's `[info]` section, mirroring the tag octicon GitHub shows next to a release tag.
+- Add a Nerd Font tag icon (`` U+F412, nf-oct-tag) to the `latest:` release line in the brief card's `[info]` section, mirroring the tag octicon GitHub shows next to a release tag.
 - Purely cosmetic: makes the release line scannable at a glance and visually consistent with GitHub's release UI.
 - Integrates into the existing `renderCard` `[info]` section; no data-flow, state, or fetch changes.
 
@@ -34,12 +34,12 @@
 - Insert the glyph between the `latest: ` label and the version, styled with whatever styles the version itself:
   - Update branch: `ui.InfoStyle.Render("latest: ") + ui.UpdateAvailableStyle.Render(" "+card.Latest+" ↑") + ui.InfoStyle.Render(suffix)` — the icon shares the peach highlight with the version and arrow.
   - Normal branch: `ui.InfoStyle.Render("latest:  "+card.Latest+suffix)` — the icon shares the muted line style.
-- Rendered result: `latest:  v1.2.3 (2024-01-15)` / `latest:  v2.0.0 ↑ (2026-01-02)`.
+- Rendered result: `latest:  v1.2.3 (2024-01-15)` / `latest:  v2.0.0 ↑ (2026-01-02)`.
 - The icon renders only when `card.Latest != ""` — already guaranteed by the enclosing branch condition, so no "tag icon with no tag" state exists.
 - Inline literal (no `ui` constant): matches the codebase convention for `▸`/`▎`/`↑` — chosen in the brainstorm over a named constant (YAGNI, single call site).
 
 ## Technical Details
-- Glyph: `` U+F412 (Nerd Font nf-oct-tag). Requires a Nerd Font-patched terminal font; renders as tofu otherwise — accepted, no fallback (see out of scope).
+- Glyph: `` U+F412 (Nerd Font nf-oct-tag). Requires a Nerd Font-patched terminal font; renders as tofu otherwise — accepted, no fallback (see out of scope).
 - Known accepted risk: U+F412 is in the Private Use Area, which is East-Asian-Ambiguous; under `RUNEWIDTH_EASTASIAN=1` it may measure 2 cells. The icon lives in flowing viewport content (not the right-aligned status bar), so the worst case is a wrap one cell early — acceptable and documented here.
 - No data-structure, message, cache, or storage changes.
 
@@ -55,23 +55,27 @@
 - Modify: `internal/model/render.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] in `render.go` (lines 689–695), insert ` ` before `card.Latest` in the update branch, inside the `UpdateAvailableStyle.Render` call together with the version and ` ↑`
-- [ ] in the same block, insert ` ` before `card.Latest` in the normal branch, inside the single `InfoStyle.Render` call
-- [ ] update the assert at `render_test.go:2141` to `strings.Contains(card, "latest:  v2.0.0")`
-- [ ] update the assert at `render_test.go:2154` to `strings.Contains(card, "latest:  v2.0.0 ↑ (2026-01-02)")`
-- [ ] run `go test -race ./...` — must pass before task 2
+- [x] in `render.go` (lines 689–695), insert ` ` before `card.Latest` in the update branch, inside the `UpdateAvailableStyle.Render` call together with the version and ` ↑`
+- [x] in the same block, insert ` ` before `card.Latest` in the normal branch, inside the single `InfoStyle.Render` call
+- [x] update the assert at `render_test.go:2141` to `strings.Contains(card, "latest:  v2.0.0")`
+- [x] update the assert at `render_test.go:2154` to `strings.Contains(card, "latest:  v2.0.0 ↑ (2026-01-02)")`
+- [x] run `go test -race ./...` — must pass before task 2
+- ⚠️ Both asserts first landed with two literal spaces instead of U+F412 — the glyph was lost copying from this plan's own "Rendered result" line, which carried the same defect. The suite went red and Task 2 was started regardless; fixed 2026-07-17 by writing the codepoint explicitly.
 
 ### Task 2: Verify acceptance criteria
 
-- [ ] verify the icon appears in both branches (with and without update) and only when `card.Latest != ""`
-- [ ] verify no other tests or renderers assume the old `latest: <version>` format (`grep -rn '"latest: ' internal/`)
-- [ ] run full suite: `go build .`, `go vet ./...`, `go test -race ./...`
-- [ ] run `golangci-lint run`
+- [x] verify the icon appears in both branches (with and without update) and only when `card.Latest != ""`
+- [x] verify no other tests or renderers assume the old `latest: <version>` format (`grep -rn '"latest: ' internal/`)
+- [x] run full suite: `go build .`, `go vet ./...`, `go test -race ./...`
+- [x] run `golangci-lint run` — 0 issues
+- ⚠️ The installed `golangci-lint` is v1.64.8 (built with go1.24) while `.golangci.yml` is v2 format and the module targets go 1.25.0, so it refuses to load the config. Ran the matching major instead: `go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest run`.
+- ➕ [x] add a regression test for the gate — a repo card with stars but no release must render neither the `latest:` line nor the icon (`card without a release: no latest line, no tag icon` in `TestRenderCardInstalledLatest`); the `card.Latest != ""` branch was previously verified only by reading the code.
 
 ### Task 3: [Final] Update documentation
 
-- [ ] add one sentence to the "Card versions" bullet in `CLAUDE.md` noting the `latest:` value is prefixed with the Nerd Font tag glyph (U+F412, tofu without a Nerd Font — accepted)
-- [ ] move this plan to `docs/plans/completed/`
+- [x] add one sentence to the "Card versions" bullet in `CLAUDE.md` noting the `latest:` value is prefixed with the Nerd Font tag glyph (U+F412, tofu without a Nerd Font — accepted)
+- [x] move this plan to `docs/plans/completed/`
+- ➕ [x] restore the glyph in this plan itself (lines 4, 37, 42 had been stripped to empty backticks / two spaces) — it is the text the `CLAUDE.md` sentence gets copied from, so the defect would have propagated again.
 
 ## Post-Completion
 *Items requiring manual intervention or external systems — no checkboxes, informational only*

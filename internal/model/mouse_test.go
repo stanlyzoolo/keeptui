@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/lepeshko/keys/internal/loader"
 )
@@ -35,6 +37,78 @@ func wheelDown(x, y int) tea.MouseMsg {
 // (row 0 = top margin, row 1 = border, row 2 = first list row).
 func toolRowY(m Model, idx int) int {
 	return 2 + idx - m.toolsViewport.YOffset
+}
+
+// forceColor pins the color profile for one test: renderLeftContent's
+// focus-dependent parts are colors only (peach vs dim selection bar), and the
+// default test profile strips them, which would make the assertions below pass
+// against any staleness bug.
+func forceColor(t *testing.T) {
+	t.Helper()
+	prev := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(prev) })
+}
+
+// TestMouseFocusRefreshesToolsList is the staleness repro: a click that moves
+// focus off the tools list must leave the list rendered as unfocused (dim
+// selection bar). The bug it guards is a click path that writes m.focus
+// directly and never re-renders the list, so it keeps the peach focused bar.
+func TestMouseFocusRefreshesToolsList(t *testing.T) {
+	tests := []struct {
+		name  string
+		click func(m Model) tea.MouseMsg
+		want  int
+	}{
+		{"click brief", func(m Model) tea.MouseMsg { return leftClick(m.toolsW+3, 5) }, focusBrief},
+		{"click help", func(m Model) tea.MouseMsg { return leftClick(m.toolsW+m.briefW+5, 5) }, focusHelp},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			forceColor(t)
+			m := newMouseTestModel(t, 120, 24, "alpha", "beta")
+			m.setFocus(focusTools)
+			m.setToolsContent()
+
+			updated, _ := m.Update(tt.click(m))
+			nm := updated.(Model)
+			if nm.focus != tt.want {
+				t.Fatalf("focus = %d, want %d", nm.focus, tt.want)
+			}
+
+			want := firstRow(nm.renderLeftContent())
+			got := strings.TrimRight(firstRow(nm.toolsViewport.View()), " ")
+			if got != want {
+				t.Errorf("tools row 0 = %q,\n                want %q (a fresh unfocused render)", got, want)
+			}
+		})
+	}
+}
+
+// TestMouseFocusBackToToolsRefreshesList covers the mirror case: clicking the
+// already-selected row must re-render the list as focused (peach bar), even
+// though the selection does not move and selectMeta never runs.
+func TestMouseFocusBackToToolsRefreshesList(t *testing.T) {
+	forceColor(t)
+	m := newMouseTestModel(t, 120, 24, "alpha", "beta")
+	m.setFocus(focusBrief)
+
+	updated, _ := m.Update(leftClick(1, toolRowY(m, 0)))
+	nm := updated.(Model)
+	if nm.focus != focusTools {
+		t.Fatalf("focus = %d, want focusTools", nm.focus)
+	}
+
+	want := firstRow(nm.renderLeftContent())
+	got := strings.TrimRight(firstRow(nm.toolsViewport.View()), " ")
+	if got != want {
+		t.Errorf("tools row 0 = %q,\n                want %q (a fresh focused render)", got, want)
+	}
+}
+
+func firstRow(s string) string {
+	row, _, _ := strings.Cut(s, "\n")
+	return row
 }
 
 // TestMouseClickIgnoredWhileEditingNote is the wrong-target repro: with the

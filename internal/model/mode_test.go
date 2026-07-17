@@ -754,3 +754,124 @@ func TestQuitTypedIntoSearch(t *testing.T) {
 		t.Errorf("search value = %q, expected the q rune to land in the query", nm.search.Value())
 	}
 }
+
+// TestFocusDigitHotkeys drives the 1/2/3 hotkeys from every starting focus,
+// including the tools→help jump the arrows cannot do in one step.
+func TestFocusDigitHotkeys(t *testing.T) {
+	tests := []struct {
+		name string
+		from int
+		key  string
+		want int
+	}{
+		{"tools to help", focusTools, "3", focusHelp},
+		{"help to tools", focusHelp, "1", focusTools},
+		{"tools to brief", focusTools, "2", focusBrief},
+		{"brief to help", focusBrief, "3", focusHelp},
+		{"help to brief", focusHelp, "2", focusBrief},
+		{"brief to tools", focusBrief, "1", focusTools},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(tt.from)
+
+			updated, _ := m.Update(keyRunes(tt.key))
+			if got := updated.(Model).focus; got != tt.want {
+				t.Errorf("after %q focus = %d, want %d", tt.key, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestFocusArrowKeys covers the arrow/l walk: one panel per press, no wrap at
+// either edge.
+func TestFocusArrowKeys(t *testing.T) {
+	right := tea.KeyMsg{Type: tea.KeyRight}
+	left := tea.KeyMsg{Type: tea.KeyLeft}
+
+	tests := []struct {
+		name string
+		from int
+		key  tea.KeyMsg
+		want int
+	}{
+		{"right tools to brief", focusTools, right, focusBrief},
+		{"right brief to help", focusBrief, right, focusHelp},
+		{"right at help does not wrap", focusHelp, right, focusHelp},
+		{"l tools to brief", focusTools, keyRunes("l"), focusBrief},
+		{"left help to brief", focusHelp, left, focusBrief},
+		{"left brief to tools", focusBrief, left, focusTools},
+		{"left at tools does not wrap", focusTools, left, focusTools},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(tt.from)
+
+			updated, _ := m.Update(tt.key)
+			if got := updated.(Model).focus; got != tt.want {
+				t.Errorf("focus = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestEscWalksFocusThenQuits verifies esc steps left panel by panel and only
+// quits off the left edge (focusTools).
+func TestEscWalksFocusThenQuits(t *testing.T) {
+	esc := tea.KeyMsg{Type: tea.KeyEsc}
+
+	m := newTestModel(focusHelp)
+	for _, want := range []int{focusBrief, focusTools} {
+		updated, cmd := m.Update(esc)
+		m = updated.(Model)
+		if m.focus != want {
+			t.Fatalf("focus = %d, want %d", m.focus, want)
+		}
+		if cmd != nil {
+			if _, isQuit := cmd().(tea.QuitMsg); isQuit {
+				t.Fatalf("esc quit from focus %d, want a focus move", want)
+			}
+		}
+	}
+
+	_, cmd := m.Update(esc)
+	if cmd == nil {
+		t.Fatal("esc from focusTools returned no cmd, want quit")
+	}
+	if _, isQuit := cmd().(tea.QuitMsg); !isQuit {
+		t.Error("esc from focusTools did not quit")
+	}
+}
+
+// TestFocusDigitSamePanelNoop verifies the digit of the already-focused panel
+// leaves the focus (and the mode) alone.
+func TestFocusDigitSamePanelNoop(t *testing.T) {
+	m := newTestModel(focusBrief)
+
+	updated, _ := m.Update(keyRunes("2"))
+	nm := updated.(Model)
+	if nm.focus != focusBrief {
+		t.Errorf("focus = %d, want focusBrief unchanged", nm.focus)
+	}
+	if nm.mode != modeNormal {
+		t.Errorf("mode = %d, want modeNormal", nm.mode)
+	}
+}
+
+// TestFocusDigitTypedIntoSearch verifies a digit is query text while searching,
+// not a focus jump — the mode dispatch owns the input.
+func TestFocusDigitTypedIntoSearch(t *testing.T) {
+	m := newTestModel(focusTools)
+	m.mode = modeSearch
+	m.search = textinput.New()
+	m.search.Focus()
+
+	updated, _ := m.Update(keyRunes("3"))
+	nm := updated.(Model)
+	if nm.focus != focusTools {
+		t.Errorf("focus = %d, want focusTools unchanged while searching", nm.focus)
+	}
+	if nm.search.Value() != "3" {
+		t.Errorf("search value = %q, expected the 3 rune to land in the query", nm.search.Value())
+	}
+}

@@ -241,11 +241,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.handleMouse(msg)
 
 	case installedMsg:
+		// A version merge can flip hasUpdate and reorder the grouped list, so
+		// capture the selected tool by name before the merge and remap the
+		// cursor onto its new row after — the selection follows the tool, not
+		// the index. No auto-fetch (don't route through selectMeta).
+		prev, hasSel := m.selectedMeta()
 		info := m.versions[msg.toolName]
 		info.Installed = msg.installed
 		info.InstalledKnown = true
 		m.versions[msg.toolName] = info
-		m.toolsViewport.SetContent(m.renderLeftContent())
+		if hasSel {
+			m.metaSelected = m.indexOfMeta(prev.Name)
+		}
+		m.setToolsContent()
 		m.briefViewport.SetContent(m.renderCard())
 		return m, nil
 
@@ -258,6 +266,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case remoteMsg:
+		// Capture the selected tool by name before any merge: a fresh Latest can
+		// flip hasUpdate and reorder the grouped list, so the cursor must follow
+		// the tool, not the row index (remapped below, no auto-fetch).
+		prev, hasSel := m.selectedMeta()
 		// Merge the rate snapshot without clobbering a known value with an
 		// unknown one (cache-hit remote fetches make no request, so carry
 		// Known==false).
@@ -280,7 +292,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.repoStatus[msg.toolName] = msg.repoStatus
 			}
 			m.repoCards[msg.toolName] = msg.card
-			m.toolsViewport.SetContent(m.renderLeftContent())
+			if hasSel {
+				m.metaSelected = m.indexOfMeta(prev.Name)
+			}
+			m.setToolsContent()
 			m.briefViewport.SetContent(m.renderCard())
 		case msg.repoStatus == "rate-limited":
 			// Rate-limited with no card to show: mark the tool so the card can
@@ -810,8 +825,11 @@ type searchMatch struct {
 
 // searchMatches is the search predicate: a tool matches when its name OR any
 // of its tags contains the query (case-insensitive substring). With no active
-// query every tool passes unmarked. filteredMeta projects this to the plain
-// meta slice for callers that only need the filtered list.
+// query every tool passes unmarked. The result is then stable-partitioned so
+// tools with an available update float to the top of the list (meta.yaml order
+// preserved inside each group) — this ordering is the single projection point
+// every consumer (renderer, filteredMeta, selection/mouse row mapping) sees, so
+// they can never desync. It is display-only: m.meta on disk is never reordered.
 func (m Model) searchMatches() []searchMatch {
 	query := m.searchQuery()
 	out := make([]searchMatch, 0, len(m.meta))
@@ -829,7 +847,23 @@ func (m Model) searchMatches() []searchMatch {
 		}
 		out = append(out, searchMatch{meta: mt, byTagOnly: !nameHit, tag: tag})
 	}
-	return out
+
+	// Stable two-pass partition: updatable rows first, the rest after, each
+	// group keeping its relative (meta.yaml) order. The predicate is exactly
+	// hasUpdate — the same one that renders the ` ↑` suffix, so the group and
+	// the suffix can never disagree.
+	grouped := make([]searchMatch, 0, len(out))
+	for _, sm := range out {
+		if m.hasUpdate(sm.meta.Name) {
+			grouped = append(grouped, sm)
+		}
+	}
+	for _, sm := range out {
+		if !m.hasUpdate(sm.meta.Name) {
+			grouped = append(grouped, sm)
+		}
+	}
+	return grouped
 }
 
 // matchingTag returns the first tag containing the query, or "".
@@ -842,10 +876,11 @@ func matchingTag(tags []string, query string) string {
 	return ""
 }
 
+// filteredMeta projects searchMatches to the plain meta slice. It routes
+// through searchMatches unconditionally (no empty-query fast path): the grouped
+// order must reach the selection/mouse system too, or the renderer (grouped)
+// and every click/cursor (ungrouped m.meta) would target different rows.
 func (m Model) filteredMeta() []loader.ToolMeta {
-	if m.searchQuery() == "" {
-		return m.meta
-	}
 	matches := m.searchMatches()
 	out := make([]loader.ToolMeta, len(matches))
 	for i, sm := range matches {
@@ -883,11 +918,13 @@ func (m *Model) setFocus(f int) {
 	m.setToolsContent()
 }
 
-// indexOfMeta returns the index of the named tool in the full m.meta list,
-// falling back to 0 when the name is empty or the tool is absent (e.g.
-// untracked mid-search).
+// indexOfMeta returns the index of the named tool in the *displayed* order
+// (m.filteredMeta() — the grouped, possibly search-filtered projection), so
+// callers that set m.metaSelected land on the row the renderer actually draws.
+// Falls back to 0 when the name is empty or the tool is absent (e.g. untracked
+// mid-search, or filtered out).
 func (m Model) indexOfMeta(name string) int {
-	for i, mt := range m.meta {
+	for i, mt := range m.filteredMeta() {
 		if mt.Name == name {
 			return i
 		}

@@ -308,6 +308,24 @@ func TestMouseClickHonorsYOffset(t *testing.T) {
 	}
 }
 
+// TestMouseClickResolvesGroupedRow verifies a click resolves the clicked tool
+// through the same grouped projection the renderer uses: with an updatable tool
+// lifted to the top, clicking row 0 selects that tool, not the first meta.yaml
+// entry. handleMouse needs no grouping-specific code — it maps through
+// m.filteredMeta(), which is now grouped.
+func TestMouseClickResolvesGroupedRow(t *testing.T) {
+	m := newMouseTestModel(t, 80, 24, "alpha", "beta", "gamma")
+	// gamma has an update → displayed order is [gamma, alpha, beta].
+	m.versions["gamma"] = VersionInfo{Installed: "1.0", Latest: "2.0", InstalledKnown: true}
+	m.setToolsContent()
+
+	updated, _ := m.Update(leftClick(1, toolRowY(m, 0)))
+	nm := updated.(Model)
+	if sel, ok := nm.selectedMeta(); !ok || sel.Name != "gamma" || nm.metaSelected != 0 {
+		t.Errorf("row-0 click selected %v (idx %d), want gamma (the updatable, top-grouped tool)", sel, nm.metaSelected)
+	}
+}
+
 // TestMouseNoOpBeforeReady verifies mouse events before the first
 // WindowSizeMsg (zero panel widths) are ignored.
 func TestMouseNoOpBeforeReady(t *testing.T) {

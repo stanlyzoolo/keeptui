@@ -11,11 +11,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/lepeshko/keys/internal/loader"
+	"github.com/lepeshko/keys/internal/logx"
 	"github.com/lepeshko/keys/internal/ui"
 	"github.com/lepeshko/keys/internal/version"
 )
 
 func (m Model) View() string {
+	defer logx.Recover("model.View")
+
 	if !m.ready {
 		return "Loading..."
 	}

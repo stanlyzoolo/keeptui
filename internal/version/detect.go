@@ -10,6 +10,7 @@ import (
 	"golang.org/x/mod/semver"
 
 	"github.com/lepeshko/keys/internal/loader"
+	"github.com/lepeshko/keys/internal/logx"
 	"github.com/lepeshko/keys/internal/proc"
 )
 
@@ -28,8 +29,13 @@ func InstalledVersion(t loader.Tool) string {
 		}
 	}
 
+	// Accumulate per-candidate reasons but do not log inside the loop: a
+	// --version miss followed by a -V success must stay silent. Log once, at
+	// the final give-up return, with the tool name and all reasons.
+	var reasons []string
 	for _, args := range candidates {
 		if _, err := exec.LookPath(args[0]); err != nil {
+			reasons = append(reasons, strings.Join(args, " ")+": "+err.Error())
 			continue
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -40,12 +46,15 @@ func InstalledVersion(t loader.Tool) string {
 		out, err := cmd.CombinedOutput()
 		cancel()
 		if err != nil {
+			reasons = append(reasons, strings.Join(args, " ")+": "+err.Error())
 			continue
 		}
 		if m := versionRe.FindString(string(out)); m != "" {
 			return m
 		}
+		reasons = append(reasons, strings.Join(args, " ")+": no version string in output")
 	}
+	logx.Errorf("version.InstalledVersion: %s: %s", t.Name, strings.Join(reasons, "; "))
 	return ""
 }
 

@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/lepeshko/keys/internal/loader"
+	"github.com/lepeshko/keys/internal/logx"
 )
 
 const cacheTTL = 24 * time.Hour
@@ -118,6 +119,7 @@ func doGH(req *http.Request) (*http.Response, error) {
 	}
 	resp, err := ghClient.Do(req)
 	if err != nil {
+		logx.Errorf("version.doGH: %s %s: %v", req.Method, req.URL.Path, err)
 		return nil, err
 	}
 	updateRateFromHeaders(resp.Header)
@@ -146,10 +148,25 @@ var errNoReleases = errors.New("no releases found")
 // from the global rl snapshot, because a concurrent request may overwrite rl
 // between this request's accounting and its classification.
 func classifyStatus(resp *http.Response) error {
+	remaining := resp.Header.Get("X-RateLimit-Remaining")
+	path := ""
+	if resp.Request != nil && resp.Request.URL != nil {
+		path = resp.Request.URL.Path
+	}
 	if resp.StatusCode == http.StatusForbidden || resp.StatusCode == http.StatusTooManyRequests {
-		if resp.Header.Get("X-RateLimit-Remaining") == "0" {
+		if remaining == "0" {
+			logx.Errorf("version.classifyStatus: %s http=%d remaining=%s: rate limited",
+				path, resp.StatusCode, remaining)
 			return ErrRateLimited
 		}
+	}
+	// A 404 is a conclusive "not found" (a stale/private/renamed repo ref), not
+	// a transient failure. It would recur on every startup and re-create the
+	// session log each launch, defeating the "a log file means something went
+	// wrong" signal — so classify it without logging. fetchRelease already
+	// handles its own 404 as errNoReleases before reaching here.
+	if resp.StatusCode != http.StatusNotFound {
+		logx.Errorf("version.classifyStatus: %s http=%d remaining=%s", path, resp.StatusCode, remaining)
 	}
 	return fmt.Errorf("GitHub API: HTTP %d", resp.StatusCode)
 }
@@ -597,14 +614,20 @@ func cacheFilePath() (string, error) {
 func LoadCache() Cache {
 	path, err := cacheFilePath()
 	if err != nil {
+		logx.Errorf("version.LoadCache: resolve path: %v", err)
 		return Cache{}
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
+		// A cold start with no cache.json yet is not an error.
+		if !os.IsNotExist(err) {
+			logx.Errorf("version.LoadCache: read %s: %v", path, err)
+		}
 		return Cache{}
 	}
 	var c Cache
 	if err := json.Unmarshal(data, &c); err != nil {
+		logx.Errorf("version.LoadCache: parse %s: %v", path, err)
 		return Cache{}
 	}
 	return c
@@ -626,11 +649,19 @@ func updateCacheEntry(repo string, mutate func(existing CacheEntry) CacheEntry) 
 func SaveCache(c Cache) {
 	path, err := cacheFilePath()
 	if err != nil {
+		logx.Errorf("version.SaveCache: resolve path: %v", err)
 		return
 	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		logx.Errorf("version.SaveCache: mkdir %s: %v", filepath.Dir(path), err)
 		return
 	}
-	data, _ := json.MarshalIndent(c, "", "  ")
-	os.WriteFile(path, data, 0o644) //nolint:errcheck
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		logx.Errorf("version.SaveCache: marshal: %v", err)
+		return
+	}
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		logx.Errorf("version.SaveCache: write %s: %v", path, err)
+	}
 }

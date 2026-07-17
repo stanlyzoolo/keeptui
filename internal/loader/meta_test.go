@@ -6,6 +6,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/lepeshko/keys/internal/logx"
 )
 
 // useTempConfigDir points MetaPath at a per-test directory and restores the
@@ -247,6 +249,47 @@ func TestLoadMetaMigrationRoundTrip(t *testing.T) {
 	}
 	if reloaded[0].Status != StatusInactive {
 		t.Errorf("reloaded status = %q, want %q", reloaded[0].Status, StatusInactive)
+	}
+}
+
+func TestSaveMetaFailureLogs(t *testing.T) {
+	tmp := t.TempDir()
+	// A regular file where a directory is expected makes MkdirAll fail on
+	// every OS (no chmod, which is a no-op under root and on Windows).
+	blocker := filepath.Join(tmp, "blocker")
+	if err := os.WriteFile(blocker, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	orig := testConfigDir
+	testConfigDir = filepath.Join(blocker, "sub")
+	t.Cleanup(func() { testConfigDir = orig })
+
+	logDir := t.TempDir()
+	restore := logx.SetDirForTesting(logDir)
+	defer restore()
+
+	err := SaveMeta([]ToolMeta{{Name: "x", Status: StatusActive}})
+	if err == nil {
+		t.Fatal("expected SaveMeta to fail")
+	}
+	out := logx.ReadAllForTesting(logDir)
+	if !strings.Contains(out, "loader.SaveMeta") {
+		t.Errorf("expected a SaveMeta log line, got:\n%s", out)
+	}
+}
+
+func TestSaveMetaSuccessNoLog(t *testing.T) {
+	useTempConfigDir(t)
+
+	logDir := t.TempDir()
+	restore := logx.SetDirForTesting(logDir)
+	defer restore()
+
+	if err := SaveMeta([]ToolMeta{{Name: "x", Status: StatusActive}}); err != nil {
+		t.Fatalf("SaveMeta: %v", err)
+	}
+	if out := logx.ReadAllForTesting(logDir); out != "" {
+		t.Errorf("a successful save must not log, got:\n%s", out)
 	}
 }
 

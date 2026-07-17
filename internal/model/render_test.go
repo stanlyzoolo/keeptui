@@ -18,9 +18,34 @@ import (
 	"github.com/muesli/termenv"
 
 	"github.com/lepeshko/keys/internal/loader"
+	"github.com/lepeshko/keys/internal/logx"
 	"github.com/lepeshko/keys/internal/ui"
 	"github.com/lepeshko/keys/internal/version"
 )
+
+// TestUpdateViewNoPanicNoLog confirms a normal Update/View cycle writes no log
+// file — logx.Recover is a no-op without a panic in flight, so View being hot
+// does not create log churn.
+func TestUpdateViewNoPanicNoLog(t *testing.T) {
+	logDir := t.TempDir()
+	restore := logx.SetDirForTesting(logDir)
+	defer restore()
+
+	m := New([]loader.ToolMeta{{Name: "git", Tags: []string{"vcs"}}})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(Model)
+	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	m = updated.(Model)
+	_ = m.View()
+
+	if entries, err := os.ReadDir(logDir); err == nil {
+		for _, e := range entries {
+			if strings.HasPrefix(e.Name(), "keeptui-") {
+				t.Errorf("normal Update/View cycle created a log file: %s", e.Name())
+			}
+		}
+	}
+}
 
 func TestWrapText(t *testing.T) {
 	tests := []struct {
@@ -1397,7 +1422,13 @@ func TestNeedsInstalled(t *testing.T) {
 		{
 			name:     "known installed does not need refetch",
 			tool:     loader.Tool{Name: "git", GitHub: "cli/cli"},
-			versions: map[string]VersionInfo{"git": {Installed: "1.0"}},
+			versions: map[string]VersionInfo{"git": {Installed: "1.0", InstalledKnown: true}},
+			want:     false,
+		},
+		{
+			name:     "probed-but-missing does not need refetch",
+			tool:     loader.Tool{Name: "git", GitHub: "cli/cli"},
+			versions: map[string]VersionInfo{"git": {Installed: "", InstalledKnown: true}},
 			want:     false,
 		},
 		{
@@ -1495,7 +1526,7 @@ func TestAutoFetchCmdsForSelected_NoFetchWhenCached(t *testing.T) {
 		metaSelected:  0,
 		changelogData: map[string]changelogMsg{name: {}},
 		helpCache:     map[string][2]string{name: {helpModeHelp: "cached help"}},
-		versions:      map[string]VersionInfo{name: {Installed: "1.0", Latest: "2.0"}},
+		versions:      map[string]VersionInfo{name: {Installed: "1.0", Latest: "2.0", InstalledKnown: true}},
 		repoCards:     map[string]version.RepoCard{name: {}},
 	}
 	if m.needsInstalled(m.tools[0]) {

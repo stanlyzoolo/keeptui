@@ -502,27 +502,31 @@ func (m *Model) setToolsContent() {
 }
 
 func (m Model) renderTools() string {
+	focused := m.focus == focusTools
 	panelStyle := ui.PanelBorder
-	if m.focus == focusTools {
+	if focused {
 		panelStyle = ui.PanelBorderFocused
 	}
 
-	return panelStyle.
+	panel := panelStyle.
 		Width(m.toolsW).
 		Height(max(m.height-7, 1)).
-		Render(withScrollbar(m.toolsViewport, m.toolsW, m.focus == focusTools))
+		Render(withScrollbar(m.toolsViewport, m.toolsW, focused))
+	return insetPanelTitle(panel, "[1] Tools", focused)
 }
 
 func (m Model) renderBrief() string {
+	focused := m.focus == focusBrief
 	panelStyle := ui.PanelBorder
-	if m.focus == focusBrief {
+	if focused {
 		panelStyle = ui.PanelBorderFocused
 	}
 
-	return panelStyle.
+	panel := panelStyle.
 		Width(m.briefW).
 		Height(max(m.height-7, 1)).
-		Render(withScrollbar(m.briefViewport, m.briefW, m.focus == focusBrief))
+		Render(withScrollbar(m.briefViewport, m.briefW, focused))
+	return insetPanelTitle(panel, "[2] Brief", focused)
 }
 
 func (m Model) renderHelp() string {
@@ -532,9 +536,9 @@ func (m Model) renderHelp() string {
 		panelStyle = ui.PanelBorderFocused
 	}
 
-	title := "--help"
+	title := "[3] Help"
 	if m.helpMode == helpModeMan {
-		title = "man"
+		title = "[3] Man"
 	}
 	panel := panelStyle.
 		Width(m.helpW).
@@ -823,7 +827,7 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		// Left panel (Tools)
 		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress && clickable {
 			// Any click in the panel focuses it, matching brief/help.
-			m.focus = focusTools
+			m.setFocus(focusTools)
 			// Row 0 = top margin, row 1 = panel border, row 2 = first list row.
 			toolIdx := msg.Y - 2 + m.toolsViewport.YOffset
 			filtered := m.filteredMeta()
@@ -841,9 +845,8 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
 			m.briefViewport, cmd = m.briefViewport.Update(msg)
 		case tea.MouseButtonLeft:
-			if msg.Action == tea.MouseActionPress && clickable && m.focus != focusBrief {
-				m.focus = focusBrief
-				m.briefViewport.SetContent(m.renderCard())
+			if msg.Action == tea.MouseActionPress && clickable {
+				m.setFocus(focusBrief)
 			}
 		}
 	} else {
@@ -852,9 +855,8 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		case tea.MouseButtonWheelUp, tea.MouseButtonWheelDown:
 			m.helpViewport, cmd = m.helpViewport.Update(msg)
 		case tea.MouseButtonLeft:
-			if msg.Action == tea.MouseActionPress && clickable && m.focus != focusHelp {
-				m.focus = focusHelp
-				m.helpViewport.SetContent(m.renderHelpContent())
+			if msg.Action == tea.MouseActionPress && clickable {
+				m.setFocus(focusHelp)
 			}
 		}
 	}

@@ -510,37 +510,45 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 
+		// esc walks left panel by panel and quits off the left edge; left/right
+		// walk without wrapping. The targets are named rather than computed
+		// from m.focus so the constants stay reorderable.
 		case "esc":
-			if m.focus == focusHelp {
-				m.focus = focusBrief
-				m.briefViewport.SetContent(m.renderCard())
-			} else if m.focus == focusBrief {
-				m.focus = focusTools
-				m.setToolsContent()
-				m.briefViewport.SetContent(m.renderCard())
-			} else {
+			switch m.focus {
+			case focusHelp:
+				m.setFocus(focusBrief)
+			case focusBrief:
+				m.setFocus(focusTools)
+			default:
 				return m, tea.Quit
 			}
 
 		case "right", "l":
-			if m.focus == focusTools {
-				m.focus = focusBrief
-				m.setToolsContent()
-				m.briefViewport.SetContent(m.renderCard())
-			} else if m.focus == focusBrief {
-				m.focus = focusHelp
-				m.helpViewport.SetContent(m.renderHelpContent())
+			switch m.focus {
+			case focusTools:
+				m.setFocus(focusBrief)
+			case focusBrief:
+				m.setFocus(focusHelp)
 			}
 
 		case "left":
-			if m.focus == focusHelp {
-				m.focus = focusBrief
-				m.briefViewport.SetContent(m.renderCard())
-			} else if m.focus == focusBrief {
-				m.focus = focusTools
-				m.setToolsContent()
-				m.briefViewport.SetContent(m.renderCard())
+			switch m.focus {
+			case focusHelp:
+				m.setFocus(focusBrief)
+			case focusBrief:
+				m.setFocus(focusTools)
 			}
+
+		// The panel titles ([1] Tools / [2] Brief / [3] Help) document these
+		// hotkeys; unlike the arrows they jump directly, e.g. tools → help.
+		case "1":
+			m.setFocus(focusTools)
+
+		case "2":
+			m.setFocus(focusBrief)
+
+		case "3":
+			m.setFocus(focusHelp)
 
 		case "j", "down":
 			if m.focus == focusTools {
@@ -855,6 +863,21 @@ func (m *Model) selectMeta(idx int) tea.Cmd {
 	m.briefViewport.GotoTop()
 	m.briefViewport.SetContent(m.renderCard())
 	return m.autoFetchCmdsForSelected()
+}
+
+// setFocus moves focus to f and refreshes the tools list, the only viewport
+// whose *content* depends on focus (renderLeftContent dims the selection bar
+// and drops the search highlight when the list is unfocused). The brief card
+// and the help text render identically either way — their focus-dependent
+// parts are the border and the inset title, which renderBrief/renderHelp apply
+// around the viewport at View time. Every focus move (digits, arrows, esc and
+// the mouse) goes through here, so the refresh cannot drift between call sites.
+func (m *Model) setFocus(f int) {
+	if m.focus == f {
+		return
+	}
+	m.focus = f
+	m.setToolsContent()
 }
 
 // indexOfMeta returns the index of the named tool in the full m.meta list,

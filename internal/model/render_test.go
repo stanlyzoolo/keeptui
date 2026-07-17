@@ -514,34 +514,83 @@ func TestRenderLeftContentRowWidth(t *testing.T) {
 	}
 }
 
-// TestRenderHelpTitle verifies the help panel's top border carries the mode
-// title (--help / man) without changing the border's visible width, and that
-// the tools/brief panels stay untitled.
-func TestRenderHelpTitle(t *testing.T) {
+// TestRenderPanelTitles verifies every panel's top border carries its title
+// with the focus hotkey, that the help title follows m.helpMode, and that the
+// splice leaves the border's visible width alone.
+func TestRenderPanelTitles(t *testing.T) {
 	m := New([]loader.ToolMeta{{Name: "fzf", Status: loader.StatusActive}})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
 	m = updated.(Model)
 
 	m.helpMode = helpModeHelp
 	top := stripANSI(strings.SplitN(m.renderHelp(), "\n", 2)[0])
-	if !strings.Contains(top, " --help ") {
-		t.Errorf("help-mode top border = %q, want --help title", top)
+	if !strings.Contains(top, " [3] Help ") {
+		t.Errorf("help-mode top border = %q, want [3] Help title", top)
 	}
 
 	m.helpMode = helpModeMan
 	lines := strings.Split(m.renderHelp(), "\n")
 	topMan := stripANSI(lines[0])
-	if !strings.Contains(topMan, " man ") || strings.Contains(topMan, "help") {
-		t.Errorf("man-mode top border = %q, want man title", topMan)
+	if !strings.Contains(topMan, " [3] Man ") || strings.Contains(topMan, "Help") {
+		t.Errorf("man-mode top border = %q, want [3] Man title", topMan)
 	}
 	if bottom := stripANSI(lines[len(lines)-1]); lipgloss.Width(topMan) != lipgloss.Width(bottom) {
 		t.Errorf("top border width = %d, want %d (unchanged)", lipgloss.Width(topMan), lipgloss.Width(bottom))
 	}
 
-	for name, panel := range map[string]string{"tools": m.renderTools(), "brief": m.renderBrief()} {
-		if got := stripANSI(strings.SplitN(panel, "\n", 2)[0]); strings.ContainsAny(got, "-abcdefghijklmnopqrstuvwxyz") {
-			t.Errorf("%s top border = %q, want no title", name, got)
+	for _, tt := range []struct{ name, panel, want string }{
+		{"tools", m.renderTools(), " [1] Tools "},
+		{"brief", m.renderBrief(), " [2] Brief "},
+	} {
+		panelLines := strings.Split(tt.panel, "\n")
+		got := stripANSI(panelLines[0])
+		if !strings.Contains(got, tt.want) {
+			t.Errorf("%s top border = %q, want %q title", tt.name, got, tt.want)
 		}
+		if bottom := stripANSI(panelLines[len(panelLines)-1]); lipgloss.Width(got) != lipgloss.Width(bottom) {
+			t.Errorf("%s top border width = %d, want %d (unchanged)", tt.name, lipgloss.Width(got), lipgloss.Width(bottom))
+		}
+	}
+}
+
+// TestPanelTitleFollowsFocus verifies each panel's title is painted with the
+// focus-aware border color: same visible text, different styling, so the
+// focused branch of every panel renderer is exercised.
+func TestPanelTitleFollowsFocus(t *testing.T) {
+	forceColor(t)
+
+	tests := []struct {
+		name   string
+		focus  int
+		render func(Model) string
+	}{
+		{"tools", focusTools, Model.renderTools},
+		{"brief", focusBrief, Model.renderBrief},
+		{"help", focusHelp, Model.renderHelp},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := New([]loader.ToolMeta{{Name: "fzf", Status: loader.StatusActive}})
+			updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+			m = updated.(Model)
+
+			m.focus = focusTools
+			if tt.focus == focusTools {
+				m.focus = focusHelp // ensure the panel under test starts unfocused
+			}
+			blurred, _, _ := strings.Cut(tt.render(m), "\n")
+
+			m.focus = tt.focus
+			focused, _, _ := strings.Cut(tt.render(m), "\n")
+
+			if focused == blurred {
+				t.Errorf("%s top border identical focused and unfocused (%q), want a focus-aware color", tt.name, blurred)
+			}
+			if stripANSI(focused) != stripANSI(blurred) {
+				t.Errorf("%s visible top border changed with focus:\n focused = %q\n blurred = %q",
+					tt.name, stripANSI(focused), stripANSI(blurred))
+			}
+		})
 	}
 }
 

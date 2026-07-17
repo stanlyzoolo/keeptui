@@ -71,10 +71,10 @@ All changes are display-layer only — no persistence or fetch-path changes:
 - Modify: `internal/model/render.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] swap the glyph in both selected-row branches of `renderLeftContent` (`SelectionBarStyle.Render("⏺")` / `SelectionBarDimStyle.Render("⏺")`); update the marker-column comment
-- [ ] update every `▸` expectation in `render_test.go` (`TestRenderLeftContent*`, marker-survives-focus, selected-row-priority tests)
-- [ ] add a width-guard test asserting default-condition width 1 for `⏺` (and `↑`) via go-runewidth, with a comment stating both are East-Asian Ambiguous (2 cells under `RUNEWIDTH_EASTASIAN=1`) — accepted, same class as the `▎` being removed
-- [ ] run `go test -race ./internal/model/...` — must pass before task 2
+- [x] swap the glyph in both selected-row branches of `renderLeftContent` (`SelectionBarStyle.Render("⏺")` / `SelectionBarDimStyle.Render("⏺")`); update the marker-column comment
+- [x] update every `▸` expectation in `render_test.go` (`TestRenderLeftContent*`, marker-survives-focus, selected-row-priority tests)
+- [x] add a width-guard test asserting default-condition width 1 for `⏺` (and `↑`) via go-runewidth, with a comment stating both are East-Asian Ambiguous (2 cells under `RUNEWIDTH_EASTASIAN=1`) — accepted, same class as the `▎` being removed
+- [x] run `go test -race ./internal/model/...` — must pass before task 2
 
 ### Task 2: Remove the `▎` status edge
 
@@ -83,11 +83,11 @@ All changes are display-layer only — no persistence or fetch-path changes:
 - Modify: `internal/model/render_test.go`
 - Modify: `CLAUDE.md`
 
-- [ ] delete the `statusEdge` func; the `default` branch of the marker switch becomes a plain space
-- [ ] delete/adjust `render_test.go` cases that assert the edge (`▎` for trying/inactive); keep the "cursor takes priority on the selected row" case, now asserting `⏺` over plain space
-- [ ] confirm `ui.StatusStyleTrying`/`StatusStyleInactive` are still referenced (brief card via `ui.StatusStyle`) — no ui-package changes
-- [ ] update the CLAUDE.md "Tool-list rows" paragraph (no status edge; `⏺` cursor) — and correct the "single-cell and non-East-Asian-Ambiguous" claim: `⏺` and `↑` are single-cell in the default condition but East-Asian Ambiguous (the old wording was already wrong for `↑`/`▎`)
-- [ ] run `go test -race ./internal/model/...` — must pass before task 3
+- [x] delete the `statusEdge` func; the `default` branch of the marker switch becomes a plain space
+- [x] delete/adjust `render_test.go` cases that assert the edge (`▎` for trying/inactive); keep the "cursor takes priority on the selected row" case, now asserting `⏺` over plain space
+- [x] confirm `ui.StatusStyleTrying`/`StatusStyleInactive` are still referenced (brief card via `ui.StatusStyle`) — no ui-package changes
+- [x] update the CLAUDE.md "Tool-list rows" paragraph (no status edge; `⏺` cursor) — and correct the "single-cell and non-East-Asian-Ambiguous" claim: `⏺` and `↑` are single-cell in the default condition but East-Asian Ambiguous (the old wording was already wrong for `↑`/`▎`)
+- [x] run `go test -race ./internal/model/...` — must pass before task 3
 
 ### Task 3: Group updatable tools first (projection in `searchMatches`)
 
@@ -95,14 +95,14 @@ All changes are display-layer only — no persistence or fetch-path changes:
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/render_test.go` (or `model_test` additions in the file where list tests live)
 
-- [ ] stable-partition the result of `searchMatches()`: two-pass append — `m.hasUpdate(mt.Name)` rows first, others second, filter logic untouched
-- [ ] **remove the empty-query fast path in `filteredMeta()`** (`if m.searchQuery() == "" { return m.meta }`) so it always projects through the grouped `searchMatches()` — without this the renderer and the selection/mouse system desync in normal mode (critical plan-review finding)
-- [ ] switch `indexOfMeta` to iterate `m.filteredMeta()` instead of `m.meta`; update its comment (it now answers "index in the *displayed* order")
-- [ ] update `TestIndexOfMeta` (mode_test.go): fix its stale "full-list name lookup" comment and add a case where an updatable tool is grouped ahead of a `meta.yaml`-earlier tool, asserting the *displayed* index is returned
-- [ ] write tests: updatable tools render above the rest with `meta.yaml` order preserved inside each group; `m.meta` slice order is untouched by rendering
-- [ ] write test: grouping applies inside an active search filter too
-- [ ] write test: search commit (`enter`) and rollback (`esc`) land on the right tool with grouping active (via `indexOfMeta` on the projection)
-- [ ] run `go test -race ./internal/model/...` — must pass before task 4
+- [x] stable-partition the result of `searchMatches()`: two-pass append — `m.hasUpdate(mt.Name)` rows first, others second, filter logic untouched
+- [x] **remove the empty-query fast path in `filteredMeta()`** (`if m.searchQuery() == "" { return m.meta }`) so it always projects through the grouped `searchMatches()` — without this the renderer and the selection/mouse system desync in normal mode (critical plan-review finding)
+- [x] switch `indexOfMeta` to iterate `m.filteredMeta()` instead of `m.meta`; update its comment (it now answers "index in the *displayed* order")
+- [x] update `TestIndexOfMeta` (mode_test.go): fix its stale "full-list name lookup" comment and add a case where an updatable tool is grouped ahead of a `meta.yaml`-earlier tool, asserting the *displayed* index is returned
+- [x] write tests: updatable tools render above the rest with `meta.yaml` order preserved inside each group; `m.meta` slice order is untouched by rendering
+- [x] write test: grouping applies inside an active search filter too
+- [x] write test: search commit (`enter`) and rollback (`esc`) land on the right tool with grouping active (via `indexOfMeta` on the projection)
+- [x] run `go test -race ./internal/model/...` — must pass before task 4
 
 ### Task 4: Cursor follows the tool on async reorder
 
@@ -110,12 +110,12 @@ All changes are display-layer only — no persistence or fetch-path changes:
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/render_test.go` (message-handler tests live with the model tests)
 
-- [ ] `installedMsg` handler: capture selected name via `selectedMeta()` before merging into `m.versions`; after the merge remap `m.metaSelected = m.indexOfMeta(name)` and call `m.setToolsContent()` (replaces the bare `SetContent`); skip remap when the list is empty
-- [ ] `remoteMsg` handler: same capture/remap/`setToolsContent()` in the data-merging branch
-- [ ] write test: with tool B selected, a `remoteMsg` that lifts tool C above B keeps the selection on B (name-stable, index changed)
-- [ ] write test: a `remoteMsg` that lifts the *selected* tool to the top keeps it selected at its new index
-- [ ] write test: `installedMsg`/`remoteMsg` on an empty list does not panic
-- [ ] run `go test -race ./internal/model/...` — must pass before task 5
+- [x] `installedMsg` handler: capture selected name via `selectedMeta()` before merging into `m.versions`; after the merge remap `m.metaSelected = m.indexOfMeta(name)` and call `m.setToolsContent()` (replaces the bare `SetContent`); skip remap when the list is empty
+- [x] `remoteMsg` handler: same capture/remap/`setToolsContent()` in the data-merging branch
+- [x] write test: with tool B selected, a `remoteMsg` that lifts tool C above B keeps the selection on B (name-stable, index changed)
+- [x] write test: a `remoteMsg` that lifts the *selected* tool to the top keeps it selected at its new index
+- [x] write test: `installedMsg`/`remoteMsg` on an empty list does not panic
+- [x] run `go test -race ./internal/model/...` — must pass before task 5
 
 ### Task 5: Verify mouse click row mapping against the projection
 
@@ -123,21 +123,21 @@ All changes are display-layer only — no persistence or fetch-path changes:
 - Modify: `internal/model/mouse_test.go`
 - Modify (only if a mismatch is found): `internal/model/render.go`
 
-- [ ] confirm `handleMouse` resolves the clicked row via `m.filteredMeta()` (render.go) — **depends on the Task 3 fast-path fix**: `handleMouse` itself needs no change once `filteredMeta()` is grouped; today they agree only because both collapse to `m.meta` with no query
-- [ ] write test: with grouping reordering rows, a click on row 0 selects the updatable tool shown there, not the first `meta.yaml` entry
-- [ ] run `go test -race ./internal/model/...` — must pass before task 6
+- [x] confirm `handleMouse` resolves the clicked row via `m.filteredMeta()` (render.go) — **depends on the Task 3 fast-path fix**: `handleMouse` itself needs no change once `filteredMeta()` is grouped; today they agree only because both collapse to `m.meta` with no query
+- [x] write test: with grouping reordering rows, a click on row 0 selects the updatable tool shown there, not the first `meta.yaml` entry
+- [x] run `go test -race ./internal/model/...` — must pass before task 6
 
 ### Task 6: Verify acceptance criteria
 
-- [ ] verify all four Overview items are implemented (⏺ cursor both focus states, no `▎`, no checkmark, updatable tools grouped on top)
-- [ ] verify edge cases: empty list, all tools up-to-date (no reorder), tool with no GitHub ref, mid-search reorder
-- [ ] run full suite: `go test -race ./...`
-- [ ] run `go vet ./...` and `golangci-lint run`
+- [x] verify all four Overview items are implemented (⏺ cursor both focus states, no `▎`, no checkmark, updatable tools grouped on top)
+- [x] verify edge cases: empty list, all tools up-to-date (no reorder), tool with no GitHub ref, mid-search reorder
+- [x] run full suite: `go test -race ./...`
+- [x] run `go vet ./...` and `golangci-lint run`
 
 ### Task 7: [Final] Update documentation
 
-- [ ] re-check CLAUDE.md fully reflects the new list behavior (marker column, grouping projection, `indexOfMeta` semantics, remap-on-message)
-- [ ] move this plan to `docs/plans/completed/`
+- [x] re-check CLAUDE.md fully reflects the new list behavior (marker column, grouping projection, `indexOfMeta` semantics, remap-on-message)
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 

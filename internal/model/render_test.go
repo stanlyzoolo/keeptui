@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/mattn/go-runewidth"
 	"github.com/muesli/termenv"
 
 	"github.com/lepeshko/keys/internal/loader"
@@ -349,17 +350,17 @@ func TestRenderLeftContentSearchMarker(t *testing.T) {
 	if len(lines) < 2 {
 		t.Fatalf("renderLeftContent = %q, want at least 2 rows", lines)
 	}
-	if !strings.Contains(lines[0], "▸") || !strings.Contains(lines[0], "git") {
+	if !strings.Contains(lines[0], "⏺") || !strings.Contains(lines[0], "git") {
 		t.Errorf("first match row = %q, want marker on git", lines[0])
 	}
 
 	updated, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
 	m = updated.(Model)
 	lines = strings.Split(m.renderLeftContent(), "\n")
-	if strings.Contains(lines[0], "▸") {
+	if strings.Contains(lines[0], "⏺") {
 		t.Errorf("first row = %q, marker should move away after down", lines[0])
 	}
-	if !strings.Contains(lines[1], "▸") || !strings.Contains(lines[1], "ripgrep") {
+	if !strings.Contains(lines[1], "⏺") || !strings.Contains(lines[1], "ripgrep") {
 		t.Errorf("second match row = %q, want marker on ripgrep", lines[1])
 	}
 }
@@ -451,7 +452,7 @@ func TestHighlightNameMatch(t *testing.T) {
 	}
 }
 
-// TestRenderLeftContentMarkerSurvivesFocus verifies the ▸ marker on the
+// TestRenderLeftContentMarkerSurvivesFocus verifies the ⏺ marker on the
 // selected row does not disappear when focus moves to the brief/help panels
 // (it renders dim there, but stays in the output).
 func TestRenderLeftContentMarkerSurvivesFocus(t *testing.T) {
@@ -466,20 +467,20 @@ func TestRenderLeftContentMarkerSurvivesFocus(t *testing.T) {
 	for _, f := range []int{focusTools, focusBrief, focusHelp} {
 		m.focus = f
 		lines := strings.Split(stripANSI(m.renderLeftContent()), "\n")
-		if !strings.HasPrefix(lines[1], "▸ git") {
-			t.Errorf("focus %v: selected row = %q, want ▸ marker on git", f, lines[1])
+		if !strings.HasPrefix(lines[1], "⏺ git") {
+			t.Errorf("focus %v: selected row = %q, want ⏺ marker on git", f, lines[1])
 		}
-		if strings.Contains(lines[0], "▸") {
+		if strings.Contains(lines[0], "⏺") {
 			t.Errorf("focus %v: unselected row = %q, should carry no marker", f, lines[0])
 		}
 	}
 }
 
-// TestRenderLeftContentStatusEdge verifies the marker column: ▎ edge on
-// trying/inactive rows, plain space on active rows and on unknown statuses
-// (hand-edited meta.yaml values reach the renderer untouched), and the ▸
-// marker displacing the edge on the selected row.
-func TestRenderLeftContentStatusEdge(t *testing.T) {
+// TestRenderLeftContentMarkerColumn verifies the marker column carries only the
+// ⏺ cursor: the selected row gets it regardless of status, every other row
+// (active, trying, inactive, unknown) gets a plain space — the status edge is
+// gone (tool status lives in the brief card only).
+func TestRenderLeftContentMarkerColumn(t *testing.T) {
 	m := New([]loader.ToolMeta{
 		{Name: "fzf", Status: loader.StatusActive},
 		{Name: "git", Status: loader.StatusTrying},
@@ -492,25 +493,24 @@ func TestRenderLeftContentStatusEdge(t *testing.T) {
 	m.metaSelected = 0
 
 	lines := strings.Split(stripANSI(m.renderLeftContent()), "\n")
-	if !strings.HasPrefix(lines[0], "▸ fzf") {
-		t.Errorf("selected active row = %q, want ▸ marker", lines[0])
+	if !strings.HasPrefix(lines[0], "⏺ fzf") {
+		t.Errorf("selected active row = %q, want ⏺ marker", lines[0])
 	}
-	if !strings.HasPrefix(lines[1], "▎ git") {
-		t.Errorf("trying row = %q, want ▎ edge", lines[1])
-	}
-	if !strings.HasPrefix(lines[2], "▎ ripgrep") {
-		t.Errorf("inactive row = %q, want ▎ edge", lines[2])
-	}
-	if !strings.HasPrefix(lines[3], "  yq") {
-		t.Errorf("unknown-status row = %q, want plain space in the marker column", lines[3])
+	for i, name := range []string{"git", "ripgrep", "yq"} {
+		if !strings.HasPrefix(lines[i+1], "  "+name) {
+			t.Errorf("non-selected row = %q, want plain space in the marker column", lines[i+1])
+		}
+		if strings.Contains(lines[i+1], "⏺") {
+			t.Errorf("non-selected row = %q, should carry no cursor", lines[i+1])
+		}
 	}
 
-	// The ▸ marker takes priority over the status edge on the selected row,
-	// and the active row it left behind gets a plain-space marker column.
+	// The ⏺ cursor takes priority on the selected row regardless of status, and
+	// the row it left behind falls back to a plain-space marker column.
 	m.metaSelected = 1
 	lines = strings.Split(stripANSI(m.renderLeftContent()), "\n")
-	if !strings.HasPrefix(lines[1], "▸ git") {
-		t.Errorf("selected trying row = %q, want ▸ to displace the edge", lines[1])
+	if !strings.HasPrefix(lines[1], "⏺ git") {
+		t.Errorf("selected trying row = %q, want ⏺ cursor", lines[1])
 	}
 	if !strings.HasPrefix(lines[0], "  fzf") {
 		t.Errorf("active row = %q, want plain space in the marker column", lines[0])
@@ -535,6 +535,173 @@ func TestRenderLeftContentRowWidth(t *testing.T) {
 	for i, line := range strings.Split(strings.TrimRight(stripANSI(m.renderLeftContent()), "\n"), "\n") {
 		if w := lipgloss.Width(line); w != 4 { // marker + space + 2-rune name
 			t.Errorf("row %d = %q, visible width = %d, want 4", i, line, w)
+		}
+	}
+}
+
+// updatableModel builds a model with tools where the named ones have an
+// available update (Installed older than Latest), so the grouping partition
+// lifts them to the top of the list. Sizing goes through a real WindowSizeMsg.
+func updatableModel(t *testing.T, metas []loader.ToolMeta, updatable ...string) Model {
+	t.Helper()
+	m := New(metas)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(Model)
+	m.focus = focusTools
+	for _, name := range updatable {
+		m.versions[name] = VersionInfo{Installed: "1.0", Latest: "2.0", InstalledKnown: true}
+	}
+	return m
+}
+
+// filteredNames projects the displayed (grouped/filtered) order to a name slice.
+func filteredNames(m Model) []string {
+	var out []string
+	for _, mt := range m.filteredMeta() {
+		out = append(out, mt.Name)
+	}
+	return out
+}
+
+// TestToolsListGrouping verifies updatable tools are stable-partitioned to the
+// top of the displayed list (meta.yaml order preserved inside each group) while
+// the underlying m.meta slice is left untouched.
+func TestToolsListGrouping(t *testing.T) {
+	metas := []loader.ToolMeta{
+		{Name: "aa"}, {Name: "bb"}, {Name: "cc"}, {Name: "dd"},
+	}
+	// bb and dd have updates → they float up, keeping their relative order.
+	m := updatableModel(t, metas, "bb", "dd")
+
+	if got, want := filteredNames(m), []string{"bb", "dd", "aa", "cc"}; !slices.Equal(got, want) {
+		t.Errorf("displayed order = %v, want %v", got, want)
+	}
+	// m.meta on disk order is never reordered by the display projection.
+	if got, want := (func() []string {
+		var s []string
+		for _, mt := range m.meta {
+			s = append(s, mt.Name)
+		}
+		return s
+	})(), []string{"aa", "bb", "cc", "dd"}; !slices.Equal(got, want) {
+		t.Errorf("m.meta order = %v, want %v (untouched)", got, want)
+	}
+	// The rendered rows follow the same order.
+	rows := strings.Split(strings.TrimRight(stripANSI(m.renderLeftContent()), "\n"), "\n")
+	for i, want := range []string{"bb", "dd", "aa", "cc"} {
+		if !strings.Contains(rows[i], want) {
+			t.Errorf("row %d = %q, want %s", i, rows[i], want)
+		}
+	}
+}
+
+// TestToolsListGroupingWithinSearch verifies the grouping partition applies
+// inside an active search filter too: matched updatable tools sort above matched
+// non-updatable ones.
+func TestToolsListGroupingWithinSearch(t *testing.T) {
+	metas := []loader.ToolMeta{
+		{Name: "git"}, {Name: "gitui"}, {Name: "lazygit"},
+	}
+	m := updatableModel(t, metas, "lazygit") // lazygit has an update
+	updated, _ := m.Update(keyRunes("/"))
+	m = updated.(Model)
+	m = typeRunes(t, m, "git") // all three match by name
+
+	if got, want := filteredNames(m), []string{"lazygit", "git", "gitui"}; !slices.Equal(got, want) {
+		t.Errorf("filtered+grouped order = %v, want %v", got, want)
+	}
+}
+
+// TestRemoteMsgKeepsSelectionOnReorder verifies a remoteMsg that flips another
+// tool into the updatable group (lifting it above the selected one) keeps the
+// cursor on the *selected tool*, not its old row index.
+func TestRemoteMsgKeepsSelectionOnReorder(t *testing.T) {
+	m := updatableModel(t, []loader.ToolMeta{{Name: "aa"}, {Name: "bb"}, {Name: "cc"}})
+	m.versions["cc"] = VersionInfo{Installed: "1.0", InstalledKnown: true} // no Latest yet
+	m.metaSelected = 1                                                     // bb (displayed idx 1)
+
+	// cc gets a newer release → hasUpdate(cc) true → cc floats to the top,
+	// pushing bb to displayed idx 2.
+	updated, _ := m.Update(remoteMsg{toolName: "cc", latest: "2.0", card: version.RepoCard{About: "x"}})
+	nm := updated.(Model)
+
+	if got, want := filteredNames(nm), []string{"cc", "aa", "bb"}; !slices.Equal(got, want) {
+		t.Fatalf("displayed order = %v, want %v", got, want)
+	}
+	if sel, ok := nm.selectedMeta(); !ok || sel.Name != "bb" || nm.metaSelected != 2 {
+		t.Errorf("selection = %v (idx %d), want bb at idx 2 (followed the tool)", sel, nm.metaSelected)
+	}
+}
+
+// TestRemoteMsgSelectedToolLiftedToTop verifies that when the *selected* tool is
+// the one gaining an update, it stays selected at its new top-of-list index.
+func TestRemoteMsgSelectedToolLiftedToTop(t *testing.T) {
+	m := updatableModel(t, []loader.ToolMeta{{Name: "aa"}, {Name: "bb"}, {Name: "cc"}})
+	m.versions["cc"] = VersionInfo{Installed: "1.0", InstalledKnown: true}
+	m.metaSelected = 2 // cc
+
+	updated, _ := m.Update(remoteMsg{toolName: "cc", latest: "2.0", card: version.RepoCard{About: "x"}})
+	nm := updated.(Model)
+
+	if sel, ok := nm.selectedMeta(); !ok || sel.Name != "cc" || nm.metaSelected != 0 {
+		t.Errorf("selection = %v (idx %d), want cc at idx 0 (lifted, still selected)", sel, nm.metaSelected)
+	}
+}
+
+// TestInstalledMsgKeepsSelectionOnReorder verifies the installedMsg handler
+// remaps the cursor by name too: a fresh installed version that makes another
+// tool updatable reorders the list without dragging the selection off its tool.
+func TestInstalledMsgKeepsSelectionOnReorder(t *testing.T) {
+	m := updatableModel(t, []loader.ToolMeta{{Name: "aa"}, {Name: "bb"}, {Name: "cc"}})
+	m.versions["cc"] = VersionInfo{Latest: "2.0"} // Latest known, Installed pending
+	m.metaSelected = 1                            // bb
+
+	// cc's installed version arrives, older than Latest → cc becomes updatable
+	// and floats to the top, pushing bb to idx 2.
+	updated, _ := m.Update(installedMsg{toolName: "cc", installed: "1.0"})
+	nm := updated.(Model)
+
+	if sel, ok := nm.selectedMeta(); !ok || sel.Name != "bb" || nm.metaSelected != 2 {
+		t.Errorf("selection = %v (idx %d), want bb at idx 2", sel, nm.metaSelected)
+	}
+}
+
+// TestVersionMsgsEmptyListNoPanic verifies installedMsg/remoteMsg on an empty
+// tool list are safe: the remap is skipped when there is no selection.
+func TestVersionMsgsEmptyListNoPanic(t *testing.T) {
+	m := New(nil)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(Model)
+
+	updated, _ = m.Update(installedMsg{toolName: "ghost", installed: "1.0"})
+	m = updated.(Model)
+	updated, _ = m.Update(remoteMsg{toolName: "ghost", latest: "2.0", card: version.RepoCard{About: "x"}})
+	m = updated.(Model)
+	if m.metaSelected != 0 {
+		t.Errorf("metaSelected = %d, want 0 on empty list", m.metaSelected)
+	}
+}
+
+// TestMarkerGlyphWidth pins the marker/suffix glyphs at width 1 in
+// go-runewidth's default condition (the one lipgloss measures with), keeping the
+// list's row-width math stable. Note: both ⏺ (U+23FA, the selection cursor) and
+// ↑ (U+2191, the update-available suffix) are East-Asian **Ambiguous** — they
+// measure 2 cells under RUNEWIDTH_EASTASIAN=1. This is consciously accepted:
+// the removed ▎ status edge was in the same class, so the change is not a
+// regression. A bare lipgloss.Width==1 check cannot detect the ambiguity, so the
+// test measures both conditions explicitly.
+func TestMarkerGlyphWidth(t *testing.T) {
+	for _, r := range []rune{'⏺', '↑'} {
+		def := runewidth.Condition{EastAsianWidth: false}
+		if w := def.RuneWidth(r); w != 1 {
+			t.Errorf("RuneWidth(%q) default = %d, want 1", r, w)
+		}
+		// Document (not enforce) the Ambiguous classification: width 2 under the
+		// East-Asian condition. If a future Unicode table narrowed this to 1 the
+		// comment above would be stale — surface it as a heads-up, not a failure.
+		ea := runewidth.Condition{EastAsianWidth: true}
+		if w := ea.RuneWidth(r); w != 2 {
+			t.Logf("RuneWidth(%q) east-asian = %d, expected 2 (Ambiguous) — table may have changed", r, w)
 		}
 	}
 }

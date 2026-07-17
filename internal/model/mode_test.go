@@ -530,7 +530,8 @@ func TestSearchArrowsZeroMatches(t *testing.T) {
 	}
 }
 
-// TestIndexOfMeta covers the full-list name lookup and its fallbacks.
+// TestIndexOfMeta covers the displayed-order name lookup (m.filteredMeta, i.e.
+// the grouped/filtered projection — not the raw m.meta) and its fallbacks.
 func TestIndexOfMeta(t *testing.T) {
 	m := newSearchTestModel()
 
@@ -550,6 +551,52 @@ func TestIndexOfMeta(t *testing.T) {
 				t.Errorf("indexOfMeta(%q) = %d, want %d", tt.arg, got, tt.want)
 			}
 		})
+	}
+
+	// An updatable tool is grouped ahead of a meta.yaml-earlier one: indexOfMeta
+	// must return the *displayed* index, not the m.meta index. ripgrep (meta idx
+	// 2) has an update → row 0; fzf (meta idx 0) → row 1.
+	grouped := newSearchTestModel()
+	grouped.versions["ripgrep"] = VersionInfo{Installed: "1.0", Latest: "2.0", InstalledKnown: true}
+	if got := grouped.indexOfMeta("ripgrep"); got != 0 {
+		t.Errorf("indexOfMeta(ripgrep) grouped = %d, want 0 (lifted to top)", got)
+	}
+	if got := grouped.indexOfMeta("fzf"); got != 1 {
+		t.Errorf("indexOfMeta(fzf) grouped = %d, want 1 (below the updatable row)", got)
+	}
+}
+
+// TestSearchCommitRollbackWithGrouping verifies both search exits land on the
+// right tool when grouping has reordered the displayed list: the cursor is
+// remapped by name through indexOfMeta (the displayed projection), so commit and
+// rollback resolve the correct row even though it differs from the m.meta index.
+func TestSearchCommitRollbackWithGrouping(t *testing.T) {
+	metas := []loader.ToolMeta{{Name: "aa"}, {Name: "bb"}, {Name: "cc"}}
+	// bb has an update → displayed order is [bb, aa, cc].
+	m := updatableModel(t, metas, "bb")
+	m.metaSelected = 2 // cc (displayed idx 2)
+
+	// Commit: search "cc", enter → cursor on cc at its displayed index (2).
+	updated, _ := m.Update(keyRunes("/"))
+	sm := updated.(Model)
+	sm = typeRunes(t, sm, "cc")
+	updated, _ = sm.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	nm := updated.(Model)
+	if sel, ok := nm.selectedMeta(); !ok || sel.Name != "cc" || nm.metaSelected != 2 {
+		t.Errorf("commit landed on %v (idx %d), want cc at displayed idx 2", sel, nm.metaSelected)
+	}
+
+	// Rollback: from cc, search "aa", esc → cursor restored to cc (displayed 2).
+	updated, _ = m.Update(keyRunes("/"))
+	sm = updated.(Model)
+	if sm.searchPrevName != "cc" {
+		t.Fatalf("searchPrevName = %q, want cc", sm.searchPrevName)
+	}
+	sm = typeRunes(t, sm, "aa")
+	updated, _ = sm.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	nm = updated.(Model)
+	if sel, ok := nm.selectedMeta(); !ok || sel.Name != "cc" || nm.metaSelected != 2 {
+		t.Errorf("rollback landed on %v (idx %d), want cc at displayed idx 2", sel, nm.metaSelected)
 	}
 }
 

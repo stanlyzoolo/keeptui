@@ -26,8 +26,8 @@ var (
 				Border(lipgloss.RoundedBorder()).
 				BorderForeground(ColorPrimary)
 
-	// SelectionBarStyle renders the ▸ marker on the selected row while the
-	// tools panel is focused; SelectionBarDimStyle keeps the marker visible
+	// SelectionBarStyle renders the ⏺ cursor on the selected row while the
+	// tools panel is focused; SelectionBarDimStyle keeps the cursor visible
 	// (but muted) when focus moves to the brief/help panels.
 	SelectionBarStyle = lipgloss.NewStyle().
 				Foreground(ColorPrimary)

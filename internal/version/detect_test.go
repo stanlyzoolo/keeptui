@@ -91,7 +91,7 @@ func TestInstalledVersion(t *testing.T) {
 	}
 }
 
-func TestInstalledVersionLoggingMissing(t *testing.T) {
+func TestInstalledVersionMissingBinaryNoLog(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("PATH", dir)
 
@@ -99,16 +99,36 @@ func TestInstalledVersionLoggingMissing(t *testing.T) {
 	restore := logx.SetDirForTesting(logDir)
 	defer restore()
 
+	// A tool that is simply not on PATH is the normal "not installed" state,
+	// not a malfunction — it must not create a session log.
 	if got := InstalledVersion(loader.Tool{Name: "missingtool"}); got != "" {
+		t.Fatalf("expected empty version, got %q", got)
+	}
+	if out := logx.ReadAllForTesting(logDir); out != "" {
+		t.Errorf("a not-on-PATH tool must not log, got:\n%s", out)
+	}
+}
+
+func TestInstalledVersionPresentButBrokenLogs(t *testing.T) {
+	dir := t.TempDir()
+	// Binary exists on PATH but exits non-zero for every candidate — installed
+	// yet unresponsive, a genuine anomaly worth one log line.
+	writeFakeTool(t, dir, "brokentool", `exit 1`)
+	t.Setenv("PATH", dir)
+
+	logDir := t.TempDir()
+	restore := logx.SetDirForTesting(logDir)
+	defer restore()
+
+	if got := InstalledVersion(loader.Tool{Name: "brokentool"}); got != "" {
 		t.Fatalf("expected empty version, got %q", got)
 	}
 	out := logx.ReadAllForTesting(logDir)
 	// Exactly one log line despite two candidates (--version and -V).
-	lines := strings.Count(out, "version.InstalledVersion")
-	if lines != 1 {
+	if lines := strings.Count(out, "version.InstalledVersion"); lines != 1 {
 		t.Fatalf("expected exactly one log line, got %d:\n%s", lines, out)
 	}
-	if !strings.Contains(out, "missingtool") {
+	if !strings.Contains(out, "brokentool") {
 		t.Errorf("log should name the tool, got:\n%s", out)
 	}
 }

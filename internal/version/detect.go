@@ -29,14 +29,18 @@ func InstalledVersion(t loader.Tool) string {
 		}
 	}
 
-	// Accumulate per-candidate reasons but do not log inside the loop: a
-	// --version miss followed by a -V success must stay silent. Log once, at
-	// the final give-up return, with the tool name and all reasons.
+	// Accumulate reasons only for anomalous failures — a binary that exists but
+	// won't answer --version/-V (non-zero exit, timeout, or no parseable
+	// version). A plain "not on PATH" (LookPath miss) is the normal
+	// "not installed" state the card renders as "installed: not found", not a
+	// malfunction, so it is left out: otherwise every tracked-but-uninstalled
+	// tool would create a session log on every startup, defeating logx's
+	// "a log file means something went wrong" signal. We also do not log inside
+	// the loop — a --version miss followed by a -V success must stay silent.
 	var reasons []string
 	for _, args := range candidates {
 		if _, err := exec.LookPath(args[0]); err != nil {
-			reasons = append(reasons, strings.Join(args, " ")+": "+err.Error())
-			continue
+			continue // not installed — benign, never logged
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		cmd := exec.CommandContext(ctx, args[0], args[1:]...)
@@ -54,7 +58,11 @@ func InstalledVersion(t loader.Tool) string {
 		}
 		reasons = append(reasons, strings.Join(args, " ")+": no version string in output")
 	}
-	logx.Errorf("version.InstalledVersion: %s: %s", t.Name, strings.Join(reasons, "; "))
+	// Only an installed-but-unresponsive binary reaches here with reasons; a
+	// tool simply absent from PATH leaves reasons empty and logs nothing.
+	if len(reasons) > 0 {
+		logx.Errorf("version.InstalledVersion: %s: %s", t.Name, strings.Join(reasons, "; "))
+	}
 	return ""
 }
 

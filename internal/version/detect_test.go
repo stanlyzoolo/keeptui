@@ -3,9 +3,11 @@ package version
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/lepeshko/keys/internal/loader"
+	"github.com/lepeshko/keys/internal/logx"
 )
 
 func TestIsNewer(t *testing.T) {
@@ -86,5 +88,61 @@ func TestInstalledVersion(t *testing.T) {
 				t.Errorf("InstalledVersion(%+v) = %q, want %q", tt.tool, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestInstalledVersionLoggingMissing(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("PATH", dir)
+
+	logDir := t.TempDir()
+	restore := logx.SetDirForTesting(logDir)
+	defer restore()
+
+	if got := InstalledVersion(loader.Tool{Name: "missingtool"}); got != "" {
+		t.Fatalf("expected empty version, got %q", got)
+	}
+	out := logx.ReadAllForTesting(logDir)
+	// Exactly one log line despite two candidates (--version and -V).
+	lines := strings.Count(out, "version.InstalledVersion")
+	if lines != 1 {
+		t.Fatalf("expected exactly one log line, got %d:\n%s", lines, out)
+	}
+	if !strings.Contains(out, "missingtool") {
+		t.Errorf("log should name the tool, got:\n%s", out)
+	}
+}
+
+func TestInstalledVersionLoggingFallbackNoLog(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeTool(t, dir, "flagvtool", `if [ "$1" = "-V" ]; then echo "2.0.1"; else exit 1; fi`)
+	t.Setenv("PATH", dir)
+
+	logDir := t.TempDir()
+	restore := logx.SetDirForTesting(logDir)
+	defer restore()
+
+	if got := InstalledVersion(loader.Tool{Name: "flagvtool"}); got != "2.0.1" {
+		t.Fatalf("expected 2.0.1 via -V fallback, got %q", got)
+	}
+	if out := logx.ReadAllForTesting(logDir); out != "" {
+		t.Errorf("a successful -V fallback must not log, got:\n%s", out)
+	}
+}
+
+func TestInstalledVersionLoggingSuccessNoLog(t *testing.T) {
+	dir := t.TempDir()
+	writeFakeTool(t, dir, "goodtool", `echo "goodtool version 1.2.3"`)
+	t.Setenv("PATH", dir)
+
+	logDir := t.TempDir()
+	restore := logx.SetDirForTesting(logDir)
+	defer restore()
+
+	if got := InstalledVersion(loader.Tool{Name: "goodtool"}); got != "1.2.3" {
+		t.Fatalf("expected 1.2.3, got %q", got)
+	}
+	if out := logx.ReadAllForTesting(logDir); out != "" {
+		t.Errorf("a first-candidate success must not log, got:\n%s", out)
 	}
 }

@@ -30,8 +30,8 @@ func browserCommand(goos, url string) (string, []string) {
 // openURLCmd builds a tea.Cmd that launches the system browser for url and
 // reports the outcome via openURLMsg.
 func openURLCmd(url string) tea.Cmd {
-	return func() tea.Msg {
+	return safeCmd("openURLCmd", func() tea.Msg {
 		name, args := browserCommand(runtime.GOOS, url)
 		return openURLMsg{err: exec.Command(name, args...).Start()}
-	}
+	})
 }

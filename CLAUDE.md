@@ -13,7 +13,7 @@ go vet ./...        # static analysis
 golangci-lint run   # lint (config in .golangci.yml; requires golangci-lint v2)
 ```
 
-CI (`.github/workflows/ci.yml`) runs build / vet / `test -race` / golangci-lint on every push and PR to `main`. Release is triggered by pushing a `v*` tag; GitHub Actions builds for darwin/linux/windows via `.github/workflows/release.yml`.
+CI (`.github/workflows/ci.yml`) runs build / vet / `test -race` / golangci-lint on every push and PR to `main`. Release is triggered by pushing a `v*` tag; GitHub Actions builds for darwin/linux/windows via `.github/workflows/release.yml`, injecting the tag with `-ldflags "-X main.version=<tag>"`. `main.version` (default `"dev"`) exists so that ldflag actually takes effect — it seeds the session-log header; local builds show `dev`.
 
 ## Architecture
 
@@ -28,6 +28,7 @@ CI (`.github/workflows/ci.yml`) runs build / vet / `test -race` / golangci-lint 
 | Package | Purpose |
 |---|---|
 | `internal/loader` | Persist tracker metadata (`meta.yaml`: name, status, tags, note, github ref); own the tool-status lifecycle (`active → trying → inactive` via `NextStatus`; legacy `forgotten`/`archived` values are migrated to `inactive` in `LoadMeta` — in-memory, the file keeps the old value until the next `SaveMeta`); parse GitHub refs (`NormalizeRepo`, `ParseToolRef` in `github.go`) |
+| `internal/logx` | Dependency-free, errors-only session logger; one lazily-created plain-text file per session under `~/.config/keys/logs`. Package-level state (like `tokenMem`), so any package can log without threading a logger through constructors |
 | `internal/model` | Entire Bubble Tea model — all TUI state, key handling, and rendering |
 | `internal/proc` | `DetachTTY` — runs tool probe subprocesses without a controlling terminal (`Setsid` on unix, `DETACHED_PROCESS` on Windows) |
 | `internal/ui` | Lip Gloss styles and `PlaceOverlay` helper |
@@ -88,8 +89,17 @@ The model is a three-panel layout with focus cycling via `→/←` between `focu
 | Tracker metadata | `~/.config/keys/meta.yaml` |
 | Version cache (24h TTL) | `~/.config/keys/cache.json` |
 | GitHub token (`0600`) | `~/.config/keys/token` |
+| Session error log (lazy, per session) | `~/.config/keys/logs/keeptui-<timestamp>.log` |
 
-`SaveMeta` writes atomically (temp file + `os.Rename` in the same directory) so a crash mid-write can never truncate `meta.yaml`. Tests never touch the real config: `loader` has a `testConfigDir` seam, `version` has `testCacheDir`/`testTokenDir`/`testAPIBase`.
+`SaveMeta` writes atomically (temp file + `os.Rename` in the same directory) so a crash mid-write can never truncate `meta.yaml`. Tests never touch the real config: `loader` has a `testConfigDir` seam, `version` has `testCacheDir`/`testTokenDir`/`testAPIBase`. `logx` is the exception — its seam is **exported** (`logx.SetDirForTesting(dir) (restore func())`) because `version`/`loader`/`model` tests must redirect *its* output, not just their own; `restore` reverts the directory and re-zeros the logger's globals so tests stay order-independent.
+
+### Session error log (`internal/logx`)
+
+An errors-only journal so bugs can be researched after the fact instead of reconstructed from memory. One plain-text file per session, created **lazily on the first write** — a session with no errors leaves no file at all, so the presence of a file is itself the signal. The timestamp is colon-free (Windows filenames) and zero-padded, so lexicographic order equals chronological order, which is what `Cleanup()` (keep newest 20) relies on. The header (`keys <version> <goos>/<goarch> tools=<n> token=<source>`) is assembled in `main.go` via `logx.SetHeader` and written as the file's first line — it stays in `main` because pulling version/tool-count/token-source into `logx` would invert the import graph (`logx` imports nothing from the project, keeping it at the bottom of the graph).
+
+**Why our `recover` sits deeper than Bubble Tea's:** `recover()` consumes a panic wherever it fires first, and Bubble Tea's own recover in each `tea.Cmd` goroutine prints the trace *after* `p.cancel()` (async) but *before* the terminal is restored — so the trace lands in the alt-screen buffer and vanishes on exit. `logx.Recover(context)` is therefore deferred *inside* `Update`, `View` and every command (via the `safeCmd` wrapper), records the value plus `debug.Stack()` (which still contains the real panic site from inside the defer), then **re-panics** so Bubble Tea still catches it, restores the terminal and returns `ErrProgramPanic`. `tea.WithoutCatchPanics` is deliberately **not** used — terminal restoration is Bubble Tea's job and it does it correctly. Errors-only by design: there is no debug level, no `KEYS_DEBUG`, no env reading, no JSON, no size-based rotation — without a debug level the file appears only when something went wrong. The logger never breaks the app: its own failures (file won't open, disk full) are swallowed silently.
+
+Logging sites are `Errorf`-only: cache read/write failures (`version.LoadCache`/`SaveCache`), GitHub API failures (`doGH`/`classifyStatus` — HTTP code + `X-RateLimit-Remaining`, never the token), installed-version detection give-up (`InstalledVersion`, logged once at the final `return ""`), `meta.yaml` save failures (`loader.SaveMeta`), help-capture failures (`fetchHelpCmd`), and a panic-ended session from `main`. `View`/render steady state and keystrokes are deliberately never logged.
 
 ### GitHub API
 

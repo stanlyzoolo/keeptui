@@ -4,8 +4,102 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/lepeshko/keys/internal/logx"
 )
+
+func TestFetchHelpTakeoverLogs(t *testing.T) {
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "faketui")
+	script := "#!/bin/sh\nprintf '\\033[?1049lpanic: no tty\\n'\nexit 101\n"
+	if err := os.WriteFile(fake, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	logDir := t.TempDir()
+	restore := logx.SetDirForTesting(logDir)
+	defer restore()
+
+	msg, ok := fetchHelpCmd("faketui", helpModeHelp)().(helpOutputMsg)
+	if !ok {
+		t.Fatalf("unexpected msg type %T", msg)
+	}
+	if msg.output != "" {
+		t.Errorf("takeover output leaked into help: %q", msg.output)
+	}
+	out := logx.ReadAllForTesting(logDir)
+	if !strings.Contains(out, "faketui") || !strings.Contains(out, "TUI takeover") {
+		t.Errorf("log should record the takeover and tool name, got:\n%s", out)
+	}
+}
+
+func TestFetchHelpSuccessNoLog(t *testing.T) {
+	dir := t.TempDir()
+	sane := filepath.Join(dir, "fakecli")
+	if err := os.WriteFile(sane, []byte("#!/bin/sh\necho 'Usage: fakecli'\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	logDir := t.TempDir()
+	restore := logx.SetDirForTesting(logDir)
+	defer restore()
+
+	msg := fetchHelpCmd("fakecli", helpModeHelp)().(helpOutputMsg)
+	if msg.output != "Usage: fakecli\n" {
+		t.Fatalf("plain help lost: %q, err %v", msg.output, msg.err)
+	}
+	if out := logx.ReadAllForTesting(logDir); out != "" {
+		t.Errorf("a successful help capture must not log, got:\n%s", out)
+	}
+}
+
+type safeCmdMsg struct{ v int }
+
+func TestSafeCmdPassesMsgThrough(t *testing.T) {
+	cmd := safeCmd("ctx", func() tea.Msg { return safeCmdMsg{v: 7} })
+	msg, ok := cmd().(safeCmdMsg)
+	if !ok {
+		t.Fatalf("unexpected msg type %T", msg)
+	}
+	if msg.v != 7 {
+		t.Errorf("msg not passed through untouched: %+v", msg)
+	}
+}
+
+func safeCmdPanicSite() tea.Msg {
+	panic("cmd boom")
+}
+
+func TestSafeCmdLogsAndRePanics(t *testing.T) {
+	logDir := t.TempDir()
+	restore := logx.SetDirForTesting(logDir)
+	defer restore()
+
+	cmd := safeCmd("panic.ctx", safeCmdPanicSite)
+
+	var caught any
+	func() {
+		defer func() { caught = recover() }()
+		cmd()
+	}()
+
+	if caught != "cmd boom" {
+		t.Errorf("expected re-panic with %q, caught %v", "cmd boom", caught)
+	}
+	out := logx.ReadAllForTesting(logDir)
+	if !strings.Contains(out, "panic in panic.ctx") {
+		t.Errorf("log missing context, got:\n%s", out)
+	}
+	if !strings.Contains(out, "safeCmdPanicSite") {
+		t.Errorf("trace should name the real panic site, got:\n%s", out)
+	}
+}
 
 func TestIsTUITakeover(t *testing.T) {
 	tests := []struct {

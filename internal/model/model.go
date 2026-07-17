@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/lepeshko/keys/internal/loader"
+	"github.com/lepeshko/keys/internal/logx"
 	"github.com/lepeshko/keys/internal/ui"
 	"github.com/lepeshko/keys/internal/version"
 )
@@ -231,6 +232,8 @@ func (m Model) Init() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	defer logx.Recover("model.Update")
+
 	var cmd tea.Cmd
 
 	switch msg := msg.(type) {

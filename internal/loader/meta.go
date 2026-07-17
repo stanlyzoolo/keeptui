@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/lepeshko/keys/internal/logx"
 )
 
 type Status string
@@ -82,17 +84,24 @@ func LoadMeta() ([]ToolMeta, error) {
 func SaveMeta(meta []ToolMeta) error {
 	path := MetaPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		logx.Errorf("loader.SaveMeta: mkdir %s: %v", filepath.Dir(path), err)
 		return err
 	}
 	data, err := yaml.Marshal(meta)
 	if err != nil {
+		logx.Errorf("loader.SaveMeta: marshal: %v", err)
 		return err
 	}
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		logx.Errorf("loader.SaveMeta: write %s: %v", tmp, err)
 		return err
 	}
-	return os.Rename(tmp, path)
+	if err := os.Rename(tmp, path); err != nil {
+		logx.Errorf("loader.SaveMeta: rename %s -> %s: %v", tmp, path, err)
+		return err
+	}
+	return nil
 }
 
 func FindMeta(meta []ToolMeta, name string) *ToolMeta {

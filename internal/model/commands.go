@@ -10,9 +10,22 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/lepeshko/keys/internal/loader"
+	"github.com/lepeshko/keys/internal/logx"
 	"github.com/lepeshko/keys/internal/proc"
 	"github.com/lepeshko/keys/internal/version"
 )
+
+// safeCmd wraps a command so a panic in its goroutine is recorded to the session
+// log (with the real stack) and then re-raised. Bubble Tea catches the re-raised
+// panic to restore the terminal, but prints the trace into the alt-screen buffer
+// where it is lost on exit; logx.Recover writes it to a durable file first. One
+// grep-able, uniform call site is worth the extra closure allocation per command.
+func safeCmd(ctx string, fn tea.Cmd) tea.Cmd {
+	return func() tea.Msg {
+		defer logx.Recover(ctx)
+		return fn()
+	}
+}
 
 // tokenValidatedMsg carries the result of validating a candidate token against
 // GET /rate_limit. token is the candidate to persist on success.
@@ -25,23 +38,23 @@ type tokenValidatedMsg struct {
 // validateTokenCmd checks a candidate token against /rate_limit without touching
 // package token state; the handler persists it only on success.
 func validateTokenCmd(token string) tea.Cmd {
-	return func() tea.Msg {
+	return safeCmd("validateTokenCmd", func() tea.Msg {
 		rate, err := version.FetchRateWithToken(token)
 		return tokenValidatedMsg{token: token, rate: rate, err: err}
-	}
+	})
 }
 
 // fetchInstalledCmd returns a Cmd that detects the installed version of t
 // locally (subprocess) and emits an installedMsg. It never touches the network,
 // so the installed version can render before any GitHub fetch completes.
 func fetchInstalledCmd(t loader.Tool) tea.Cmd {
-	return func() tea.Msg {
+	return safeCmd("fetchInstalledCmd", func() tea.Msg {
 		installed := version.InstalledVersion(t)
 		return installedMsg{
 			toolName:  t.Name,
 			installed: installed,
 		}
-	}
+	})
 }
 
 // fetchRemoteCmd returns a Cmd that makes a single network pass over t's
@@ -54,7 +67,11 @@ func fetchRemoteCmd(t loader.Tool) tea.Cmd { return remoteCmd(t, false) }
 func refreshRemoteCmd(t loader.Tool) tea.Cmd { return remoteCmd(t, true) }
 
 func remoteCmd(t loader.Tool, force bool) tea.Cmd {
-	return func() tea.Msg {
+	ctx := "fetchRemoteCmd"
+	if force {
+		ctx = "refreshRemoteCmd"
+	}
+	return safeCmd(ctx, func() tea.Msg {
 		var d version.RepoData
 		if force {
 			d = version.RefreshRepoData(t.GitHub)
@@ -84,7 +101,7 @@ func remoteCmd(t loader.Tool, force bool) tea.Cmd {
 			rate: version.Rate(),
 			err:  d.Err,
 		}
-	}
+	})
 }
 
 // fetchRateCmd queries GET /rate_limit, which reports the current quota without
@@ -92,10 +109,10 @@ func remoteCmd(t loader.Tool, force bool) tea.Cmd {
 // signal even on warm-cache starts (where remote fetches make no request) and
 // on demand from the API-status overlay.
 func fetchRateCmd() tea.Cmd {
-	return func() tea.Msg {
+	return safeCmd("fetchRateCmd", func() tea.Msg {
 		rate, err := version.FetchRate()
 		return rateMsg{rate: rate, err: err}
-	}
+	})
 }
 
 func fetchChangelogCmd(githubField, toolName string) tea.Cmd {
@@ -109,7 +126,11 @@ func refreshChangelogCmd(githubField, toolName string) tea.Cmd {
 }
 
 func changelogCmd(githubField, toolName string, force bool) tea.Cmd {
-	return func() tea.Msg {
+	ctx := "fetchChangelogCmd"
+	if force {
+		ctx = "refreshChangelogCmd"
+	}
+	return safeCmd(ctx, func() tea.Msg {
 		var (
 			info version.ReleaseInfo
 			err  error
@@ -127,15 +148,18 @@ func changelogCmd(githubField, toolName string, force bool) tea.Cmd {
 			publishedAt: info.PublishedAt,
 			err:         err,
 		}
-	}
+	})
 }
 
-// needsInstalled reports whether the installed version for t is not yet known.
-// Detected locally, so it fires regardless of GitHub, matching Init(). Guards
-// against re-running the subprocess on every cursor movement.
+// needsInstalled reports whether local detection for t has not yet run.
+// Detected locally, so it fires regardless of GitHub, matching Init(). It keys
+// off InstalledKnown, not Installed=="", so a tool that was probed and found
+// missing (Installed=="", InstalledKnown==true) is not re-probed — and thus not
+// re-logged — on every cursor movement; a force refresh ([r]) re-detects
+// explicitly by bypassing this guard.
 func (m *Model) needsInstalled(t loader.Tool) bool {
 	info, ok := m.versions[t.Name]
-	return !ok || info.Installed == ""
+	return !ok || !info.InstalledKnown
 }
 
 // needsRemote reports whether the network pass for t must still run.
@@ -212,12 +236,18 @@ func (m *Model) autoFetchCmdsForSelected() tea.Cmd {
 }
 
 func fetchHelpCmd(name string, mode int) tea.Cmd {
-	return func() tea.Msg {
+	return safeCmd("fetchHelpCmd", func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 
 		var output []byte
 		var err error
+		sawTakeover := false
+
+		modeLabel := "--help"
+		if mode == helpModeMan {
+			modeLabel = "man"
+		}
 
 		// Each mode has exactly one source — no silent cross-fallback — so [m]
 		// and [h] are distinct and a missing page/flag surfaces its own message
@@ -244,6 +274,7 @@ func fetchHelpCmd(name string, mode int) tea.Cmd {
 				// since DetachTTY cut it off from /dev/tty). That is not help
 				// text — fall through to the "No --help output" message.
 				if isTUITakeover(out) {
+					sawTakeover = true
 					continue
 				}
 				if len(out) > 0 {
@@ -254,8 +285,16 @@ func fetchHelpCmd(name string, mode int) tea.Cmd {
 		}
 
 		if len(output) == 0 {
+			// One line per capture, not one per candidate: a TUI takeover trips
+			// all of --help/-h/help, and logging inside the loop would write the
+			// same line three times.
+			if sawTakeover {
+				logx.Errorf("model.fetchHelpCmd: %s [%s]: discarded TUI takeover capture", name, modeLabel)
+			} else {
+				logx.Errorf("model.fetchHelpCmd: %s [%s]: no output: %v", name, modeLabel, err)
+			}
 			return helpOutputMsg{toolName: name, mode: mode, err: err}
 		}
 		return helpOutputMsg{toolName: name, mode: mode, output: cleanTerminalOutput(string(output))}
-	}
+	})
 }

@@ -43,8 +43,10 @@ func logDir() string {
 // SetDirForTesting redirects the log directory and resets all logger state, so
 // other packages' tests can capture logx output and stay order-independent
 // (sticky globals otherwise make "no file created" assertions depend on test
-// order within the package binary). The returned restore reverts to the real
-// directory and re-zeros the state.
+// order within the package binary). The returned restore reverts to the
+// *previous* override (not necessarily the real directory) and re-zeros the
+// state, so a per-test redirect nests correctly inside a package TestMain that
+// already redirected to a shared temp dir.
 func SetDirForTesting(dir string) (restore func()) {
 	mu.Lock()
 	defer mu.Unlock()

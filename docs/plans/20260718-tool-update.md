@@ -199,10 +199,10 @@ type Plan struct {
 
 ### Task 8: Verify acceptance criteria
 
-- [ ] verify all requirements from Overview are implemented (detect brew/go/cargo/pipx/npm, `update_cmd` override, confirm dialog, live `[3]` log, spinner, re-fetch on success)
-- [ ] verify edge cases: no `hasUpdate`, unknown manager, double-press, untrack mid-update, `\r` progress bars, 500-line cap
-- [ ] run full test suite: `go test -race ./...`
-- [ ] run `go vet ./...` and `golangci-lint run`
+- [x] verify all requirements from Overview are implemented (detect brew/go/cargo/pipx/npm, `update_cmd` override, confirm dialog, live `[3]` log, spinner, re-fetch on success)
+- [x] verify edge cases: no `hasUpdate`, unknown manager, double-press, untrack mid-update, `\r` progress bars, 500-line cap
+- [x] run full test suite: `go test -race ./...`
+- [x] run `go vet ./...` and `golangci-lint run` (6 remaining staticcheck SA5011 warnings are pre-existing false positives in test files from 2026-06-28/07-07, unrelated to this feature — no regressions introduced)
 
 ### Task 9: [Final] Update documentation
 

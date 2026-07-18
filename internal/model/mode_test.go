@@ -8,6 +8,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/lepeshko/keys/internal/loader"
+	"github.com/lepeshko/keys/internal/updater"
 )
 
 func keyRunes(s string) tea.KeyMsg {
@@ -920,5 +921,168 @@ func TestFocusDigitTypedIntoSearch(t *testing.T) {
 	}
 	if nm.search.Value() != "3" {
 		t.Errorf("search value = %q, expected the 3 rune to land in the query", nm.search.Value())
+	}
+}
+
+// newUpdateTestModel builds a focusBrief model with one tool that has a pending
+// release (installed older than latest, so hasUpdate is true). Sizing goes
+// through a real WindowSizeMsg so the card/status bar render as in the app.
+func newUpdateTestModel() Model {
+	m := New([]loader.ToolMeta{{Name: "rg", GitHub: "github.com/BurntSushi/ripgrep"}})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(Model)
+	m.focus = focusBrief
+	m.versions["rg"] = VersionInfo{Installed: "1.0.0", Latest: "2.0.0", InstalledKnown: true}
+	return m
+}
+
+// TestUpdateKeyWithoutUpdate: [u] in focusBrief on a tool with no pending
+// release sets a hint and does not enter the confirm mode.
+func TestUpdateKeyWithoutUpdate(t *testing.T) {
+	m := newUpdateTestModel()
+	m.versions["rg"] = VersionInfo{Installed: "2.0.0", Latest: "2.0.0", InstalledKnown: true}
+
+	updated, _ := m.Update(keyRunes("u"))
+	nm := updated.(Model)
+	if nm.mode != modeNormal {
+		t.Fatalf("mode = %d, want modeNormal", nm.mode)
+	}
+	if !strings.Contains(nm.statusMsg, "no update available") {
+		t.Errorf("statusMsg = %q, want a 'no update available' hint", nm.statusMsg)
+	}
+}
+
+// TestUpdateKeyWhileUpdatingNoop: [u] while an update is already running is a
+// no-op — one update at a time, no queue.
+func TestUpdateKeyWhileUpdatingNoop(t *testing.T) {
+	m := newUpdateTestModel()
+	m.updatingFor = "rg"
+
+	updated, cmd := m.Update(keyRunes("u"))
+	nm := updated.(Model)
+	if nm.mode != modeNormal {
+		t.Errorf("mode = %d, want modeNormal (no confirm)", nm.mode)
+	}
+	if cmd != nil {
+		t.Errorf("cmd = %v, want nil (no detection while updating)", cmd)
+	}
+	if nm.statusMsg != "" {
+		t.Errorf("statusMsg = %q, want empty", nm.statusMsg)
+	}
+}
+
+// TestUpdateDetectedEntersConfirm: a successful detection for the selected tool
+// stores the plan and opens modeConfirmUpdate; the status bar shows the command.
+func TestUpdateDetectedEntersConfirm(t *testing.T) {
+	m := newUpdateTestModel()
+	plan := updater.Plan{Manager: "brew", Argv: []string{"brew", "upgrade", "ripgrep"}, Display: "brew upgrade ripgrep"}
+
+	updated, _ := m.Update(updateDetectedMsg{tool: "rg", plan: plan})
+	nm := updated.(Model)
+	if nm.mode != modeConfirmUpdate {
+		t.Fatalf("mode = %d, want modeConfirmUpdate", nm.mode)
+	}
+	if nm.updatePlan.Display != "brew upgrade ripgrep" {
+		t.Errorf("updatePlan.Display = %q, want the detected command", nm.updatePlan.Display)
+	}
+	if bar := nm.renderStatusBar(); !strings.Contains(bar, "brew upgrade ripgrep") {
+		t.Errorf("status bar = %q, want it to show the plan command", bar)
+	}
+}
+
+// TestUpdateDetectedStaleDropped: a detection result for a tool that is no
+// longer selected is ignored.
+func TestUpdateDetectedStaleDropped(t *testing.T) {
+	m := newUpdateTestModel()
+	plan := updater.Plan{Display: "brew upgrade other", Argv: []string{"true"}}
+
+	updated, _ := m.Update(updateDetectedMsg{tool: "other", plan: plan})
+	nm := updated.(Model)
+	if nm.mode != modeNormal {
+		t.Errorf("mode = %d, want modeNormal (stale msg dropped)", nm.mode)
+	}
+	if nm.updatePlan.Display != "" {
+		t.Errorf("updatePlan.Display = %q, want empty (plan not stored)", nm.updatePlan.Display)
+	}
+}
+
+// TestUpdateDetectedUnknownManager: ErrUnknownManager does not open a dead-end
+// dialog — it shows a hint and stays in modeNormal.
+func TestUpdateDetectedUnknownManager(t *testing.T) {
+	m := newUpdateTestModel()
+
+	updated, _ := m.Update(updateDetectedMsg{tool: "rg", err: updater.ErrUnknownManager})
+	nm := updated.(Model)
+	if nm.mode != modeNormal {
+		t.Fatalf("mode = %d, want modeNormal", nm.mode)
+	}
+	if !strings.Contains(nm.statusMsg, "no known updater") {
+		t.Errorf("statusMsg = %q, want a 'no known updater' hint", nm.statusMsg)
+	}
+}
+
+// TestUpdateConfirmEnterStarts: enter in modeConfirmUpdate launches the update —
+// sets updatingFor/updateLogFor, resets the log, and returns a command.
+func TestUpdateConfirmEnterStarts(t *testing.T) {
+	m := newUpdateTestModel()
+	m.mode = modeConfirmUpdate
+	m.updatePlan = updater.Plan{Argv: []string{"true"}, Display: "true"}
+	m.updateLog = []string{"stale"}
+
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	nm := updated.(Model)
+	if nm.mode != modeNormal {
+		t.Errorf("mode = %d, want modeNormal after enter", nm.mode)
+	}
+	if nm.updatingFor != "rg" {
+		t.Errorf("updatingFor = %q, want %q", nm.updatingFor, "rg")
+	}
+	if nm.updateLogFor != "rg" {
+		t.Errorf("updateLogFor = %q, want %q", nm.updateLogFor, "rg")
+	}
+	if len(nm.updateLog) != 0 {
+		t.Errorf("updateLog = %v, want reset to empty", nm.updateLog)
+	}
+	if cmd == nil {
+		t.Error("cmd = nil, want a start+spinner command")
+	}
+}
+
+// TestUpdateConfirmEscCancels: esc in modeConfirmUpdate returns to modeNormal
+// without starting anything.
+func TestUpdateConfirmEscCancels(t *testing.T) {
+	m := newUpdateTestModel()
+	m.mode = modeConfirmUpdate
+	m.updatePlan = updater.Plan{Argv: []string{"true"}, Display: "true"}
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	nm := updated.(Model)
+	if nm.mode != modeNormal {
+		t.Errorf("mode = %d, want modeNormal", nm.mode)
+	}
+	if nm.updatingFor != "" {
+		t.Errorf("updatingFor = %q, want empty (nothing started)", nm.updatingFor)
+	}
+}
+
+// TestSpinnerTicksWhileUpdating: the spinner tick loop keeps rescheduling while
+// updatingFor is set (without it the card spinner freezes after one frame).
+func TestSpinnerTicksWhileUpdating(t *testing.T) {
+	m := newUpdateTestModel()
+	m.updatingFor = "rg"
+
+	updated, cmd := m.Update(m.spinner.Tick())
+	nm := updated.(Model)
+	if cmd == nil {
+		t.Error("cmd = nil, want the tick loop to keep ticking while updating")
+	}
+	_ = nm
+
+	// Once both refresh and update are idle, the loop stops.
+	m.updatingFor = ""
+	m.refreshingFor = ""
+	_, cmd2 := m.Update(m.spinner.Tick())
+	if cmd2 != nil {
+		t.Error("cmd = non-nil, want the tick loop to stop when idle")
 	}
 }

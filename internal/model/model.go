@@ -369,9 +369,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		// Animate only while a refresh is in flight; once refreshingFor is
-		// cleared (by the remoteMsg handler) the loop stops rescheduling itself.
-		if m.refreshingFor == "" {
+		// Animate while a refresh ([r]) or an update ([u]) is in flight; once
+		// both refreshingFor and updatingFor are cleared (by the remoteMsg /
+		// updateDoneMsg handlers) the loop stops rescheduling itself.
+		if m.refreshingFor == "" && m.updatingFor == "" {
 			return m, nil
 		}
 		m.spinner, cmd = m.spinner.Update(msg)
@@ -429,6 +430,28 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if mt, ok := m.selectedMeta(); ok && mt.Name == msg.toolName {
 			m.helpViewport.SetContent(m.renderHelpContent())
 		}
+		return m, nil
+
+	case updateDetectedMsg:
+		// Detection result for a [u] press. Drop it if the target is no longer
+		// the selected tool (the user moved on) or an update is already running.
+		// ErrUnknownManager is not a dead-end dialog — just a hint pointing at
+		// update_cmd / manual install. On success, stash the plan and open the
+		// confirm dialog.
+		mt, ok := m.selectedMeta()
+		if !ok || mt.Name != msg.tool || m.updatingFor != "" {
+			return m, nil
+		}
+		if msg.err != nil {
+			if errors.Is(msg.err, updater.ErrUnknownManager) {
+				m.statusMsg = "no known updater for " + msg.tool + " — set update_cmd or [o] releases"
+			} else {
+				m.statusMsg = "update detect failed: " + msg.err.Error()
+			}
+			return m, nil
+		}
+		m.updatePlan = msg.plan
+		m.mode = modeConfirmUpdate
 		return m, nil
 
 	case updateChunkMsg:
@@ -499,6 +522,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateUntrackConfirm(msg)
 		case modeRename:
 			return m.updateRenameInput(msg)
+		case modeConfirmUpdate:
+			return m.updateConfirmUpdate(msg)
 		case modeAPIStatus, modeTokenInput:
 			return m.updateAPIStatus(msg)
 		}
@@ -789,6 +814,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.mode = modeConfirmUntrack
 					m.untrackTarget = mt.Name
 					return m, nil
+				}
+			} else if m.focus == focusBrief {
+				// Update the selected tool: only when it has a pending release
+				// (else a hint) and no update is already running (one at a time,
+				// no queue). Detection spawns subprocesses, so it runs in a
+				// tea.Cmd — the updateDetectedMsg handler opens the confirm mode.
+				if m.updatingFor != "" {
+					return m, nil
+				}
+				if t, ok := m.selectedTool(); ok {
+					if !m.hasUpdate(t.Name) {
+						m.statusMsg = "no update available for " + t.Name
+						return m, nil
+					}
+					return m, detectUpdateCmd(t)
 				}
 			}
 

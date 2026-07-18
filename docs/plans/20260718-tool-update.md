@@ -160,15 +160,15 @@ type Plan struct {
 - Modify: `internal/model/render.go`
 - Modify: `internal/model/mode_test.go`
 
-- [ ] add `modeConfirmUpdate` to `inputMode` **and** an explicit `case modeConfirmUpdate:` in the `switch m.mode` dispatch in `Update()` (every mode has one)
-- [ ] `case "u"` in `focusBrief` (branch on focus — `focusTools` keeps untrack): guard `hasUpdate(name)` (else `statusMsg`), guard `updatingFor != ""` (no-op), then fire `detectUpdateCmd(t)` — no subprocess work on the Update thread
-- [ ] `updateDetectedMsg` handler: drop if the tool is no longer selected or an update is already running; `ErrUnknownManager` → `statusMsg` hint (`set update_cmd or update manually, [o] opens releases`); success → store `m.updatePlan`, enter `modeConfirmUpdate`
-- [ ] `updateConfirmUpdate` handler in `mode.go`: `enter` → set `updatingFor`, reset `updateLog`/`updateLogFor`, fire `startUpdateCmd(m.updatePlan, name)` + spinner tick; `esc` → back to `modeNormal`
-- [ ] `renderStatusBar()` branch for `modeConfirmUpdate`: `update <name>: <plan.Display> — [enter] run  [esc] cancel`
-- [ ] card title while `updatingFor != ""`: `updating <name> <spinner>` (twin of `refreshingFor`; both set → refreshing wins, they're mutually exclusive anyway via guards); extend the `spinner.TickMsg` gate to `refreshingFor != "" || updatingFor != ""` — without this the spinner freezes after one frame
-- [ ] `[u] update` hint appended to the `focusBrief` bar only when `hasUpdate(selected)`
-- [ ] write tests: `[u]` without `hasUpdate` → `statusMsg`, mode unchanged; `[u]` while `updatingFor != ""` → no-op; `updateDetectedMsg` success → `modeConfirmUpdate` with plan in status bar; stale `updateDetectedMsg` (other tool selected) dropped; `esc` cancels without side effects; `enter` sets `updatingFor` and returns a command; `spinner.TickMsg` keeps ticking while `updatingFor != ""`
-- [ ] run `go test -race ./...` — must pass before task 6
+- [x] add `modeConfirmUpdate` to `inputMode` **and** an explicit `case modeConfirmUpdate:` in the `switch m.mode` dispatch in `Update()` (every mode has one)
+- [x] `case "u"` in `focusBrief` (branch on focus — `focusTools` keeps untrack): guard `hasUpdate(name)` (else `statusMsg`), guard `updatingFor != ""` (no-op), then fire `detectUpdateCmd(t)` — no subprocess work on the Update thread
+- [x] `updateDetectedMsg` handler: drop if the tool is no longer selected or an update is already running; `ErrUnknownManager` → `statusMsg` hint (`set update_cmd or update manually, [o] opens releases`); success → store `m.updatePlan`, enter `modeConfirmUpdate`
+- [x] `updateConfirmUpdate` handler in `mode.go`: `enter` → set `updatingFor`, reset `updateLog`/`updateLogFor`, fire `startUpdateCmd(m.updatePlan, name)` + spinner tick; `esc` → back to `modeNormal`
+- [x] `renderStatusBar()` branch for `modeConfirmUpdate`: `update <name>: <plan.Display> — [enter] run  [esc] cancel`
+- [x] card title while `updatingFor != ""`: `updating <name> <spinner>` (twin of `refreshingFor`; both set → refreshing wins, they're mutually exclusive anyway via guards); extend the `spinner.TickMsg` gate to `refreshingFor != "" || updatingFor != ""` — without this the spinner freezes after one frame
+- [x] `[u] update` hint appended to the `focusBrief` bar only when `hasUpdate(selected)`
+- [x] write tests: `[u]` without `hasUpdate` → `statusMsg`, mode unchanged; `[u]` while `updatingFor != ""` → no-op; `updateDetectedMsg` success → `modeConfirmUpdate` with plan in status bar; stale `updateDetectedMsg` (other tool selected) dropped; `esc` cancels without side effects; `enter` sets `updatingFor` and returns a command; `spinner.TickMsg` keeps ticking while `updatingFor != ""`
+- [x] run `go test -race ./...` — must pass before task 6
 
 ### Task 6: `[3]` panel — live update log rendering
 

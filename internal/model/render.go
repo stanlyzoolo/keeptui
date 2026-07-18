@@ -97,6 +97,18 @@ func (m Model) renderStatusBar() string {
 			keyHint("esc"),
 		))
 	}
+	if m.mode == modeConfirmUpdate {
+		name := ""
+		if mt, ok := m.selectedMeta(); ok {
+			name = mt.Name
+		}
+		return style.Render(fmt.Sprintf(
+			"%s  %s run  %s cancel",
+			ui.SearchPromptStyle.Render("update "+name+": "+m.updatePlan.Display),
+			keyHint("enter"),
+			keyHint("esc"),
+		))
+	}
 	if m.mode == modeTokenInput {
 		return style.Render(keyHint("enter") + " validate & save  " + keyHint("esc") + " cancel")
 	}
@@ -108,6 +120,9 @@ func (m Model) renderStatusBar() string {
 	}
 	if m.focus == focusBrief {
 		hints := keyHint("o") + " open repo  " + keyHint("c") + " changelog  " + keyHint("r") + " refresh  " + keyHint("s") + " status  " + keyHint("e") + " note  " + keyHint("t") + " tags  " + keyHint("q") + " quit"
+		if mt, ok := m.selectedMeta(); ok && m.hasUpdate(mt.Name) {
+			hints = keyHint("u") + " update  " + hints
+		}
 		return m.renderHintsBar(style, hints)
 	}
 	if m.focus == focusHelp {
@@ -625,7 +640,13 @@ func (m Model) renderCard() string {
 	}
 	nameRendered := lipgloss.NewStyle().Bold(true).Foreground(ui.ColorOrange).Render(name)
 	var title string
-	if m.refreshingFor == t.Name {
+	if m.updatingFor == t.Name {
+		// While an update is running, the title becomes a status line:
+		// "updating <name> <spinner>" (twin of the refresh spinner; the two are
+		// mutually exclusive via the [u]/[r] guards). The about is hidden until
+		// the update completes.
+		title = ui.InfoStyle.Render("updating ") + nameRendered + ui.InfoStyle.Render(" ") + m.spinner.View()
+	} else if m.refreshingFor == t.Name {
 		// While a force refresh is in flight, the title line becomes a status
 		// line: "refreshing <name> data <spinner>" (name keeps its bold style,
 		// spinner frames advance on spinner.TickMsg). The about is hidden until

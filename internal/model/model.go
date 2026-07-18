@@ -496,6 +496,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if msg.err != nil {
 			m.statusMsg = "update failed — see [3]"
+			// A command that fails before emitting any output (empty argv, missing
+			// manager binary, StdoutPipe/Start error, immediate non-zero exit)
+			// leaves updateLog empty, so [3] would still read "starting update…"
+			// while the status bar points there for the reason. Seed the log with
+			// the error so [3] shows it. The argv never carries the token and
+			// msg.err is an exec/exit error, so this stays token-free.
+			if m.updateLogFor == msg.tool && len(m.updateLog) == 0 {
+				m.updateLog = append(m.updateLog, "update failed: "+msg.err.Error())
+				if mt, ok := m.selectedMeta(); ok && mt.Name == msg.tool {
+					m.helpViewport.SetContent(m.renderHelpContent())
+					m.helpViewport.GotoBottom()
+				}
+			}
 			// Record the failure for post-hoc research: manager, exit error and
 			// the tail of the log. The update argv never carries the token, and
 			// nothing here reads it, so the log stays token-free.

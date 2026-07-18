@@ -230,6 +230,32 @@ func TestUpdateDoneFailure(t *testing.T) {
 	}
 }
 
+// TestUpdateDoneFailureEmptyLogSurfacesError: when the update fails before
+// emitting any output (missing binary, bad argv, immediate exit), the empty [3]
+// log would still read "starting update…". The done handler seeds the log with
+// the error so the panel the status bar points to actually shows the reason.
+func TestUpdateDoneFailureEmptyLogSurfacesError(t *testing.T) {
+	logDir := t.TempDir()
+	restore := logx.SetDirForTesting(logDir)
+	defer restore()
+
+	m := updateDoneModel(t)
+	m.updateLog = nil // failed before any chunk arrived
+
+	nm, _ := m.Update(updateDoneMsg{tool: "rg", err: errUpdateTest})
+	m2 := nm.(Model)
+	if len(m2.updateLog) == 0 {
+		t.Fatal("updateLog empty, want the error text seeded for [3]")
+	}
+	if !strings.Contains(m2.updateLog[0], "exit status 1") {
+		t.Errorf("updateLog[0] = %q, want the error text", m2.updateLog[0])
+	}
+	// [3] must now render the seeded error, not the "starting update…" placeholder.
+	if content := m2.renderHelpContent(); !strings.Contains(content, "exit status 1") {
+		t.Errorf("[3] content = %q, want the update error surfaced", content)
+	}
+}
+
 // TestUpdateDoneUntracked: a done for a tool no longer tracked (untracked
 // mid-update) just clears the guard — no re-fetch, no crash, no status.
 func TestUpdateDoneUntracked(t *testing.T) {

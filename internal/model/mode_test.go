@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -1018,6 +1019,43 @@ func TestUpdateDetectedUnknownManager(t *testing.T) {
 	}
 	if !strings.Contains(nm.statusMsg, "no known updater") {
 		t.Errorf("statusMsg = %q, want a 'no known updater' hint", nm.statusMsg)
+	}
+}
+
+// TestUpdateKeyFiresDetect: [u] in focusBrief on a tool with a pending release
+// fires detection (returns a non-nil command) and stays in modeNormal — the
+// confirm dialog opens only after the async updateDetectedMsg lands.
+func TestUpdateKeyFiresDetect(t *testing.T) {
+	m := newUpdateTestModel()
+
+	updated, cmd := m.Update(keyRunes("u"))
+	nm := updated.(Model)
+	if nm.mode != modeNormal {
+		t.Errorf("mode = %d, want modeNormal (detection is async)", nm.mode)
+	}
+	if cmd == nil {
+		t.Error("cmd = nil, want the detection command")
+	}
+	if nm.statusMsg != "" {
+		t.Errorf("statusMsg = %q, want empty (no error, no hint)", nm.statusMsg)
+	}
+}
+
+// TestUpdateDetectedGenericError: a non-ErrUnknownManager detection error shows
+// the "update detect failed" status and stays in modeNormal (no confirm).
+func TestUpdateDetectedGenericError(t *testing.T) {
+	m := newUpdateTestModel()
+
+	updated, _ := m.Update(updateDetectedMsg{tool: "rg", err: errors.New("boom")})
+	nm := updated.(Model)
+	if nm.mode != modeNormal {
+		t.Fatalf("mode = %d, want modeNormal", nm.mode)
+	}
+	if !strings.Contains(nm.statusMsg, "update detect failed") {
+		t.Errorf("statusMsg = %q, want an 'update detect failed' hint", nm.statusMsg)
+	}
+	if nm.updatePlan.Display != "" {
+		t.Errorf("updatePlan.Display = %q, want empty (no plan stored)", nm.updatePlan.Display)
 	}
 }
 

@@ -2364,8 +2364,8 @@ func TestRenderCardSpinner(t *testing.T) {
 }
 
 // TestRenderCardInstalledLatest covers the [info] version lines: installed:
-// renders whenever the section is open (dim "detecting…" while the local
-// probe is in flight, dim "not found" once it reported empty), the section
+// renders whenever the section is open (muted "detecting…" while the local
+// probe is in flight, "✕ not found" once it reported empty), the section
 // opens for a GitHub-less tool once an installed version is known, and
 // latest: gains the update highlight + ↑ only when the installed version is
 // older. The model goes through New + WindowSizeMsg so renderCard sees the
@@ -2411,8 +2411,8 @@ func TestRenderCardInstalledLatest(t *testing.T) {
 		m.versions["gh"] = VersionInfo{Latest: "v2.0.0", InstalledKnown: true}
 		m.repoCards["gh"] = version.RepoCard{Latest: "v2.0.0"}
 		card := stripANSI(m.renderCard())
-		if !strings.Contains(card, "installed: not found") {
-			t.Errorf("card missing installed fallback; got:\n%s", card)
+		if !strings.Contains(card, "installed: ✕ not found") {
+			t.Errorf("card missing installed fallback with ✕ marker; got:\n%s", card)
 		}
 	})
 
@@ -2424,7 +2424,7 @@ func TestRenderCardInstalledLatest(t *testing.T) {
 		if !strings.Contains(card, "installed: detecting…") {
 			t.Errorf("card missing pending installed line; got:\n%s", card)
 		}
-		if strings.Contains(card, "not found") {
+		if strings.Contains(card, "not found") || strings.Contains(card, "✕") {
 			t.Errorf("card claims not found before detection finished; got:\n%s", card)
 		}
 	})

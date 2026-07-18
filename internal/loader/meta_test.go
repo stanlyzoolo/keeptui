@@ -77,6 +77,37 @@ func TestSaveMetaLoadMetaRoundTrip(t *testing.T) {
 	}
 }
 
+func TestSaveMetaLoadMetaPreservesUpdateCmd(t *testing.T) {
+	dir := useTempConfigDir(t)
+
+	want := []ToolMeta{
+		{Name: "ripgrep", Status: StatusActive, Added: "2026-01-15", UpdateCmd: "brew upgrade ripgrep"},
+		{Name: "jq", Status: StatusTrying, Added: "2026-02-01"},
+	}
+	if err := SaveMeta(want); err != nil {
+		t.Fatalf("SaveMeta: %v", err)
+	}
+	got, err := LoadMeta()
+	if err != nil {
+		t.Fatalf("LoadMeta: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("round trip = %+v, want %+v", got, want)
+	}
+
+	// omitempty: a tool without update_cmd must not serialize the field.
+	onDisk, err := os.ReadFile(filepath.Join(dir, "keys", "meta.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(onDisk), "update_cmd: brew upgrade ripgrep") {
+		t.Errorf("on-disk yaml missing update_cmd for ripgrep:\n%s", onDisk)
+	}
+	if strings.Count(string(onDisk), "update_cmd") != 1 {
+		t.Errorf("update_cmd serialized for a tool without one (omitempty broken):\n%s", onDisk)
+	}
+}
+
 func TestSaveMetaLeavesNoTempFile(t *testing.T) {
 	dir := useTempConfigDir(t)
 

@@ -105,11 +105,11 @@ type Plan struct {
 - Modify: `internal/loader/loader.go`
 - Modify: `internal/loader/meta_test.go`
 
-- [ ] add `UpdateCmd string \`yaml:"update_cmd,omitempty"\`` to `ToolMeta`
-- [ ] add `UpdateCmd` to `Tool` and thread it through `ToolsFromMeta`
-- [ ] write test: `meta.yaml` round-trip preserves `update_cmd`; absent field stays empty and is not serialized (omitempty)
-- [ ] write test: `ToolsFromMeta` carries `UpdateCmd` into `Tool`
-- [ ] run `go test -race ./...` — must pass before task 2
+- [x] add `UpdateCmd string \`yaml:"update_cmd,omitempty"\`` to `ToolMeta`
+- [x] add `UpdateCmd` to `Tool` and thread it through `ToolsFromMeta`
+- [x] write test: `meta.yaml` round-trip preserves `update_cmd`; absent field stays empty and is not serialized (omitempty)
+- [x] write test: `ToolsFromMeta` carries `UpdateCmd` into `Tool`
+- [x] run `go test -race ./...` — must pass before task 2
 
 ### Task 2: `internal/updater` — Plan type and pure detection core
 

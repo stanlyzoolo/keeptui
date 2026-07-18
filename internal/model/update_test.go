@@ -283,3 +283,44 @@ func TestStartUpdateCmdStreamsToCompletion(t *testing.T) {
 		}
 	}
 }
+
+// TestHelpKeyDismissesCompletedUpdateLog: the update log is sticky in [3] after
+// completion, but an explicit [h]/[m] is intent to leave it — the key must clear
+// updateLogFor so --help / man is reachable for that tool again.
+func TestHelpKeyDismissesCompletedUpdateLog(t *testing.T) {
+	for _, key := range []string{"h", "m"} {
+		m := New([]loader.ToolMeta{{Name: "git"}})
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		m = updated.(Model)
+		m.focus = focusBrief
+		m.updateLog = []string{"updated git"}
+		m.updateLogFor = "git"
+		m.updatingFor = "" // update finished
+
+		updated, _ = m.Update(keyRunes(key))
+		m = updated.(Model)
+		if m.updateLogFor != "" {
+			t.Errorf("[%s] after completion should clear updateLogFor, got %q", key, m.updateLogFor)
+		}
+	}
+}
+
+// TestHelpKeyKeepsLiveUpdateLog: while an update is still in flight, [h]/[m]
+// must NOT drop the live log — updatingFor still names the tool.
+func TestHelpKeyKeepsLiveUpdateLog(t *testing.T) {
+	for _, key := range []string{"h", "m"} {
+		m := New([]loader.ToolMeta{{Name: "git"}})
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+		m = updated.(Model)
+		m.focus = focusBrief
+		m.updateLog = []string{"downloading"}
+		m.updateLogFor = "git"
+		m.updatingFor = "git" // in flight
+
+		updated, _ = m.Update(keyRunes(key))
+		m = updated.(Model)
+		if m.updateLogFor != "git" {
+			t.Errorf("[%s] during in-flight update should keep live log, got %q", key, m.updateLogFor)
+		}
+	}
+}

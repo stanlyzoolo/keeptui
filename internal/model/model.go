@@ -797,6 +797,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.focus = focusHelp
 				m.helpMode = helpModeHelp
 				if mt, ok := m.selectedMeta(); ok {
+					// An explicit [h] is intent to leave a completed update log
+					// (otherwise sticky on re-selection); drop it so help is
+					// reachable again. Keep the live log during an in-flight
+					// update (updatingFor == name).
+					if m.updateLogFor == mt.Name && m.updatingFor != mt.Name {
+						m.updateLogFor = ""
+					}
 					cached := m.helpCache[mt.Name]
 					if cached[helpModeHelp] == "" {
 						m.helpLoadingFor = mt.Name
@@ -813,6 +820,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.focus = focusHelp
 				m.helpMode = helpModeMan
 				if mt, ok := m.selectedMeta(); ok {
+					// See [h]: an explicit [m] also dismisses a completed update
+					// log so the man page is reachable again.
+					if m.updateLogFor == mt.Name && m.updatingFor != mt.Name {
+						m.updateLogFor = ""
+					}
 					cached := m.helpCache[mt.Name]
 					if cached[helpModeMan] == "" {
 						m.helpLoadingFor = mt.Name

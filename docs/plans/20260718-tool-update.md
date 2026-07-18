@@ -191,11 +191,11 @@ type Plan struct {
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/commands_test.go`
 
-- [ ] `updateDoneMsg` handler: clear `updatingFor`; success → `statusMsg "updated <name>"` + `fetchInstalledCmd(t)` (the merge handler's existing by-name cursor remap moves the tool out of the update group); failure → `statusMsg "update failed — see [3]"` + `logx.Errorf` with manager, exit code and last log lines (never the token)
-- [ ] untracked-mid-update edge: `updateDoneMsg` for a tool no longer in `m.meta` clears `updatingFor` only — no re-fetch, no statusMsg crash
-- [ ] write tests: success → `fetchInstalledCmd` returned and `updatingFor` empty; failure → statusMsg set, log written (via `logx.SetDirForTesting`); untracked tool → clean no-op
-- [ ] write test: after a success merge flips `hasUpdate` off, selection still points at the same tool by name
-- [ ] run `go test -race ./...` — must pass before task 8
+- [x] `updateDoneMsg` handler: clear `updatingFor`; success → `statusMsg "updated <name>"` + `fetchInstalledCmd(t)` (the merge handler's existing by-name cursor remap moves the tool out of the update group); failure → `statusMsg "update failed — see [3]"` + `logx.Errorf` with manager, exit code and last log lines (never the token)
+- [x] untracked-mid-update edge: `updateDoneMsg` for a tool no longer in `m.meta` clears `updatingFor` only — no re-fetch, no statusMsg crash
+- [x] write tests: success → `fetchInstalledCmd` returned and `updatingFor` empty; failure → statusMsg set, log written (via `logx.SetDirForTesting`); untracked tool → clean no-op
+- [x] write test: after a success merge flips `hasUpdate` off, selection still points at the same tool by name
+- [x] run `go test -race ./...` — must pass before task 8
 
 ### Task 8: Verify acceptance criteria
 

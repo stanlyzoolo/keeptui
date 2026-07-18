@@ -481,6 +481,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, waitForChunkCmd(msg.tool, msg.ch)
 
+	case updateDoneMsg:
+		// The update subprocess finished. Clear the guard regardless of outcome
+		// so a new update can start and the spinner.TickMsg loop stops
+		// rescheduling itself; the live log in [3] survives until the next
+		// update begins. Re-render the card so its title drops the spinner.
+		m.updatingFor = ""
+		// A tool untracked mid-update is no longer in m.tools: just drop the
+		// guard — no re-fetch, no statusMsg reaching into a card that is gone.
+		t, ok := m.toolByName(msg.tool)
+		if !ok {
+			m.briefViewport.SetContent(m.renderCard())
+			return m, nil
+		}
+		if msg.err != nil {
+			m.statusMsg = "update failed — see [3]"
+			// Record the failure for post-hoc research: manager, exit error and
+			// the tail of the log. The update argv never carries the token, and
+			// nothing here reads it, so the log stays token-free.
+			logx.Errorf("update failed: tool=%s manager=%s err=%v tail=%q",
+				msg.tool, m.updatePlan.Manager, msg.err, tailLines(m.updateLog, 5))
+			m.briefViewport.SetContent(m.renderCard())
+			return m, nil
+		}
+		// Success: re-detect the installed version. The installedMsg merge flips
+		// hasUpdate off, moves the tool out of the update group and remaps the
+		// cursor by name, so no extra bookkeeping is needed here.
+		m.statusMsg = "updated " + msg.tool
+		m.briefViewport.SetContent(m.renderCard())
+		return m, fetchInstalledCmd(t)
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -911,12 +941,29 @@ func (m Model) selectedTool() (loader.Tool, bool) {
 	if !ok {
 		return loader.Tool{}, false
 	}
+	return m.toolByName(mt.Name)
+}
+
+// toolByName returns the tracked tool with the given name (and false when it is
+// no longer tracked — e.g. untracked mid-update). It backs updateDoneMsg's
+// re-fetch, which fires for a tool that need not be the selected one.
+func (m Model) toolByName(name string) (loader.Tool, bool) {
 	for _, t := range m.tools {
-		if t.Name == mt.Name {
+		if t.Name == name {
 			return t, true
 		}
 	}
 	return loader.Tool{}, false
+}
+
+// tailLines joins the last n entries of the update log into a single
+// space-separated string for the failure log line; fewer than n lines are all
+// returned. Kept small on purpose — the log record wants a hint, not the buffer.
+func tailLines(lines []string, n int) string {
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, " ")
 }
 
 // searchQuery returns the normalized (lowercase, trimmed) live query, or ""

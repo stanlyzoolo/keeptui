@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"testing"
+	"time"
 )
 
 func TestDetachTTYSetsOwnSession(t *testing.T) {
@@ -13,6 +14,39 @@ func TestDetachTTYSetsOwnSession(t *testing.T) {
 	DetachTTY(cmd)
 	if cmd.SysProcAttr == nil || !cmd.SysProcAttr.Setsid {
 		t.Fatalf("DetachTTY must set Setsid, got %+v", cmd.SysProcAttr)
+	}
+}
+
+// TestKillGroupNilProcess: KillGroup is a no-op (no panic, no error) on a
+// command that was never started, so callers can defer it unconditionally.
+func TestKillGroupNilProcess(t *testing.T) {
+	if err := KillGroup(nil); err != nil {
+		t.Errorf("KillGroup(nil) = %v, want nil", err)
+	}
+	if err := KillGroup(exec.Command("true")); err != nil {
+		t.Errorf("KillGroup(unstarted) = %v, want nil", err)
+	}
+}
+
+// TestKillGroupTerminatesGroup starts a detached child that spawns a
+// long-sleeping grandchild and verifies KillGroup (negative-pid SIGKILL) tears
+// down the whole group, not just the direct child.
+func TestKillGroupTerminatesGroup(t *testing.T) {
+	cmd := exec.Command("sh", "-c", "sleep 60 & wait")
+	DetachTTY(cmd)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if err := KillGroup(cmd); err != nil {
+		t.Fatalf("KillGroup: %v", err)
+	}
+	// Wait must return (killed), not hang until the 60s sleep elapses.
+	done := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("process group still alive after KillGroup")
 	}
 }
 

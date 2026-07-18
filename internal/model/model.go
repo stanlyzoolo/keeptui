@@ -13,6 +13,7 @@ import (
 	"github.com/lepeshko/keys/internal/loader"
 	"github.com/lepeshko/keys/internal/logx"
 	"github.com/lepeshko/keys/internal/ui"
+	"github.com/lepeshko/keys/internal/updater"
 	"github.com/lepeshko/keys/internal/version"
 )
 
@@ -81,6 +82,42 @@ const (
 	helpModeMan  = 1
 )
 
+// updateLogMaxLines caps the live update log buffer. Only the tail matters (the
+// final "installed"/error lines); older output can be dropped without loss.
+const updateLogMaxLines = 500
+
+// updateDetectedMsg carries the result of updater.Detect for a tool, run in a
+// tea.Cmd because detection spawns subprocesses (go version -m, cargo install
+// --list) and must never run on the Update thread. The handler enters the
+// confirm mode on success and shows a hint on ErrUnknownManager.
+type updateDetectedMsg struct {
+	tool string
+	plan updater.Plan
+	err  error
+}
+
+// updateChunkMsg carries one segment of the running update's merged
+// stdout+stderr. replace is set for a segment terminated by '\r' (progress
+// bars), so it overwrites the last buffered line instead of appending. ch is
+// the same channel the reader goroutine writes to, threaded through so the
+// handler can re-subscribe with waitForChunkCmd. (The channel is typed
+// updateLine rather than string — see the note there — so it can also carry the
+// completion+error item without a second channel.)
+type updateChunkMsg struct {
+	tool    string
+	line    string
+	replace bool
+	ch      chan updateLine
+}
+
+// updateDoneMsg signals the update subprocess finished (err is the exit error,
+// nil on success). The handler clears updatingFor and, on success, re-detects
+// the installed version so the ↑ marker clears.
+type updateDoneMsg struct {
+	tool string
+	err  error
+}
+
 type Model struct {
 	tools               []loader.Tool
 	versions            map[string]VersionInfo
@@ -122,6 +159,18 @@ type Model struct {
 	// doubles as the double-press guard and as the tick-loop / render gate.
 	spinner       spinner.Model
 	refreshingFor string
+
+	// updatingFor twins refreshingFor for the in-TUI update flow: it holds the
+	// name of the tool currently being updated (empty = idle), drives the card
+	// spinner and doubles as the single-update-at-a-time guard. updatePlan is
+	// the plan awaiting confirmation in modeConfirmUpdate. updateLog is the live
+	// merged stdout+stderr buffer for panel [3]; updateLogFor is the tool it
+	// belongs to, so navigating away shows normal help and navigating back shows
+	// the log again (the buffer survives until the next update starts).
+	updatingFor  string
+	updatePlan   updater.Plan
+	updateLog    []string
+	updateLogFor string
 
 	meta         []loader.ToolMeta
 	metaSelected int
@@ -381,6 +430,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.helpViewport.SetContent(m.renderHelpContent())
 		}
 		return m, nil
+
+	case updateChunkMsg:
+		// Fold one segment of the running update's output into the live buffer.
+		// A '\r'-terminated segment (progress bar) replaces the last line rather
+		// than appending, so a progress bar renders as one updating line. Only
+		// the active session's buffer is touched, but we always re-subscribe so
+		// the channel keeps draining to EOF (which yields updateDoneMsg).
+		if msg.tool == m.updateLogFor {
+			line := cleanTerminalOutput(msg.line)
+			if msg.replace && len(m.updateLog) > 0 {
+				m.updateLog[len(m.updateLog)-1] = line
+			} else {
+				m.updateLog = append(m.updateLog, line)
+			}
+			// Cap to the tail: the final lines (install result, errors) matter.
+			if len(m.updateLog) > updateLogMaxLines {
+				m.updateLog = m.updateLog[len(m.updateLog)-updateLogMaxLines:]
+			}
+			// Repaint [3] and autoscroll only when the updating tool is the one
+			// selected; a chunk for a backgrounded update leaves the visible
+			// panel (another tool's help) untouched.
+			if mt, ok := m.selectedMeta(); ok && mt.Name == m.updateLogFor {
+				m.helpViewport.SetContent(m.renderHelpContent())
+				m.helpViewport.GotoBottom()
+			}
+		}
+		return m, waitForChunkCmd(msg.tool, msg.ch)
 
 	case tea.WindowSizeMsg:
 		m.width = msg.Width

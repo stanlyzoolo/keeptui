@@ -206,9 +206,9 @@ type Plan struct {
 
 ### Task 9: [Final] Update documentation
 
-- [ ] update CLAUDE.md: `internal/updater` row in the package table, `[u]`/`modeConfirmUpdate` in the TUI state machine section, streaming pattern note, `update_cmd` in the meta schema mention
-- [ ] update README.md if it documents keys/features
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update CLAUDE.md: `internal/updater` row in the package table, `[u]`/`modeConfirmUpdate` in the TUI state machine section, streaming pattern note, `update_cmd` in the meta schema mention
+- [x] update README.md if it documents keys/features
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 

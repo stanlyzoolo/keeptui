@@ -665,9 +665,11 @@ func (m Model) renderCard() string {
 		case installed != "":
 			sb.WriteString(ui.InfoStyle.Render("installed: "+installed) + "\n")
 		case vinfo.InstalledKnown:
-			sb.WriteString(ui.DescStyle.Render("installed: not found") + "\n")
+			sb.WriteString(ui.InfoStyle.Render("installed: ") +
+				ui.DangerStyle.Render("✕") +
+				ui.InfoStyle.Render(" not found") + "\n")
 		default:
-			sb.WriteString(ui.DescStyle.Render("installed: detecting…") + "\n")
+			sb.WriteString(ui.InfoStyle.Render("installed: detecting…") + "\n")
 		}
 		if hasCard {
 			if card.Latest != "" {

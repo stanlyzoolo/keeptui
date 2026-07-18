@@ -177,13 +177,13 @@ type Plan struct {
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] log branch **inside `renderHelpContent()`, ahead of the `helpLoadingFor`/cache branches**: when `updateLogFor == selected`, return the log buffer — otherwise re-selecting the updating tool shows `Loading...`
-- [ ] `autoFetchCmdsForSelected` skips the help fetch (and `helpLoadingFor` set) for the tool whose log is showing, so a late `helpOutputMsg` can't clobber the live log
-- [ ] panel title `[3] Update` while the log is displayed (same `insetPanelTitle` path as `[3] Help`/`[3] Man`)
-- [ ] autoscroll: viewport `GotoBottom()` on each appended chunk while the log is displayed; manual wheel-scroll still works between chunks
-- [ ] `selectMeta` away → normal help for the newly selected tool; back → log again (buffer survives until the next update starts)
-- [ ] write tests: title switches to `[3] Update` for the updating tool and back to help on another tool; re-selecting the updating tool shows the log, not `Loading...`; log persists after `updateDoneMsg`; new update resets the buffer
-- [ ] run `go test -race ./...` — must pass before task 7
+- [x] log branch **inside `renderHelpContent()`, ahead of the `helpLoadingFor`/cache branches**: when `updateLogFor == selected`, return the log buffer — otherwise re-selecting the updating tool shows `Loading...`
+- [x] `autoFetchCmdsForSelected` skips the help fetch (and `helpLoadingFor` set) for the tool whose log is showing, so a late `helpOutputMsg` can't clobber the live log
+- [x] panel title `[3] Update` while the log is displayed (same `insetPanelTitle` path as `[3] Help`/`[3] Man`)
+- [x] autoscroll: viewport `GotoBottom()` on each appended chunk while the log is displayed; manual wheel-scroll still works between chunks (chunk handler already `GotoBottom()`s; `autoFetchCmdsForSelected` also `GotoBottom()`s on re-selection)
+- [x] `selectMeta` away → normal help for the newly selected tool; back → log again (buffer survives until the next update starts)
+- [x] write tests: title switches to `[3] Update` for the updating tool and back to help on another tool; re-selecting the updating tool shows the log, not `Loading...`; log persists after `updateDoneMsg`; new update resets the buffer (buffer reset covered by `TestUpdateConfirmUpdate`)
+- [x] run `go test -race ./...` — must pass before task 7
 
 ### Task 7: Completion handling — re-fetch, remap, errors, logging
 

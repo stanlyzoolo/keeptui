@@ -225,12 +225,19 @@ func (m *Model) autoFetchCmdsForSelected() tea.Cmd {
 		}
 	}
 	if mt, ok := m.selectedMeta(); ok {
-		cached := m.helpCache[mt.Name]
-		if cached[m.helpMode] == "" {
+		switch {
+		case m.updateLogFor == mt.Name:
+			// The tool's live update log owns [3]: don't fetch help (and don't
+			// set helpLoadingFor) — a late helpOutputMsg or the "Loading..."
+			// state would clobber the log. Just render the log branch, scrolled
+			// to the tail so the newest output is visible on re-selection.
+			m.helpViewport.SetContent(m.renderHelpContent())
+			m.helpViewport.GotoBottom()
+		case m.helpCache[mt.Name][m.helpMode] == "":
 			m.helpLoadingFor = mt.Name
 			m.helpViewport.SetContent(m.renderHelpContent())
 			cmds = append(cmds, fetchHelpCmd(mt.Name, m.helpMode))
-		} else {
+		default:
 			m.helpViewport.SetContent(m.renderHelpContent())
 			m.helpViewport.GotoTop()
 		}

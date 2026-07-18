@@ -544,6 +544,11 @@ func (m Model) renderHelp() string {
 	if m.helpMode == helpModeMan {
 		title = "[3] Man"
 	}
+	// While the selected tool's live update log is showing, the panel is the
+	// update log, not help — mirror that in the inset title.
+	if mt, ok := m.selectedMeta(); ok && m.updateLogFor != "" && m.updateLogFor == mt.Name {
+		title = "[3] Update"
+	}
 	panel := panelStyle.
 		Width(m.helpW).
 		Height(max(m.height-7, 1)).
@@ -891,6 +896,23 @@ func (m Model) renderHelpContent() string {
 	mt, ok := m.selectedMeta()
 	if !ok {
 		return ui.MetaNoteStyle.Render("No tool selected")
+	}
+
+	// Live update log: while the selected tool is (or was just) being updated,
+	// [3] shows the merged stdout+stderr buffer instead of help. This branch
+	// sits ahead of the helpLoadingFor/cache branches so re-selecting the
+	// updating tool never paints "Loading..." (autoFetchCmdsForSelected also
+	// skips the help fetch for this tool, so no late helpOutputMsg clobbers it).
+	// The buffer survives until the next update starts.
+	if m.updateLogFor != "" && m.updateLogFor == mt.Name {
+		if len(m.updateLog) == 0 {
+			return ui.MetaNoteStyle.Render("starting update…")
+		}
+		text := strings.Join(m.updateLog, "\n")
+		if innerW := max(m.helpW-2, 20); innerW > 0 {
+			text = wrapText(text, innerW)
+		}
+		return text
 	}
 
 	// Gate per tool, not on "any fetch in flight": another tool's fetch may

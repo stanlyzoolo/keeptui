@@ -130,12 +130,12 @@ type Plan struct {
 - Modify: `internal/updater/updater.go`
 - Modify: `internal/updater/updater_test.go`
 
-- [ ] implement `Detect(t loader.Tool)`: `UpdateCmd` override → custom plan via `sh -c` (skip detection entirely); else `LookPath` + `EvalSymlinks` + collect buildinfo via `go version -m` (through `proc.DetachTTY`, short timeout) and feed `detectFromPath`
-- [ ] crate-name resolution for cargo via `cargo install --list` (fallback: binary name); package resolution for pipx/npm from the realpath segments
-- [ ] not-on-PATH → `ErrUnknownManager` wrapped with a "not installed" hint; helper failures (`go version -m` absent, `cargo` absent) degrade to the next check, never abort detection
-- [ ] write test: `UpdateCmd` override returns `custom` plan `["sh","-c",cmd]` and never calls detection
-- [ ] write test: missing binary → error; symlinked binary resolves through `EvalSymlinks` (use `t.TempDir()` fixtures)
-- [ ] run `go test -race ./...` — must pass before task 4
+- [x] implement `Detect(t loader.Tool)`: `UpdateCmd` override → custom plan via `sh -c` (skip detection entirely); else `LookPath` + `EvalSymlinks` + collect buildinfo via `go version -m` (through `proc.DetachTTY`, short timeout) and feed `detectFromPath`
+- [x] crate-name resolution for cargo via `cargo install --list` (fallback: binary name); package resolution for pipx/npm from the realpath segments
+- [x] not-on-PATH → `ErrUnknownManager` wrapped with a "not installed" hint; helper failures (`go version -m` absent, `cargo` absent) degrade to the next check, never abort detection
+- [x] write test: `UpdateCmd` override returns `custom` plan `["sh","-c",cmd]` and never calls detection
+- [x] write test: missing binary → error; symlinked binary resolves through `EvalSymlinks` (use `t.TempDir()` fixtures)
+- [x] run `go test -race ./...` — must pass before task 4
 
 ### Task 4: Streaming plumbing — msgs, reader, chunk loop
 

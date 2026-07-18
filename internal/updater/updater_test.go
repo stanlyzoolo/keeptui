@@ -2,9 +2,13 @@ package updater
 
 import (
 	"errors"
+	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+
+	"github.com/lepeshko/keys/internal/loader"
 )
 
 func TestDetectFromPath(t *testing.T) {
@@ -98,6 +102,99 @@ func TestDetectFromPath(t *testing.T) {
 				t.Errorf("Display = %q, want %q", plan.Display, wantDisplay)
 			}
 		})
+	}
+}
+
+func TestDetectUpdateCmdOverride(t *testing.T) {
+	// A tool with UpdateCmd set returns a custom plan even when the binary is
+	// not on PATH — proving detection (LookPath) is skipped entirely.
+	tool := loader.Tool{Name: "definitely-not-a-real-binary-xyz", UpdateCmd: "brew upgrade rg && echo done"}
+	plan, err := Detect(tool)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if plan.Manager != "custom" {
+		t.Errorf("Manager = %q, want %q", plan.Manager, "custom")
+	}
+	wantArgv := []string{"sh", "-c", "brew upgrade rg && echo done"}
+	if !equalStrings(plan.Argv, wantArgv) {
+		t.Errorf("Argv = %v, want %v", plan.Argv, wantArgv)
+	}
+	if plan.Display != "brew upgrade rg && echo done" {
+		t.Errorf("Display = %q, want %q", plan.Display, "brew upgrade rg && echo done")
+	}
+}
+
+func TestDetectMissingBinary(t *testing.T) {
+	tool := loader.Tool{Name: "definitely-not-a-real-binary-xyz"}
+	_, err := Detect(tool)
+	if !errors.Is(err, ErrUnknownManager) {
+		t.Fatalf("err = %v, want ErrUnknownManager", err)
+	}
+}
+
+func TestDetectResolvesSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink/PATH fixture is unix-only")
+	}
+	tmp := t.TempDir()
+
+	// Real binary under a Homebrew Cellar-shaped path.
+	cellarBin := filepath.Join(tmp, "opt", "Cellar", "mytool", "1.0.0", "bin", "mytool")
+	if err := os.MkdirAll(filepath.Dir(cellarBin), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(cellarBin, []byte("#!/bin/sh\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// A bin dir on PATH holds a symlink to the real binary.
+	binDir := filepath.Join(tmp, "bin")
+	if err := os.MkdirAll(binDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(binDir, "mytool")
+	if err := os.Symlink(cellarBin, link); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", binDir)
+
+	plan, err := Detect(loader.Tool{Name: "mytool"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// EvalSymlinks must have followed the link into the Cellar path → brew.
+	if plan.Manager != "brew" {
+		t.Errorf("Manager = %q, want %q", plan.Manager, "brew")
+	}
+	wantArgv := []string{"brew", "upgrade", "mytool"}
+	if !equalStrings(plan.Argv, wantArgv) {
+		t.Errorf("Argv = %v, want %v", plan.Argv, wantArgv)
+	}
+}
+
+func TestCargoCrateFromList(t *testing.T) {
+	list := "" +
+		"exa v0.10.1:\n" +
+		"    exa\n" +
+		"ripgrep v14.1.0 (https://github.com/BurntSushi/ripgrep):\n" +
+		"    rg\n" +
+		"bat v0.24.0:\n" +
+		"    bat\n"
+
+	tests := []struct {
+		binName string
+		want    string
+	}{
+		{"rg", "ripgrep"},
+		{"exa", "exa"},
+		{"bat", "bat"},
+		{"nonexistent", ""},
+	}
+	for _, tt := range tests {
+		if got := cargoCrateFromList(list, tt.binName); got != tt.want {
+			t.Errorf("cargoCrateFromList(_, %q) = %q, want %q", tt.binName, got, tt.want)
+		}
 	}
 }
 

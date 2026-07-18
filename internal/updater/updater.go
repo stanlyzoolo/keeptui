@@ -5,11 +5,18 @@
 package updater
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
+
+	"github.com/lepeshko/keys/internal/loader"
+	"github.com/lepeshko/keys/internal/proc"
 )
 
 // ErrUnknownManager is returned when no package manager can be attributed to a
@@ -38,6 +45,126 @@ func homeDir() string {
 		return ""
 	}
 	return h
+}
+
+// Detect resolves the update Plan for a tool. It is the OS-facing wrapper over
+// the pure detectFromPath core: it spawns subprocesses (go version -m, cargo
+// install --list) and must therefore never run on a latency-sensitive path such
+// as Bubble Tea's Update — callers run it inside a tea.Cmd.
+//
+// Resolution order:
+//  1. An explicit UpdateCmd always wins: it becomes a "custom" plan run through
+//     sh -c (the user may write pipes or &&) and detection is skipped entirely.
+//  2. Otherwise the binary is located via LookPath + EvalSymlinks, Go buildinfo
+//     is collected via `go version -m`, and the pair is fed to detectFromPath.
+//     A cargo hit is refined with the real crate name from `cargo install
+//     --list`. Helper failures degrade softly — a missing `go`/`cargo` just
+//     leaves the corresponding signal empty, never aborting detection.
+//
+// A binary that is not on PATH yields ErrUnknownManager wrapped with a
+// "not installed" hint.
+func Detect(t loader.Tool) (Plan, error) {
+	if strings.TrimSpace(t.UpdateCmd) != "" {
+		return Plan{
+			Manager: "custom",
+			Argv:    []string{"sh", "-c", t.UpdateCmd},
+			Display: t.UpdateCmd,
+		}, nil
+	}
+
+	found, err := exec.LookPath(t.Name)
+	if err != nil {
+		return Plan{}, fmt.Errorf("%s not installed: %w", t.Name, ErrUnknownManager)
+	}
+	realPath, err := filepath.EvalSymlinks(found)
+	if err != nil {
+		realPath = found // fall back to the unresolved path rather than aborting
+	}
+
+	buildinfo := goBuildinfo(realPath)
+
+	plan, err := detectFromPath(realPath, buildinfo)
+	if err != nil {
+		return Plan{}, err
+	}
+
+	// Refine the cargo crate name: detectFromPath defaults it to the binary
+	// name, but the crate can differ (crate "exa" ships binary "exa"; crate
+	// "ripgrep" ships "rg"). `cargo install --list` is the source of truth.
+	if plan.Manager == "cargo" {
+		if crate := cargoCrate(binaryName(realPath)); crate != "" {
+			plan = autoPlan("cargo", []string{"cargo", "install", crate})
+		}
+	}
+
+	return plan, nil
+}
+
+// probeTimeout bounds each detection helper subprocess.
+const probeTimeout = 3 * time.Second
+
+// goBuildinfo returns the output of `go version -m <path>`, or "" when go is
+// absent or the binary carries no Go buildinfo. It never errors: an empty
+// result simply means "no Go module signal" to detectFromPath.
+func goBuildinfo(path string) string {
+	out, err := runProbe("go", "version", "-m", path)
+	if err != nil {
+		return ""
+	}
+	return out
+}
+
+// cargoCrate returns the crate name that owns the given binary by parsing
+// `cargo install --list`, or "" when cargo is absent or the binary is not
+// listed (caller keeps the binary-name fallback).
+func cargoCrate(binName string) string {
+	out, err := runProbe("cargo", "install", "--list")
+	if err != nil {
+		return ""
+	}
+	return cargoCrateFromList(out, binName)
+}
+
+// cargoCrateFromList is the pure parser for `cargo install --list` output. Each
+// crate is a header line "<crate> v<ver>:" followed by indented binary names;
+// it returns the crate whose binary set contains binName, else "".
+func cargoCrateFromList(list, binName string) string {
+	var crate string
+	for line := range strings.SplitSeq(list, "\n") {
+		if line == "" {
+			continue
+		}
+		if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
+			// Header line: "<crate> vX.Y.Z:" (path/source may follow in parens).
+			name := strings.TrimSpace(line)
+			if i := strings.IndexByte(name, ' '); i >= 0 {
+				name = name[:i]
+			}
+			crate = name
+			continue
+		}
+		if strings.TrimSpace(line) == binName {
+			return crate
+		}
+	}
+	return ""
+}
+
+// runProbe executes a detection helper subprocess detached from the controlling
+// terminal (proc.DetachTTY) with a short timeout, returning combined output.
+func runProbe(name string, args ...string) (string, error) {
+	if _, err := exec.LookPath(name); err != nil {
+		return "", err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
+	proc.DetachTTY(cmd)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
 }
 
 // cellarRe extracts the formula name from a Homebrew Cellar path segment:

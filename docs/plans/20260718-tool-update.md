@@ -117,12 +117,12 @@ type Plan struct {
 - Create: `internal/updater/updater.go`
 - Create: `internal/updater/updater_test.go`
 
-- [ ] define `Plan{Manager, Argv, Display}` and typed `ErrUnknownManager`
-- [ ] implement pure `detectFromPath(realPath, buildinfo string) (Plan, error)` with the brew → go → cargo → pipx → npm chain; `testHomeDir` seam for `~`-relative checks (pattern: `loader.testConfigDir`)
-- [ ] `Display` built by joining `Argv` for auto-detected plans
-- [ ] write table tests: Cellar path → brew with formula name from path (`ripgrep` for an `rg` binary); buildinfo `path` line → `go install <module>@latest`; `~/.cargo/bin` → cargo; pipx venv path → pipx; npm global `node_modules/<pkg>` → npm; unmatched → `ErrUnknownManager`
-- [ ] write test pinning order: Cellar path WITH valid buildinfo must yield brew, not go
-- [ ] run `go test -race ./...` — must pass before task 3
+- [x] define `Plan{Manager, Argv, Display}` and typed `ErrUnknownManager`
+- [x] implement pure `detectFromPath(realPath, buildinfo string) (Plan, error)` with the brew → go → cargo → pipx → npm chain; `testHomeDir` seam for `~`-relative checks (pattern: `loader.testConfigDir`)
+- [x] `Display` built by joining `Argv` for auto-detected plans
+- [x] write table tests: Cellar path → brew with formula name from path (`ripgrep` for an `rg` binary); buildinfo `path` line → `go install <module>@latest`; `~/.cargo/bin` → cargo; pipx venv path → pipx; npm global `node_modules/<pkg>` → npm; unmatched → `ErrUnknownManager`
+- [x] write test pinning order: Cellar path WITH valid buildinfo must yield brew, not go
+- [x] run `go test -race ./...` — must pass before task 3
 
 ### Task 3: `updater.Detect` — OS wrapper over the pure core
 

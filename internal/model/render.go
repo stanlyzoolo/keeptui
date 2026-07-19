@@ -126,7 +126,17 @@ func (m Model) renderStatusBar() string {
 		return m.renderHintsBar(style, hints)
 	}
 	if m.focus == focusHelp {
-		hints := keyHint("↑↓") + " scroll  " + keyHint("h") + " --help  " + keyHint("m") + " man  " + keyHint("/") + " search  " + keyHint("←") + " back  " + keyHint("q") + " quit"
+		// With a navigable entry index j/k (and the arrows) drive the
+		// spotlight cursor, so the scroll label would lie; without entries
+		// (update log, placeholders, prose) they scroll as before.
+		scrollOrNav := keyHint("↑↓") + " scroll  "
+		if len(m.helpEntries) > 0 {
+			scrollOrNav = keyHint("j/k") + " navigate  "
+		}
+		hints := scrollOrNav + keyHint("h") + " --help  " + keyHint("m") + " man  " + keyHint("/") + " search  " + keyHint("←") + " back  " + keyHint("q") + " quit"
+		if m.helpNavIdx >= 0 {
+			hints = keyHint("esc") + " exit nav  " + hints
+		}
 		return m.renderHintsBar(style, hints)
 	}
 	return m.renderHintsBar(style,
@@ -880,6 +890,28 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
+// applySpotlight dims every line outside the current navigation entry while
+// the [3] cursor is active: the entry's lines keep their full colorizeHelp
+// styling, the rest are stripped of their own coloring and repainted with
+// ui.HelpDimStyle — the same strip-then-repaint trick the [L] overlay uses,
+// but per whole line, so no ANSI-safe splicing is needed. A stale
+// out-of-bounds index renders undimmed rather than panicking (entries and
+// cursor are reset together in setHelpContent, but a value-receiver render
+// must not trust that).
+func (m Model) applySpotlight(text string) string {
+	if m.helpNavIdx < 0 || m.helpNavIdx >= len(m.helpEntries) {
+		return text
+	}
+	e := m.helpEntries[m.helpNavIdx]
+	lines := strings.Split(text, "\n")
+	for i, line := range lines {
+		if i < e.start || i >= e.end {
+			lines[i] = ui.HelpDimStyle.Render(stripANSI(line))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
 func (m Model) rawHelpText() string {
 	mt, ok := m.selectedMeta()
 	if !ok {
@@ -908,11 +940,7 @@ func (m Model) renderHelpContent() string {
 		if len(m.updateLog) == 0 {
 			return ui.MetaNoteStyle.Render("starting update…")
 		}
-		text := strings.Join(m.updateLog, "\n")
-		if innerW := max(m.helpW-2, 20); innerW > 0 {
-			text = wrapText(text, innerW)
-		}
-		return text
+		return wrapText(strings.Join(m.updateLog, "\n"), m.helpWrapWidth())
 	}
 
 	// Gate per tool, not on "any fetch in flight": another tool's fetch may
@@ -930,12 +958,9 @@ func (m Model) renderHelpContent() string {
 		}
 		return ui.MetaNoteStyle.Render("Press [m] for man page\nPress [h] for --help")
 	}
-	text := cached[m.helpMode]
-	if innerW := max(m.helpW-2, 20); innerW > 0 {
-		text = wrapText(text, innerW)
-	}
+	text := wrapText(cached[m.helpMode], m.helpWrapWidth())
 	if m.mode != modeHelpSearch || m.helpSearch.Value() == "" {
-		return colorizeHelp(text)
+		return m.applySpotlight(colorizeHelp(text))
 	}
 	query := m.helpSearch.Value()
 	lines := strings.Split(text, "\n")

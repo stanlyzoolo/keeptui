@@ -69,6 +69,141 @@ func TestWrapText(t *testing.T) {
 	}
 }
 
+func TestParseHelpEntries(t *testing.T) {
+	// Wide width: no wrapping, so entry ranges equal source-line ranges.
+	const wide = 200
+
+	clapHelp := strings.Join([]string{
+		"ripgrep 13.0.0",
+		"",
+		"USAGE:",
+		"    rg [OPTIONS] PATTERN",
+		"",
+		"OPTIONS:",
+		"    -e, --regexp <PATTERN>",
+		"            A pattern to search for.",
+		"    -i, --ignore-case",
+		"            Case insensitive search.",
+		"            Second description line.",
+		"    -v, --invert-match",
+	}, "\n")
+
+	cobraHelp := strings.Join([]string{
+		"Work seamlessly with GitHub.",
+		"",
+		"Available Commands:",
+		"  completion  Generate the autocompletion script",
+		"  help        Help about any command",
+		"",
+		"Flags:",
+		"  -h, --help   help for gh",
+	}, "\n")
+
+	gnuHelp := strings.Join([]string{
+		"Usage: ls [OPTION]... [FILE]...",
+		"",
+		"  -v, --verbose",
+		"          explain what is being done",
+		"  -q, --quiet",
+		"          suppress output",
+	}, "\n")
+
+	manHelp := strings.Join([]string{
+		"OPTIONS",
+		"     -i      Ignore case.",
+		"             More description.",
+		"",
+		"     -V      Print version.",
+	}, "\n")
+
+	tests := []struct {
+		name string
+		in   string
+		want []entryRange
+	}{
+		{"empty", "", nil},
+		{"prose only", "just some text\nwith no flags at all", nil},
+		{"clap flags with descriptions", clapHelp, []entryRange{
+			{start: 6, end: 8},   // -e + description
+			{start: 8, end: 11},  // -i + two description lines
+			{start: 11, end: 12}, // -v, no description
+		}},
+		{"cobra subcommands and flags", cobraHelp, []entryRange{
+			{start: 3, end: 4}, // completion
+			{start: 4, end: 5}, // help
+			{start: 7, end: 8}, // -h
+		}},
+		{"gnu flags", gnuHelp, []entryRange{
+			{start: 2, end: 4},
+			{start: 4, end: 6},
+		}},
+		{"man page options", manHelp, []entryRange{
+			{start: 1, end: 3}, // -i + continuation, blank line terminates
+			{start: 4, end: 5},
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseHelpEntries(tt.in, wide)
+			if len(got) != len(tt.want) {
+				t.Fatalf("parseHelpEntries returned %d entries %v, want %d %v", len(got), got, len(tt.want), tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("entry %d = %v, want %v", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+
+	t.Run("headers and usage belong to no entry", func(t *testing.T) {
+		lines := strings.Split(clapHelp, "\n")
+		for _, e := range parseHelpEntries(clapHelp, wide) {
+			for i := e.start; i < e.end; i++ {
+				if isHelpSectionHeader(lines[i]) || strings.Contains(lines[i], "USAGE") || strings.Contains(lines[i], "rg [OPTIONS]") {
+					t.Errorf("entry %v covers non-entry line %d: %q", e, i, lines[i])
+				}
+			}
+		}
+	})
+}
+
+// TestParseHelpEntriesWrapMapping pins the invariant that entry ranges
+// address wrapped display lines: a long description wraps into extra lines
+// and the entry must cover all of them, in the exact positions wrapText
+// produces.
+func TestParseHelpEntriesWrapMapping(t *testing.T) {
+	raw := strings.Join([]string{
+		"OPTIONS:",
+		"  -i, --ignore-case",
+		"          a very long description line that will certainly wrap at a narrow width",
+		"  -q, --quiet",
+	}, "\n")
+	const width = 30
+	display := strings.Split(wrapText(raw, width), "\n")
+
+	entries := parseHelpEntries(raw, width)
+	if len(entries) != 2 {
+		t.Fatalf("got %d entries %v, want 2", len(entries), entries)
+	}
+	first, second := entries[0], entries[1]
+	if !strings.Contains(display[first.start], "--ignore-case") {
+		t.Errorf("first entry start line = %q, want the -i flag line", display[first.start])
+	}
+	if first.end-first.start < 3 {
+		t.Errorf("first entry %v spans %d display lines, want >= 3 (wrapped description)", first, first.end-first.start)
+	}
+	if !strings.Contains(display[second.start], "--quiet") {
+		t.Errorf("second entry start line = %q, want the -q flag line", display[second.start])
+	}
+	if second.end != len(display) {
+		t.Errorf("second entry end = %d, want %d (last display line)", second.end, len(display))
+	}
+	for i := first.end; i < second.start; i++ {
+		t.Errorf("gap line %d between entries: %q", i, display[i])
+	}
+}
+
 func TestFormatStars(t *testing.T) {
 	tests := []struct {
 		in   int
@@ -2592,4 +2727,273 @@ func TestUpdateLogPersistsAfterDone(t *testing.T) {
 	if got := nm.renderHelpContent(); !strings.Contains(got, "upgrading rg") {
 		t.Errorf("renderHelpContent after done = %q, want the persisted log", got)
 	}
+}
+
+// TestApplySpotlight: with an active navigation cursor, lines outside the
+// current entry are stripped of their own coloring and repainted dim, while
+// the entry's lines keep the full colorizeHelp styling.
+func TestApplySpotlight(t *testing.T) {
+	forceColorProfile(t)
+	const dimSeq = "38;2;136;136;136" // ui.ColorDim #888888 in truecolor
+
+	m := helpNavModel()
+	if len(m.helpEntries) != 2 {
+		t.Fatalf("helpEntries = %v, want 2", m.helpEntries)
+	}
+	plain := m.renderHelpContent()
+	if strings.Contains(plain, dimSeq) {
+		t.Fatalf("cursor off: output already contains the dim sequence")
+	}
+
+	m.helpNavIdx = 0
+	out := m.renderHelpContent()
+	lines := strings.Split(out, "\n")
+	e := m.helpEntries[0]
+	for i, line := range lines {
+		inside := i >= e.start && i < e.end
+		hasDim := strings.Contains(line, dimSeq)
+		if inside && hasDim {
+			t.Errorf("line %d inside entry is dimmed: %q", i, line)
+		}
+		if !inside && !hasDim {
+			t.Errorf("line %d outside entry is not dimmed: %q", i, line)
+		}
+	}
+	// The spotlighted flag line keeps its HelpFlagStyle color (ColorPrimary).
+	const flagSeq = "38;2;218;119;86" // ui.ColorPrimary #DA7756
+	if !strings.Contains(lines[e.start], flagSeq) {
+		t.Errorf("entry start line lost its flag styling: %q", lines[e.start])
+	}
+	// Outside lines carry no colorizeHelp styling anymore, only the dim.
+	if strings.Contains(lines[0], flagSeq) {
+		t.Errorf("dimmed header line still carries original styling: %q", lines[0])
+	}
+}
+
+// TestApplySpotlightStaleIndex: an out-of-bounds cursor renders undimmed
+// instead of panicking (a value-receiver render must not trust the index).
+func TestApplySpotlightStaleIndex(t *testing.T) {
+	forceColorProfile(t)
+	m := helpNavModel()
+	m.helpNavIdx = 99
+	if got, want := m.renderHelpContent(), func() string { m.helpNavIdx = -1; return m.renderHelpContent() }(); got != want {
+		t.Errorf("stale index output differs from cursor-off output")
+	}
+}
+
+// TestSpotlightClearedOnFocusAway: moving focus off [3] with an active cursor
+// repaints the viewport undimmed — stale dimming must not survive setFocus.
+func TestSpotlightClearedOnFocusAway(t *testing.T) {
+	forceColorProfile(t)
+	const dimSeq = "38;2;136;136;136"
+
+	m := helpNavModel()
+	m.helpViewport = viewport.New(60, 10)
+	m.helpNavIdx = 0
+	m.helpViewport.SetContent(m.renderHelpContent())
+	if !strings.Contains(m.helpViewport.View(), dimSeq) {
+		t.Fatalf("precondition: viewport should show dimmed content")
+	}
+
+	updated, _ := m.Update(keyRunes("2"))
+	nm := updated.(Model)
+	if nm.focus != focusBrief {
+		t.Fatalf("focus = %d, want focusBrief", nm.focus)
+	}
+	if strings.Contains(nm.helpViewport.View(), dimSeq) {
+		t.Errorf("stale dim survived the focus move away from [3]")
+	}
+}
+
+// helpNavScrollModel builds a model with six two-line entries (13 display
+// lines) and a 4-line viewport, for exercising cursor movement + auto-scroll.
+func helpNavScrollModel() Model {
+	m := newTestModel(focusHelp)
+	m.helpW = 62
+	var b strings.Builder
+	b.WriteString("OPTIONS:")
+	for _, f := range []string{"alpha", "beta", "gamma", "delta", "epsilon", "zeta"} {
+		b.WriteString("\n  --" + f + "\n          about " + f)
+	}
+	m.helpCache["git"] = [2]string{helpModeHelp: b.String()}
+	m.setHelpContent()
+	m.helpViewport = viewport.New(60, 4)
+	m.helpViewport.SetContent(m.renderHelpContent())
+	return m
+}
+
+// TestHelpNavFirstPress: the first j lands on the first entry visible at the
+// current scroll position, not the first entry of the document.
+func TestHelpNavFirstPress(t *testing.T) {
+	t.Run("from top", func(t *testing.T) {
+		m := helpNavScrollModel()
+		updated, _ := m.Update(keyRunes("j"))
+		nm := updated.(Model)
+		if nm.helpNavIdx != 0 {
+			t.Errorf("helpNavIdx = %d, want 0 (first entry)", nm.helpNavIdx)
+		}
+	})
+	t.Run("scrolled down", func(t *testing.T) {
+		m := helpNavScrollModel()
+		m.helpViewport.SetYOffset(6) // entries at {1,3} {3,5} {5,7}...: first with end > 6 is index 2
+		updated, _ := m.Update(keyRunes("j"))
+		nm := updated.(Model)
+		if nm.helpNavIdx != 2 {
+			t.Errorf("helpNavIdx = %d, want 2 (first visible entry)", nm.helpNavIdx)
+		}
+	})
+	t.Run("scrolled past all entries", func(t *testing.T) {
+		m := helpNavScrollModel()
+		m.helpViewport.SetContent(m.renderHelpContent() + "\n" + strings.Repeat("trailing\n", 20))
+		m.helpViewport.SetYOffset(15)
+		updated, _ := m.Update(keyRunes("j"))
+		nm := updated.(Model)
+		if want := len(nm.helpEntries) - 1; nm.helpNavIdx != want {
+			t.Errorf("helpNavIdx = %d, want %d (last entry)", nm.helpNavIdx, want)
+		}
+	})
+}
+
+// TestHelpNavEdges: no wrap-around — j at the last entry and k at the first
+// are no-ops.
+func TestHelpNavEdges(t *testing.T) {
+	m := helpNavScrollModel()
+	m.helpNavIdx = len(m.helpEntries) - 1
+	updated, _ := m.Update(keyRunes("j"))
+	nm := updated.(Model)
+	if want := len(nm.helpEntries) - 1; nm.helpNavIdx != want {
+		t.Errorf("j at last entry: helpNavIdx = %d, want %d", nm.helpNavIdx, want)
+	}
+
+	nm.helpNavIdx = 0
+	nm.helpViewport.GotoTop()
+	updated, _ = nm.Update(keyRunes("k"))
+	nm = updated.(Model)
+	if nm.helpNavIdx != 0 {
+		t.Errorf("k at first entry: helpNavIdx = %d, want 0", nm.helpNavIdx)
+	}
+}
+
+// TestHelpNavEscSemantics: the first esc only turns the cursor off (scroll
+// kept, focus kept); the second walks focus to [2] as before.
+func TestHelpNavEscSemantics(t *testing.T) {
+	esc := tea.KeyMsg{Type: tea.KeyEsc}
+	m := helpNavScrollModel()
+	m.helpNavIdx = 2
+	m.helpViewport.SetYOffset(5)
+
+	updated, _ := m.Update(esc)
+	nm := updated.(Model)
+	if nm.helpNavIdx != -1 {
+		t.Fatalf("first esc: helpNavIdx = %d, want -1", nm.helpNavIdx)
+	}
+	if nm.focus != focusHelp {
+		t.Fatalf("first esc: focus = %d, want focusHelp", nm.focus)
+	}
+	if nm.helpViewport.YOffset != 5 {
+		t.Errorf("first esc: YOffset = %d, want 5 (scroll preserved)", nm.helpViewport.YOffset)
+	}
+
+	updated, _ = nm.Update(esc)
+	nm = updated.(Model)
+	if nm.focus != focusBrief {
+		t.Errorf("second esc: focus = %d, want focusBrief", nm.focus)
+	}
+}
+
+// TestHelpNavAutoScroll: moving the cursor keeps the entry in view; a
+// taller-than-window entry pins its start to the top edge.
+func TestHelpNavAutoScroll(t *testing.T) {
+	t.Run("scrolls down to entry below window", func(t *testing.T) {
+		m := helpNavScrollModel()
+		m.helpNavIdx = 0
+		updated, _ := m.Update(keyRunes("j")) // to entry {3,5}, window [0,4)
+		nm := updated.(Model)
+		if nm.helpViewport.YOffset != 1 {
+			t.Errorf("YOffset = %d, want 1 (end-Height)", nm.helpViewport.YOffset)
+		}
+	})
+	t.Run("scrolls up to entry above window", func(t *testing.T) {
+		m := helpNavScrollModel()
+		m.helpNavIdx = 3
+		m.helpViewport.SetYOffset(8)
+		updated, _ := m.Update(keyRunes("k")) // to entry {5,7}, window [8,12)
+		nm := updated.(Model)
+		if nm.helpViewport.YOffset != 5 {
+			t.Errorf("YOffset = %d, want 5 (entry start)", nm.helpViewport.YOffset)
+		}
+	})
+	t.Run("tall entry pins start to top", func(t *testing.T) {
+		m := newTestModel(focusHelp)
+		m.helpW = 62
+		tall := "OPTIONS:\n  --big\n" + strings.TrimRight(strings.Repeat("          line\n", 6), "\n")
+		m.helpCache["git"] = [2]string{helpModeHelp: tall}
+		m.setHelpContent()
+		m.helpViewport = viewport.New(60, 4)
+		m.helpViewport.SetContent(m.renderHelpContent())
+		if len(m.helpEntries) != 1 {
+			t.Fatalf("helpEntries = %v, want 1 tall entry", m.helpEntries)
+		}
+		updated, _ := m.Update(keyRunes("j"))
+		nm := updated.(Model)
+		if want := nm.helpEntries[0].start; nm.helpViewport.YOffset != want {
+			t.Errorf("YOffset = %d, want %d (entry start, not bottom-aligned)", nm.helpViewport.YOffset, want)
+		}
+	})
+}
+
+// TestHelpNavEmptyEntriesScrolls: with no entries (placeholder, update log)
+// j/k keep their plain scroll behavior and never activate the cursor.
+func TestHelpNavEmptyEntriesScrolls(t *testing.T) {
+	m := newTestModel(focusHelp)
+	m.helpW = 62
+	m.helpViewport = viewport.New(60, 4)
+	m.helpViewport.SetContent(strings.Repeat("x\n", 20))
+
+	updated, _ := m.Update(keyRunes("j"))
+	nm := updated.(Model)
+	if nm.helpNavIdx != -1 {
+		t.Errorf("helpNavIdx = %d, want -1 (no entries, no cursor)", nm.helpNavIdx)
+	}
+	if nm.helpViewport.YOffset != 1 {
+		t.Errorf("YOffset = %d, want 1 (plain scroll)", nm.helpViewport.YOffset)
+	}
+}
+
+// TestRenderStatusBarFocusHelp: the [3] bar advertises navigation when the
+// entry index is non-empty, adds the exit hint while the cursor is active,
+// and falls back to the scroll label when there is nothing to navigate.
+func TestRenderStatusBarFocusHelp(t *testing.T) {
+	stripBar := func(m Model) string {
+		return stripANSI(m.renderStatusBar())
+	}
+
+	t.Run("no entries: scroll label", func(t *testing.T) {
+		m := newTestModel(focusHelp)
+		m.width = 120
+		bar := stripBar(m)
+		if !strings.Contains(bar, "scroll") || strings.Contains(bar, "navigate") {
+			t.Errorf("bar = %q, want scroll hint and no navigate hint", bar)
+		}
+	})
+	t.Run("entries present: navigate hint", func(t *testing.T) {
+		m := helpNavModel()
+		m.width = 120
+		bar := stripBar(m)
+		if !strings.Contains(bar, "[j/k] navigate") {
+			t.Errorf("bar = %q, want j/k navigate hint", bar)
+		}
+		if strings.Contains(bar, "exit nav") {
+			t.Errorf("bar = %q, exit-nav hint must be absent while the cursor is off", bar)
+		}
+	})
+	t.Run("cursor active: exit-nav hint", func(t *testing.T) {
+		m := helpNavModel()
+		m.width = 120
+		m.helpNavIdx = 0
+		bar := stripBar(m)
+		if !strings.Contains(bar, "[esc] exit nav") {
+			t.Errorf("bar = %q, want esc exit-nav hint", bar)
+		}
+	})
 }

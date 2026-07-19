@@ -1124,3 +1124,137 @@ func TestSpinnerTicksWhileUpdating(t *testing.T) {
 		t.Error("cmd = non-nil, want the tick loop to stop when idle")
 	}
 }
+
+// navHelpFixture is a minimal clap-style help with two flag entries, used by
+// the help-navigation tests.
+const navHelpFixture = "OPTIONS:\n  -v, --verbose\n          be verbose\n  -q, --quiet\n          be quiet"
+
+// helpNavModel returns a model focused on [3] with cached help for git and
+// the entry index computed.
+func helpNavModel() Model {
+	m := newTestModel(focusHelp)
+	m.helpW = 62
+	m.helpCache["git"] = [2]string{helpModeHelp: navHelpFixture}
+	m.setHelpContent()
+	return m
+}
+
+// TestSetHelpContentEntries: the recompute point derives entries from cached
+// help and always starts with the cursor off.
+func TestSetHelpContentEntries(t *testing.T) {
+	m := helpNavModel()
+	if len(m.helpEntries) != 2 {
+		t.Fatalf("helpEntries = %v, want 2 entries", m.helpEntries)
+	}
+	if m.helpNavIdx != -1 {
+		t.Errorf("helpNavIdx = %d, want -1 after recompute", m.helpNavIdx)
+	}
+}
+
+// TestHelpOutputMsgRecomputesEntries: a fetched help result for the selected
+// tool populates the entry index through the same single recompute point.
+func TestHelpOutputMsgRecomputesEntries(t *testing.T) {
+	m := newTestModel(focusHelp)
+	m.helpW = 62
+
+	updated, _ := m.Update(helpOutputMsg{toolName: "git", mode: helpModeHelp, output: navHelpFixture})
+	nm := updated.(Model)
+	if len(nm.helpEntries) != 2 {
+		t.Fatalf("helpEntries = %v, want 2 entries after helpOutputMsg", nm.helpEntries)
+	}
+	if nm.helpNavIdx != -1 {
+		t.Errorf("helpNavIdx = %d, want -1", nm.helpNavIdx)
+	}
+}
+
+// TestSetHelpContentEmptyStates: the update log, the loading state and a
+// cache miss all leave the entry index empty — j/k must stay plain scroll.
+func TestSetHelpContentEmptyStates(t *testing.T) {
+	t.Run("update log", func(t *testing.T) {
+		m := helpNavModel()
+		m.updateLogFor = "git"
+		m.updateLog = []string{"downloading..."}
+		m.setHelpContent()
+		if len(m.helpEntries) != 0 {
+			t.Errorf("helpEntries = %v, want empty during update log", m.helpEntries)
+		}
+	})
+	t.Run("loading", func(t *testing.T) {
+		m := helpNavModel()
+		m.helpLoadingFor = "git"
+		m.setHelpContent()
+		if len(m.helpEntries) != 0 {
+			t.Errorf("helpEntries = %v, want empty while loading", m.helpEntries)
+		}
+	})
+	t.Run("cache miss placeholder", func(t *testing.T) {
+		m := newTestModel(focusHelp)
+		m.helpW = 62
+		m.setHelpContent()
+		if len(m.helpEntries) != 0 {
+			t.Errorf("helpEntries = %v, want empty on cache miss", m.helpEntries)
+		}
+	})
+}
+
+// TestHelpNavIdxResetTriggers: every text-change or ownership-change path
+// resets the spotlight cursor.
+func TestHelpNavIdxResetTriggers(t *testing.T) {
+	t.Run("selection change", func(t *testing.T) {
+		m := New([]loader.ToolMeta{{Name: "alpha"}, {Name: "beta"}})
+		m.helpW = 62
+		m.helpCache["alpha"] = [2]string{helpModeHelp: navHelpFixture}
+		m.setHelpContent()
+		m.helpNavIdx = 0
+		m.selectMeta(1)
+		if m.helpNavIdx != -1 {
+			t.Errorf("helpNavIdx = %d, want -1 after selection change", m.helpNavIdx)
+		}
+	})
+	t.Run("help/man switch", func(t *testing.T) {
+		m := helpNavModel()
+		m.helpNavIdx = 0
+		updated, _ := m.Update(keyRunes("m"))
+		nm := updated.(Model)
+		if nm.helpNavIdx != -1 {
+			t.Errorf("helpNavIdx = %d, want -1 after [m]", nm.helpNavIdx)
+		}
+	})
+	t.Run("resize", func(t *testing.T) {
+		m := helpNavModel()
+		m.ready = true
+		m.helpNavIdx = 0
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+		nm := updated.(Model)
+		if nm.helpNavIdx != -1 {
+			t.Errorf("helpNavIdx = %d, want -1 after resize", nm.helpNavIdx)
+		}
+		if len(nm.helpEntries) != 2 {
+			t.Errorf("helpEntries = %v, want 2 entries recomputed at the new width", nm.helpEntries)
+		}
+	})
+	t.Run("focus away via digit", func(t *testing.T) {
+		m := helpNavModel()
+		m.helpNavIdx = 0
+		updated, _ := m.Update(keyRunes("2"))
+		nm := updated.(Model)
+		if nm.focus != focusBrief {
+			t.Fatalf("focus = %d, want focusBrief", nm.focus)
+		}
+		if nm.helpNavIdx != -1 {
+			t.Errorf("helpNavIdx = %d, want -1 after focus moved away", nm.helpNavIdx)
+		}
+	})
+	t.Run("help search entry", func(t *testing.T) {
+		m := helpNavModel()
+		m.helpNavIdx = 0
+		updated, _ := m.Update(keyRunes("/"))
+		nm := updated.(Model)
+		if nm.mode != modeHelpSearch {
+			t.Fatalf("mode = %d, want modeHelpSearch", nm.mode)
+		}
+		if nm.helpNavIdx != -1 {
+			t.Errorf("helpNavIdx = %d, want -1 after entering help search", nm.helpNavIdx)
+		}
+	})
+}

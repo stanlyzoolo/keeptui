@@ -98,34 +98,51 @@ func wrapText(s string, width int) string {
 		return s
 	}
 	var result strings.Builder
-	lines := strings.Split(s, "\n")
-	for i, line := range lines {
+	for i, line := range strings.Split(s, "\n") {
 		if i > 0 {
 			result.WriteByte('\n')
 		}
-		if utf8.RuneCountInString(line) <= width {
-			result.WriteString(line)
-			continue
-		}
-		words := strings.Fields(line)
-		col := 0
-		for j, word := range words {
-			wl := utf8.RuneCountInString(word)
-			if j == 0 {
-				result.WriteString(word)
-				col = wl
-			} else if col+1+wl > width {
+		for k, wrapped := range wrapLine(line, width) {
+			if k > 0 {
 				result.WriteByte('\n')
-				result.WriteString(word)
-				col = wl
-			} else {
-				result.WriteByte(' ')
-				result.WriteString(word)
-				col += 1 + wl
 			}
+			result.WriteString(wrapped)
 		}
 	}
 	return result.String()
+}
+
+// wrapLine wraps a single line by words at width. Extracted from wrapText so
+// parseHelpEntries can count how many display lines a source line produces
+// without re-implementing the wrap rules — the entry index and the rendered
+// content must agree on line positions, so they must share this code.
+// Note a wrapped line is rebuilt from strings.Fields: leading indentation is
+// lost and continuation pieces start at column 0.
+func wrapLine(line string, width int) []string {
+	if utf8.RuneCountInString(line) <= width {
+		return []string{line}
+	}
+	var lines []string
+	var cur strings.Builder
+	col := 0
+	for j, word := range strings.Fields(line) {
+		wl := utf8.RuneCountInString(word)
+		switch {
+		case j == 0:
+			cur.WriteString(word)
+			col = wl
+		case col+1+wl > width:
+			lines = append(lines, cur.String())
+			cur.Reset()
+			cur.WriteString(word)
+			col = wl
+		default:
+			cur.WriteByte(' ')
+			cur.WriteString(word)
+			col += 1 + wl
+		}
+	}
+	return append(lines, cur.String())
 }
 
 func stripMarkdown(s string) string {
@@ -267,6 +284,100 @@ func colorizeHelp(s string) string {
 		lines[i] = base + b.String() + reset
 	}
 	return strings.Join(lines, "\n")
+}
+
+// entryRange is a half-open [start, end) range of display (wrapped) lines
+// holding one navigable help entry: a flag or subcommand line plus its
+// indented description lines.
+type entryRange struct {
+	start, end int
+}
+
+// helpEntryFlagRe: the line's first non-space token is a flag — the flag core
+// of helpTokenRe anchored at the trimmed start of the line.
+var helpEntryFlagRe = regexp.MustCompile(`^\s*--?[a-zA-Z]`)
+
+// helpEntrySubcmdRe: an indented subcommand row — a word not starting with a
+// dash followed by 2+ spaces and description text (the shape of cobra/clap
+// command blocks). Indentation is required so unindented prose ("Usage: keys
+// [flags]", section text) never starts an entry; the word class has no ':' so
+// inline labels like "Note:" don't match.
+var helpEntrySubcmdRe = regexp.MustCompile(`^\s+[A-Za-z][A-Za-z0-9_.-]*\s{2,}\S`)
+
+func isHelpEntryStart(line string) bool {
+	return helpEntryFlagRe.MatchString(line) || helpEntrySubcmdRe.MatchString(line)
+}
+
+// isHelpSectionHeader mirrors colorizeHelp's header rule: an unindented line
+// ending in ':'.
+func isHelpSectionHeader(line string) bool {
+	trimmed := strings.TrimRight(line, " ")
+	return trimmed != "" && trimmed[0] != ' ' && trimmed[0] != '\t' && strings.HasSuffix(trimmed, ":")
+}
+
+// helpIndent returns the number of leading whitespace runes (tabs count as
+// one — only relative depth matters).
+func helpIndent(line string) int {
+	n := 0
+	for _, r := range line {
+		if r != ' ' && r != '\t' {
+			break
+		}
+		n++
+	}
+	return n
+}
+
+// parseHelpEntries derives the navigable entry index for the help panel from
+// the raw (pre-wrap) help text. Detection runs on the SOURCE lines: wrapText
+// drops leading indentation when it wraps a line (see wrapLine), which would
+// defeat the indent-based continuation heuristic on wrapped output. The
+// resulting ranges are then mapped onto wrapped-line indices via the same
+// wrapLine wrapText uses, so an entryRange always addresses the lines the
+// viewport actually shows.
+//
+// An entry starts at a flag line or an indented subcommand row and continues
+// through lines indented deeper than its start line, ending at a blank line,
+// a section header, or the next entry start. Headers, Usage and free prose
+// belong to no entry.
+func parseHelpEntries(raw string, width int) []entryRange {
+	if raw == "" {
+		return nil
+	}
+	src := strings.Split(raw, "\n")
+	// wrappedAt[i] = display index of the first wrapped line produced by
+	// src[i]; wrappedAt[len(src)] = total display line count.
+	wrappedAt := make([]int, len(src)+1)
+	n := 0
+	for i, line := range src {
+		wrappedAt[i] = n
+		if width > 0 {
+			n += len(wrapLine(line, width))
+		} else {
+			n++
+		}
+	}
+	wrappedAt[len(src)] = n
+
+	var entries []entryRange
+	for i := 0; i < len(src); {
+		if !isHelpEntryStart(src[i]) {
+			i++
+			continue
+		}
+		indent := helpIndent(src[i])
+		j := i + 1
+		for j < len(src) {
+			l := src[j]
+			if strings.TrimSpace(l) == "" || isHelpSectionHeader(l) || isHelpEntryStart(l) || helpIndent(l) <= indent {
+				break
+			}
+			j++
+		}
+		entries = append(entries, entryRange{start: wrappedAt[i], end: wrappedAt[j]})
+		i = j
+	}
+	return entries
 }
 
 func findMatches(text, query string) []int {

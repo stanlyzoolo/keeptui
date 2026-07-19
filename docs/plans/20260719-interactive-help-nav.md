@@ -95,10 +95,11 @@ Approach A from brainstorm: a **heuristic entry index over the already-wrapped l
 - Modify: `internal/model/textutil.go`
 - Modify: `internal/model/textutil_test.go` (create if the file does not exist; entry-parsing tests may also land in `render_test.go` next to the `colorizeHelp` tests — follow whichever file exists)
 
-- [ ] add `entryRange struct{ start, end int }` and `parseHelpEntries(lines []string) []entryRange` to `textutil.go`, implementing the start/continuation heuristic from Technical Details (flag start via the `helpTokenRe` flag core anchored at trimmed-line start; subcommand start = indented non-dash word + 2+ spaces + text; continuation = deeper indent until next start / unindented `X:` header / blank line)
-- [ ] write table-driven tests on realistic fixtures: clap-style (`rg --help`: `-e, --regexp <PATTERN>` + indented description), cobra-style subcommand block (`  commit    Record changes…`), GNU-style (`  -v, --verbose` with description on the same and following lines), a man-page OPTIONS excerpt
-- [ ] write edge-case tests: entry with multi-line description, wrap tails (description line wrapped by `wrapText` stays inside the entry), section headers and Usage lines excluded from all entries, blank line terminates an entry, empty input → empty slice, text with no flags/subcommands at all → empty slice
-- [ ] run `go test -race ./internal/model/` — must pass before task 2
+- [x] add `entryRange struct{ start, end int }` and `parseHelpEntries` to `textutil.go`, implementing the start/continuation heuristic from Technical Details (flag start via the `helpTokenRe` flag core anchored at trimmed-line start; subcommand start = indented non-dash word + 2+ spaces + text; continuation = deeper indent until next start / unindented `X:` header / blank line)
+- ➕ signature deviation: `parseHelpEntries(raw string, width int)` parses the **source** (pre-wrap) lines and maps ranges to wrapped display indices via a `wrapLine` helper extracted from `wrapText`. Reason: `wrapText` rebuilds wrapped lines from `strings.Fields`, dropping leading indentation — the indent-based continuation heuristic is unusable on wrapped output. Sharing `wrapLine` preserves the index-sync invariant with the renderer (this also subsumes the `wrappedHelpLines()` width concern: the shared unit is the wrap algorithm itself).
+- [x] write table-driven tests on realistic fixtures: clap-style, cobra subcommand block, GNU-style, man-page OPTIONS excerpt (`TestParseHelpEntries` in `render_test.go`)
+- [x] write edge-case tests: multi-line description, wrap tails stay inside the entry (`TestParseHelpEntriesWrapMapping` pins positions against actual `wrapText` output), headers/Usage excluded, blank line terminates, empty input → nil, prose-only → nil
+- [x] run `go test -race ./internal/model/` — passed
 
 ### Task 2: model state + setHelpContent single recompute point
 
@@ -108,14 +109,14 @@ Approach A from brainstorm: a **heuristic entry index over the already-wrapped l
 - Modify: `internal/model/mode.go`
 - Modify: `internal/model/model_test.go` (or the test file matching existing conventions)
 
-- [ ] add `helpEntries []entryRange` and `helpNavIdx int` to `Model`; initialize `helpNavIdx = -1` in `New`
-- [ ] extract `wrappedHelpLines()` from `renderHelpContent` (`rawHelpText` + `wrapText` with `max(helpW-2, 20)`) and use it in both `renderHelpContent` and `setHelpContent` — identical wrapping is the invariant that keeps entry indices in sync with rendered lines
-- [ ] implement `(*Model) setHelpContent()`: `helpEntries = parseHelpEntries(wrappedHelpLines())` — but empty when the update-log branch (`updateLogFor == selected`), `helpLoadingFor`, a cache-miss placeholder, or no-selection would render; `helpNavIdx = -1`; then `helpViewport.SetContent(renderHelpContent())`; never scrolls
-- [ ] replace `SetContent(renderHelpContent())` with `setHelpContent()` at text-change sites: the `autoFetchCmdsForSelected` switch in `commands.go:234-242` (keep its per-branch `GotoBottom`/`GotoTop`), `[h]`/`[m]` handlers, `helpOutputMsg` handler at `model.go:431`, rename refresh at `mode.go:272`, update-log start/finish transitions; keep plain `SetContent(renderHelpContent())` at style-only sites (help-search keystrokes, per-chunk `updateChunkMsg`)
-- [ ] **add** a `setHelpContent()` call to the ready-branch resize path (`model.go:541-548`) — new behavior: help re-wraps on resize (today it never re-renders there), entries recompute, cursor resets
-- [ ] reset `helpNavIdx = -1` in `setFocus()` and on entering `modeHelpSearch` via `/`; in both, when the cursor was active, also re-render the help viewport so stale dim never survives the transition
-- [ ] write tests: entries populated after a (simulated) `helpOutputMsg` with flag text; entries empty for update-log/loading/placeholder states; `helpNavIdx` reset to -1 on tool selection change, `[h]`↔`[m]` switch, resize (and content re-wrapped at the new width), `setFocus` away from help (help view no longer dimmed), and `/` help-search entry (same)
-- [ ] run `go test -race ./internal/model/` — must pass before task 3
+- [x] add `helpEntries []entryRange` and `helpNavIdx int` to `Model`; initialize `helpNavIdx = -1` in `New`
+- [x] shared wrapping invariant: instead of `wrappedHelpLines()`, a `helpWrapWidth()` method is the single width source (`max(helpW-2, 20)`) used by `renderHelpContent` (both branches) and `setHelpContent`; the wrap *algorithm* is shared via `wrapLine` (Task 1 deviation) — same invariant, smaller surface
+- [x] implement `(*Model) setHelpContent()`: `helpEntries = parseHelpEntries(rawHelpText(), helpWrapWidth())` — nil when the update-log branch, `helpLoadingFor`, or no-selection would render (a cache-miss placeholder yields nil via `rawHelpText() == ""`); `helpNavIdx = -1`; then `SetContent(renderHelpContent())`; never scrolls
+- [x] replace `SetContent(renderHelpContent())` with `setHelpContent()` at text-change sites: the `autoFetchCmdsForSelected` switch (per-branch `GotoBottom`/`GotoTop` kept), `[h]`/`[m]` handlers (both branches each), `helpOutputMsg` handler, update-log start (`mode.go` confirm-update enter — ➕ note: `mode.go:272` is the log *start*, not a rename site; rename flows through `autoFetchCmdsForSelected`); style-only sites unchanged (help-search keystrokes, per-chunk `updateChunkMsg`, `updateDoneMsg` error seed — log appends with entries already empty)
+- [x] **add** `setHelpContent()` to the ready-branch resize path (new behavior: help re-wraps on resize) and switch the `!ready` initial SetContent to it too
+- [x] reset `helpNavIdx = -1` in `setFocus()` and on `/` help-search entry; both re-render the help viewport when the cursor was active
+- [x] write tests (`mode_test.go`): `TestSetHelpContentEntries`, `TestHelpOutputMsgRecomputesEntries`, `TestSetHelpContentEmptyStates` (update log / loading / cache miss), `TestHelpNavIdxResetTriggers` (selection change, `[h]`↔`[m]`, resize + recompute, focus away via digit, `/` entry)
+- [x] run `go test -race ./internal/model/` — full `./...` + `go vet` passed
 
 ### Task 3: spotlight rendering — HelpDimStyle + applySpotlight
 
@@ -124,11 +125,11 @@ Approach A from brainstorm: a **heuristic entry index over the already-wrapped l
 - Modify: `internal/model/render.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] add `ui.HelpDimStyle` (foreground `ColorDim`) to `styles.go` with a comment distinguishing it from `OverlayDimStyle`
-- [ ] in `renderHelpContent()`, after the `colorizeHelp` step (normal path only — not the search-highlight or update-log branches): when `helpNavIdx` is within `helpEntries` bounds, repaint every line outside `[start, end)` with `ui.HelpDimStyle.Render(stripANSI(line))`
-- [ ] write tests: with an active cursor, lines outside the entry contain the dim color sequence and none of the original `colorizeHelp` sequences; lines inside keep full coloring; `helpNavIdx == -1` renders identically to today; out-of-bounds `helpNavIdx` (stale index) falls back to undimmed output rather than panicking
-- [ ] verify existing help-search highlight tests and update-log render tests pass unchanged
-- [ ] run `go test -race ./internal/model/ ./internal/ui/` — must pass before task 4
+- [x] add `ui.HelpDimStyle` (foreground `ColorDim`) to `styles.go` with a comment distinguishing it from `OverlayDimStyle`
+- [x] `applySpotlight` in `render.go`, applied to the `colorizeHelp` return (normal path only): repaints every line outside `[start, end)` with `ui.HelpDimStyle.Render(stripANSI(line))`; bounds-checked
+- [x] write tests: `TestApplySpotlight` (dim outside incl. no original styling, full color inside incl. flag color, cursor-off has no dim), `TestApplySpotlightStaleIndex` (out-of-bounds → undimmed, no panic), `TestSpotlightClearedOnFocusAway` (viewport repainted undimmed after `2`)
+- [x] verified existing help-search highlight tests and update-log render tests pass unchanged
+- [x] run `go test -race ./internal/model/ ./internal/ui/` — passed
 
 ### Task 4: navigation keys + auto-scroll
 
@@ -136,12 +137,12 @@ Approach A from brainstorm: a **heuristic entry index over the already-wrapped l
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/mode_test.go`
 
-- [ ] in the `j`/`down` and `k`/`up` `focusHelp` branches: with non-empty `helpEntries`, first press selects the first visible entry (first entry with `end > YOffset`; past-the-end fallback = last entry), subsequent presses step ±1 clamped without wrap; with empty `helpEntries`, keep current scroll behavior
-- [ ] after each cursor change: style-only re-render + auto-scroll with mutually exclusive branches: `if start < YOffset { SetYOffset(start) } else if end > YOffset+Height { SetYOffset(min(end-Height, start)) }`
-- [ ] `esc` in `focusHelp`: cursor active → reset to `-1` + re-render, scroll untouched; cursor off → `setFocus(focusBrief)` as today
-- [ ] confirm `PgUp`/`PgDn`/`g`/`G`/wheel paths do not touch `helpNavIdx`
-- [ ] write tests: first `j` lands on first visible entry (including a scrolled-down viewport case); `j` at last entry and `k` at first entry are no-ops; `esc` resets cursor but preserves `YOffset`; second `esc` moves focus to `focusBrief`; auto-scroll moves `YOffset` when the target entry is above/below the window; an entry taller than `Height` ends with `YOffset == start` (top-pinned, not bottom-aligned); `j`/`k` still scroll when `helpEntries` is empty (update log, placeholder)
-- [ ] run `go test -race ./internal/model/` — must pass before task 5
+- [x] `helpNavStep(delta)` + `firstVisibleEntry()` + `scrollToNavEntry()` in `model.go`; the `j`/`down` and `k`/`up` `focusHelp` branches route to `helpNavStep(±1)` when `helpEntries` is non-empty, plain scroll otherwise
+- [x] auto-scroll with mutually exclusive branches and the `min(end-Height, start)` clamp
+- [x] `esc` in `focusHelp`: cursor active → reset + re-render, scroll untouched; cursor off → `setFocus(focusBrief)` as today
+- [x] `PgUp`/`PgDn`/`g`/`G`/wheel paths untouched — they never reference `helpNavIdx`
+- [x] tests: `TestHelpNavFirstPress` (top / scrolled / past-all-entries), `TestHelpNavEdges` (no wrap), `TestHelpNavEscSemantics` (reset + scroll kept, second esc → `[2]`), `TestHelpNavAutoScroll` (down, up, tall entry pins start), `TestHelpNavEmptyEntriesScrolls`
+- [x] run `go test -race ./internal/model/` — passed
 
 ### Task 5: status-bar hints
 
@@ -149,9 +150,9 @@ Approach A from brainstorm: a **heuristic entry index over the already-wrapped l
 - Modify: `internal/model/render.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] extend the `focusHelp` hints in `renderStatusBar()` (currently `[↑↓] scroll … [←] back … [q] quit` — no esc hint exists): add `[j/k] navigate`; when `helpNavIdx >= 0`, additionally show `[esc] exit nav`
-- [ ] write tests: hint present in `focusHelp` normal state; `exit nav` addition shown while the cursor is active (no existing test pins the `focusHelp` bar — add coverage for both states)
-- [ ] run `go test -race ./internal/model/` — must pass before task 6
+- [x] `focusHelp` hints: `[↑↓] scroll` is **replaced** by `[j/k] navigate` when `helpEntries` is non-empty (the scroll label would lie — arrows drive the cursor then); `[esc] exit nav` prepended while `helpNavIdx >= 0` (➕ deviation from "add": replacement keeps the label truthful and the bar short)
+- [x] tests: `TestRenderStatusBarFocusHelp` — scroll label with no entries, `[j/k] navigate` with entries, `[esc] exit nav` only while active
+- [x] run `go test -race ./internal/model/` — passed (full `./...`, `go vet`, `golangci-lint` — only 6 pre-existing SA5011 in test files, present on clean main too)
 
 ### Task 6: Verify acceptance criteria
 

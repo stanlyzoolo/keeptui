@@ -156,15 +156,15 @@ Approach A from brainstorm: a **heuristic entry index over the already-wrapped l
 
 ### Task 6: Verify acceptance criteria
 
-- [ ] verify all Overview requirements: entry cursor over flags *and* subcommands, spotlight dimming, first-j/k activation, esc semantics, scroll keys untouched, read-only
-- [ ] verify edge cases: empty help, tool with no man page, update log active, help search interleaving, resize mid-navigation, tool switch mid-navigation
-- [ ] run full suite: `go test -race ./...`
-- [ ] run `go vet ./...` and `golangci-lint run`
+- [x] verify all Overview requirements: entry cursor over flags *and* subcommands (`helpEntryFlagRe` + `helpEntrySubcmdRe`), spotlight dimming (`applySpotlight`), first-j/k activation at the first visible entry, two-stage esc, scroll keys untouched (`PgUp`/`PgDn`/`g`/`G`/wheel never touch `helpNavIdx`), read-only (no enter action)
+- [x] verify edge cases: empty help / cache-miss placeholder and the stored "No man page…" fallback parse to zero entries (j/k scroll); update log active → empty entries; help search entry resets + repaints; resize recomputes at the new width and resets; tool switch resets via `autoFetchCmdsForSelected`; mouse click into another panel clears via `setFocus`
+- [x] run full suite: `go test -race ./...` — all packages pass
+- [x] run `go vet ./...` (clean) and `golangci-lint run` (only the 6 pre-existing SA5011 test-file issues, identical on clean main)
 
 ### Task 7: [Final] Update documentation
 
-- [ ] update `CLAUDE.md`: extend the TUI state-machine section with the help-navigation behavior (activation, entry heuristic, spotlight, invalidation rules) and the `setHelpContent` vs style-only re-render split
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update `CLAUDE.md`: new "Help navigation" bullet in the TUI state-machine section (entry heuristic incl. the source-line/wrapLine mapping rationale, `setHelpContent` vs style-only split, activation/esc/scroll rules, status-bar swap) + `parseHelpEntries`/`wrapLine` added to the `textutil.go` row
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 

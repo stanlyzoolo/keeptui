@@ -9,7 +9,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/lepeshko/keys/internal/loader"
 	"github.com/lepeshko/keys/internal/logx"
+	"github.com/lepeshko/keys/internal/updater"
 )
 
 func TestFetchHelpTakeoverLogs(t *testing.T) {
@@ -157,3 +159,148 @@ func TestFetchHelpCmdRejectsTUITakeover(t *testing.T) {
 		t.Errorf("plain help lost: %q, err %v", msg.output, msg.err)
 	}
 }
+
+// updateDoneModel builds a fully-initialized two-tool model with rg's installed
+// version older than latest (so hasUpdate(rg) is true and rg sorts to the top of
+// the update-grouped list). rg is mid-update: updatingFor/updateLogFor set.
+func updateDoneModel(t *testing.T) Model {
+	t.Helper()
+	m := New([]loader.ToolMeta{
+		{Name: "rg", GitHub: "github.com/BurntSushi/ripgrep"},
+		{Name: "fzf"},
+	})
+	m = mustModel(m.Update(tea.WindowSizeMsg{Width: 120, Height: 24}))
+	m.versions["rg"] = VersionInfo{Installed: "1.0.0", Latest: "2.0.0", InstalledKnown: true}
+	m.updatePlan = updater.Plan{Manager: "brew", Argv: []string{"brew", "upgrade", "ripgrep"}, Display: "brew upgrade ripgrep"}
+	m.updatingFor = "rg"
+	m.updateLogFor = "rg"
+	m.updateLog = []string{"==> Upgrading ripgrep", "==> Pouring ripgrep"}
+	m.metaSelected = m.indexOfMeta("rg")
+	return m
+}
+
+// TestUpdateDoneSuccess: a successful updateDoneMsg clears updatingFor, sets the
+// "updated <name>" status and returns a command that re-detects the installed
+// version (installedMsg for the same tool).
+func TestUpdateDoneSuccess(t *testing.T) {
+	m := updateDoneModel(t)
+	nm, cmd := m.Update(updateDoneMsg{tool: "rg", err: nil})
+	m2 := nm.(Model)
+	if m2.updatingFor != "" {
+		t.Errorf("updatingFor = %q, want empty after done", m2.updatingFor)
+	}
+	if m2.statusMsg != "updated rg" {
+		t.Errorf("statusMsg = %q, want %q", m2.statusMsg, "updated rg")
+	}
+	if cmd == nil {
+		t.Fatal("want a re-fetch command, got nil")
+	}
+	msg, ok := cmd().(installedMsg)
+	if !ok || msg.toolName != "rg" {
+		t.Errorf("cmd produced %T (%+v), want installedMsg for rg", msg, msg)
+	}
+}
+
+// TestUpdateDoneFailure: a failed updateDoneMsg clears updatingFor, sets the
+// "see [3]" status, writes a log line (manager + tool, never a token) and does
+// not re-fetch.
+func TestUpdateDoneFailure(t *testing.T) {
+	logDir := t.TempDir()
+	restore := logx.SetDirForTesting(logDir)
+	defer restore()
+
+	m := updateDoneModel(t)
+	nm, cmd := m.Update(updateDoneMsg{tool: "rg", err: errUpdateTest})
+	m2 := nm.(Model)
+	if m2.updatingFor != "" {
+		t.Errorf("updatingFor = %q, want empty after failure", m2.updatingFor)
+	}
+	if m2.statusMsg != "update failed — see [3]" {
+		t.Errorf("statusMsg = %q, want the see-[3] hint", m2.statusMsg)
+	}
+	if cmd != nil {
+		t.Error("failure must not re-fetch the installed version")
+	}
+	out := logx.ReadAllForTesting(logDir)
+	if !strings.Contains(out, "rg") || !strings.Contains(out, "brew") {
+		t.Errorf("log = %q, want tool and manager recorded", out)
+	}
+	if strings.Contains(out, "token") {
+		t.Errorf("log leaked a token-ish word: %q", out)
+	}
+}
+
+// TestUpdateDoneFailureEmptyLogSurfacesError: when the update fails before
+// emitting any output (missing binary, bad argv, immediate exit), the empty [3]
+// log would still read "starting update…". The done handler seeds the log with
+// the error so the panel the status bar points to actually shows the reason.
+func TestUpdateDoneFailureEmptyLogSurfacesError(t *testing.T) {
+	logDir := t.TempDir()
+	restore := logx.SetDirForTesting(logDir)
+	defer restore()
+
+	m := updateDoneModel(t)
+	m.updateLog = nil // failed before any chunk arrived
+
+	nm, _ := m.Update(updateDoneMsg{tool: "rg", err: errUpdateTest})
+	m2 := nm.(Model)
+	if len(m2.updateLog) == 0 {
+		t.Fatal("updateLog empty, want the error text seeded for [3]")
+	}
+	if !strings.Contains(m2.updateLog[0], "exit status 1") {
+		t.Errorf("updateLog[0] = %q, want the error text", m2.updateLog[0])
+	}
+	// [3] must now render the seeded error, not the "starting update…" placeholder.
+	if content := m2.renderHelpContent(); !strings.Contains(content, "exit status 1") {
+		t.Errorf("[3] content = %q, want the update error surfaced", content)
+	}
+}
+
+// TestUpdateDoneUntracked: a done for a tool no longer tracked (untracked
+// mid-update) just clears the guard — no re-fetch, no crash, no status.
+func TestUpdateDoneUntracked(t *testing.T) {
+	m := updateDoneModel(t)
+	m.updatingFor = "gone"
+	nm, cmd := m.Update(updateDoneMsg{tool: "gone", err: nil})
+	m2 := nm.(Model)
+	if m2.updatingFor != "" {
+		t.Errorf("updatingFor = %q, want cleared", m2.updatingFor)
+	}
+	if cmd != nil {
+		t.Error("untracked done must not re-fetch")
+	}
+	if m2.statusMsg != "" {
+		t.Errorf("statusMsg = %q, want empty for an untracked tool", m2.statusMsg)
+	}
+}
+
+// TestUpdateDoneCursorFollowsTool: after the success re-fetch merges an
+// up-to-date installed version, hasUpdate flips off and rg leaves the update
+// group — but the selection still points at rg by name, not at a stale index.
+func TestUpdateDoneCursorFollowsTool(t *testing.T) {
+	m := updateDoneModel(t)
+	// rg has an update → sorts to the top; selection is on rg (index 0).
+	if got, _ := m.selectedMeta(); got.Name != "rg" {
+		t.Fatalf("precondition: selected = %q, want rg", got.Name)
+	}
+	nm, cmd := m.Update(updateDoneMsg{tool: "rg", err: nil})
+	m2 := nm.(Model)
+	// Run the re-fetch to get the installedMsg, then feed it the now-current
+	// installed version — this flips hasUpdate off and reorders the list.
+	if cmd == nil {
+		t.Fatal("want a re-fetch command")
+	}
+	m3 := mustModel(m2.Update(installedMsg{toolName: "rg", installed: "2.0.0"}))
+	if m3.hasUpdate("rg") {
+		t.Fatal("hasUpdate(rg) still true after installing latest")
+	}
+	if got, _ := m3.selectedMeta(); got.Name != "rg" {
+		t.Errorf("selected = %q after regroup, want the cursor to follow rg", got.Name)
+	}
+}
+
+var errUpdateTest = updateTestError("exit status 1")
+
+type updateTestError string
+
+func (e updateTestError) Error() string { return string(e) }

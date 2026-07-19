@@ -1,8 +1,10 @@
 package model
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"time"
@@ -12,6 +14,7 @@ import (
 	"github.com/lepeshko/keys/internal/loader"
 	"github.com/lepeshko/keys/internal/logx"
 	"github.com/lepeshko/keys/internal/proc"
+	"github.com/lepeshko/keys/internal/updater"
 	"github.com/lepeshko/keys/internal/version"
 )
 
@@ -222,17 +225,163 @@ func (m *Model) autoFetchCmdsForSelected() tea.Cmd {
 		}
 	}
 	if mt, ok := m.selectedMeta(); ok {
-		cached := m.helpCache[mt.Name]
-		if cached[m.helpMode] == "" {
+		switch {
+		case m.updateLogFor == mt.Name:
+			// The tool's live update log owns [3]: don't fetch help (and don't
+			// set helpLoadingFor) — a late helpOutputMsg or the "Loading..."
+			// state would clobber the log. Just render the log branch, scrolled
+			// to the tail so the newest output is visible on re-selection.
+			m.helpViewport.SetContent(m.renderHelpContent())
+			m.helpViewport.GotoBottom()
+		case m.helpCache[mt.Name][m.helpMode] == "":
 			m.helpLoadingFor = mt.Name
 			m.helpViewport.SetContent(m.renderHelpContent())
 			cmds = append(cmds, fetchHelpCmd(mt.Name, m.helpMode))
-		} else {
+		default:
 			m.helpViewport.SetContent(m.renderHelpContent())
 			m.helpViewport.GotoTop()
 		}
 	}
 	return tea.Batch(cmds...)
+}
+
+// updateLine is one item crossing from the update reader goroutine to the tea
+// runtime. A normal item carries text plus the replace flag (a '\r' progress
+// segment overwrites the last line; a '\n' line appends). The final item has
+// done set and carries the process exit error (nil on success). Using one
+// channel for both — instead of a separate error channel threaded through every
+// waitForChunkCmd re-subscribe — keeps the happens-before ordering trivial: the
+// reader sends the done item before closing the channel, so it is received in
+// order, race-free.
+type updateLine struct {
+	text    string
+	replace bool
+	done    bool
+	err     error
+}
+
+// updateTimeout bounds a running update. `cargo install` compiles from source
+// and can legitimately run for many minutes, so the ceiling is generous.
+const updateTimeout = 10 * time.Minute
+
+// detectUpdateCmd resolves the update Plan for t off the Update thread —
+// updater.Detect spawns subprocesses (go version -m, cargo install --list) and
+// must never run inside Update(), like every other probe. Emits an
+// updateDetectedMsg; the handler enters the confirm mode or shows a hint.
+func detectUpdateCmd(t loader.Tool) tea.Cmd {
+	return safeCmd("detectUpdateCmd", func() tea.Msg {
+		plan, err := updater.Detect(t)
+		return updateDetectedMsg{tool: t.Name, plan: plan, err: err}
+	})
+}
+
+// startUpdateCmd runs plan's command, streaming its merged stdout+stderr into a
+// channel one segment at a time, and returns waitForChunkCmd to pump the first
+// segment into the tea runtime. The subprocess is detached from the controlling
+// terminal (proc.DetachTTY) so a program that expects a TTY — e.g. a sudo
+// password prompt — fails fast instead of hanging invisibly. On the 10-minute
+// deadline the whole process group is killed (the child is a session leader,
+// so a plain kill would orphan `sh -c` grandchildren).
+func startUpdateCmd(plan updater.Plan, tool string) tea.Cmd {
+	return safeCmd("startUpdateCmd", func() tea.Msg {
+		if len(plan.Argv) == 0 {
+			return updateDoneMsg{tool: tool, err: errors.New("empty update command")}
+		}
+
+		ch := make(chan updateLine, 64)
+		ctx, cancel := context.WithTimeout(context.Background(), updateTimeout)
+		cmd := exec.CommandContext(ctx, plan.Argv[0], plan.Argv[1:]...)
+		proc.DetachTTY(cmd)
+		// Kill the process group, not just the direct child, when ctx fires.
+		cmd.Cancel = func() error { return proc.KillGroup(cmd) }
+
+		pipe, err := cmd.StdoutPipe()
+		if err != nil {
+			cancel()
+			return updateDoneMsg{tool: tool, err: err}
+		}
+		cmd.Stderr = cmd.Stdout // merge stderr into the same pipe (one fd, no copier)
+		if err := cmd.Start(); err != nil {
+			cancel()
+			return updateDoneMsg{tool: tool, err: err}
+		}
+
+		go func() {
+			defer cancel()
+			// Read the pipe to EOF *first*, then Wait: os/exec forbids calling
+			// Wait before all pipe reads finish (it closes the pipe under the
+			// reader). Only after the drain + Wait is the exit error known.
+			streamLines(pipe, func(text string, replace bool) {
+				ch <- updateLine{text: text, replace: replace}
+			})
+			waitErr := cmd.Wait()
+			ch <- updateLine{done: true, err: waitErr}
+			close(ch)
+		}()
+
+		// Invoke the wait once here so this command yields the first real chunk
+		// message: returning the waitForChunkCmd *value* would hand Update a
+		// tea.Cmd as a Msg (Bubble Tea does not auto-run a returned command).
+		return waitForChunkCmd(tool, ch)()
+	})
+}
+
+// waitForChunkCmd blocks on the next item from the update channel and turns it
+// into a message: a normal item becomes updateChunkMsg (which re-subscribes via
+// this same command), the done item — or a closed channel — becomes
+// updateDoneMsg. It is the re-subscribe half of Bubble Tea's channel idiom.
+func waitForChunkCmd(tool string, ch chan updateLine) tea.Cmd {
+	return safeCmd("waitForChunkCmd", func() tea.Msg {
+		ul, ok := <-ch
+		if !ok || ul.done {
+			return updateDoneMsg{tool: tool, err: ul.err}
+		}
+		return updateChunkMsg{tool: tool, line: ul.text, replace: ul.replace, ch: ch}
+	})
+}
+
+// streamLines reads r to EOF, calling emit once per line with a replace flag.
+// The flag models a real terminal cursor: a lone '\r' leaves the cursor at the
+// start of the current line, so the *next* segment overwrites it — replace is
+// therefore true when the *previous* segment ended in a lone '\r', not the
+// current one. '\n' (and "\r\n", collapsed to one '\n') moves to a fresh line,
+// so the next segment appends. This makes a progress bar ("10%\r90%\r100%\n")
+// collapse to a single updating line while ordinary output still appends. A
+// trailing unterminated fragment is emitted last.
+func streamLines(r io.Reader, emit func(text string, replace bool)) {
+	br := bufio.NewReader(r)
+	var buf []byte
+	prevCR := false
+	flush := func(text string, isCR bool) {
+		emit(text, prevCR)
+		prevCR = isCR
+	}
+	for {
+		b, err := br.ReadByte()
+		if err != nil {
+			if len(buf) > 0 {
+				flush(string(buf), false)
+			}
+			return
+		}
+		switch b {
+		case '\n':
+			flush(string(buf), false)
+			buf = buf[:0]
+		case '\r':
+			// Peek: "\r\n" is a normal line terminator (append next), a lone
+			// "\r" leaves the cursor at line start (overwrite next).
+			if next, _ := br.Peek(1); len(next) == 1 && next[0] == '\n' {
+				_, _ = br.ReadByte() // consume the '\n'
+				flush(string(buf), false)
+			} else {
+				flush(string(buf), true)
+			}
+			buf = buf[:0]
+		default:
+			buf = append(buf, b)
+		}
+	}
 }
 
 func fetchHelpCmd(name string, mode int) tea.Cmd {

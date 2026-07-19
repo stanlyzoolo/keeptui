@@ -27,6 +27,7 @@ const (
 	modeTrack          // "t" in focusTools
 	modeConfirmUntrack // "u" in focusTools
 	modeRename         // "r" in focusTools
+	modeConfirmUpdate  // "u" in focusBrief: confirm the detected update command
 	modeAPIStatus      // "L": rate-limit / token overlay
 	modeTokenInput     // "e" inside the overlay: masked token entry
 )
@@ -248,6 +249,35 @@ func (m Model) updateRenameInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.nameInput, cmd = m.nameInput.Update(msg)
 		return m, cmd
+	}
+}
+
+// updateConfirmUpdate handles the modeConfirmUpdate dialog (modeled on
+// modeConfirmUntrack): enter launches the update — set updatingFor, reset the
+// live log to the target tool, and fire the streaming command plus the spinner
+// tick; esc (or any other key) cancels back to modeNormal. The plan awaiting
+// confirmation lives in m.updatePlan.
+func (m Model) updateConfirmUpdate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		m.mode = modeNormal
+		mt, ok := m.selectedMeta()
+		if !ok {
+			return m, nil
+		}
+		m.updatingFor = mt.Name
+		m.updateLog = nil
+		m.updateLogFor = mt.Name
+		m.briefViewport.SetContent(m.renderCard())
+		m.helpViewport.SetContent(m.renderHelpContent())
+		return m, tea.Batch(
+			m.spinner.Tick,
+			startUpdateCmd(m.updatePlan, mt.Name),
+		)
+	default:
+		// esc or any other key cancels.
+		m.mode = modeNormal
+		return m, nil
 	}
 }
 

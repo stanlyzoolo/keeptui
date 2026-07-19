@@ -37,6 +37,10 @@ type ToolMeta struct {
 	Tags   []string `yaml:"tags,omitempty"`
 	Note   string   `yaml:"note,omitempty"`
 	GitHub string   `yaml:"github,omitempty"`
+	// UpdateCmd is an explicit update command that overrides package-manager
+	// detection. omitempty keeps meta.yaml written without the field backward
+	// compatible.
+	UpdateCmd string `yaml:"update_cmd,omitempty"`
 }
 
 // testConfigDir overrides the config directory in tests.

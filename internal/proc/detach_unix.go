@@ -19,3 +19,15 @@ import (
 func DetachTTY(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 }
+
+// KillGroup terminates cmd and every process in its group. DetachTTY makes the
+// child a session/group leader (Setsid), so a plain cmd.Process.Kill would
+// orphan grandchildren such as the tools spawned by `sh -c`. Signalling the
+// negated pid delivers SIGKILL to the whole group. Best-effort: a nil or
+// already-exited process is a no-op.
+func KillGroup(cmd *exec.Cmd) error {
+	if cmd == nil || cmd.Process == nil {
+		return nil
+	}
+	return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+}

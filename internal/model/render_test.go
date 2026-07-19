@@ -2476,3 +2476,120 @@ func TestRenderCardInstalledLatest(t *testing.T) {
 		}
 	})
 }
+
+// updateLogModel builds a model with two tools and a live update log for the
+// first (rg), for the Task-6 [3]-panel log rendering tests. Maps are non-nil so
+// selectMeta/renderCard/autoFetch never nil-panic; viewports are sized so
+// GotoBottom has something to scroll.
+func updateLogModel() Model {
+	m := Model{
+		width: 120, height: 24, helpW: 60, briefW: 40, toolsW: 20,
+		meta:          []loader.ToolMeta{{Name: "rg"}, {Name: "fzf"}},
+		metaSelected:  0,
+		focus:         focusHelp,
+		helpMode:      helpModeHelp,
+		helpCache:     map[string][2]string{"fzf": {helpModeHelp: "FZFHELP"}},
+		versions:      map[string]VersionInfo{"rg": {InstalledKnown: true}, "fzf": {InstalledKnown: true}},
+		repoCards:     map[string]version.RepoCard{},
+		repoStatus:    map[string]string{},
+		changelogData: map[string]changelogMsg{},
+		updateLogFor:  "rg",
+		updateLog:     []string{"upgrading rg", "done"},
+	}
+	m.tools = loader.ToolsFromMeta(m.meta)
+	m.helpViewport = viewport.New(59, 17)
+	m.briefViewport = viewport.New(39, 17)
+	m.toolsViewport = viewport.New(19, 17)
+	return m
+}
+
+// TestUpdateLogPanelTitle verifies the [3] panel title reads "[3] Update" while
+// the updating tool is selected and reverts to "[3] Help" on another tool.
+func TestUpdateLogPanelTitle(t *testing.T) {
+	m := New([]loader.ToolMeta{{Name: "rg", Status: loader.StatusActive}, {Name: "fzf", Status: loader.StatusActive}})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	m = updated.(Model)
+	m.updateLogFor = "rg"
+	m.updateLog = []string{"upgrading rg"}
+
+	m.metaSelected = 0 // rg — the updating tool
+	m.helpViewport.SetContent(m.renderHelpContent())
+	top := stripANSI(strings.SplitN(m.renderHelp(), "\n", 2)[0])
+	if !strings.Contains(top, " [3] Update ") {
+		t.Errorf("updating-tool top border = %q, want [3] Update title", top)
+	}
+
+	m.metaSelected = 1 // fzf — not updating
+	topOther := stripANSI(strings.SplitN(m.renderHelp(), "\n", 2)[0])
+	if !strings.Contains(topOther, " [3] Help ") || strings.Contains(topOther, "Update") {
+		t.Errorf("other-tool top border = %q, want [3] Help title", topOther)
+	}
+}
+
+// TestUpdateLogRendersAheadOfLoading verifies the live-log branch wins over the
+// helpLoadingFor "Loading..." state: re-selecting the updating tool mid-fetch
+// still shows the log buffer, not a loading spinner.
+func TestUpdateLogRendersAheadOfLoading(t *testing.T) {
+	m := updateLogModel()
+	m.helpLoadingFor = "rg" // even mid-fetch, the log branch takes precedence
+
+	got := m.renderHelpContent()
+	if strings.Contains(got, "Loading") {
+		t.Errorf("renderHelpContent = %q, want the log, not Loading", got)
+	}
+	if !strings.Contains(got, "upgrading rg") || !strings.Contains(got, "done") {
+		t.Errorf("renderHelpContent = %q, want the full log buffer", got)
+	}
+}
+
+// TestUpdateLogSelectAwayAndBack verifies navigating away from the updating tool
+// shows the other tool's normal help, and navigating back shows the live log
+// again (the buffer survives selection moves).
+func TestUpdateLogSelectAwayAndBack(t *testing.T) {
+	m := updateLogModel()
+
+	_ = m.selectMeta(0) // rg (log tool)
+	if got := m.renderHelpContent(); !strings.Contains(got, "upgrading rg") {
+		t.Errorf("on rg: renderHelpContent = %q, want update log", got)
+	}
+	_ = m.selectMeta(1) // fzf — normal help
+	if got := m.renderHelpContent(); !strings.Contains(got, "FZFHELP") || strings.Contains(got, "upgrading rg") {
+		t.Errorf("on fzf: renderHelpContent = %q, want fzf help, not the log", got)
+	}
+	_ = m.selectMeta(0) // back to rg — log again
+	if got := m.renderHelpContent(); !strings.Contains(got, "upgrading rg") {
+		t.Errorf("back on rg: renderHelpContent = %q, want update log again", got)
+	}
+}
+
+// TestAutoFetchSkipsHelpForUpdateLog verifies autoFetchCmdsForSelected does not
+// arm a help fetch (or set helpLoadingFor) for the tool whose live log is
+// showing — otherwise a late helpOutputMsg would clobber the log in [3].
+func TestAutoFetchSkipsHelpForUpdateLog(t *testing.T) {
+	m := updateLogModel()
+	m.helpCache = map[string][2]string{} // rg has no cached help: normally a fetch
+	m.metaSelected = 0                   // rg — the updating tool
+
+	_ = m.autoFetchCmdsForSelected()
+	if m.helpLoadingFor != "" {
+		t.Errorf("helpLoadingFor = %q, want empty (help fetch skipped for log tool)", m.helpLoadingFor)
+	}
+	if got := m.renderHelpContent(); strings.Contains(got, "Loading") {
+		t.Errorf("renderHelpContent = %q, want the log, not Loading", got)
+	}
+}
+
+// TestUpdateLogPersistsAfterDone verifies the log buffer survives an
+// updateDoneMsg: the tool's log stays displayable until the next update starts.
+func TestUpdateLogPersistsAfterDone(t *testing.T) {
+	m := updateLogModel()
+	m.updatingFor = "rg"
+
+	nm := mustModel(m.Update(updateDoneMsg{tool: "rg", err: nil}))
+	if nm.updateLogFor != "rg" || len(nm.updateLog) == 0 {
+		t.Fatalf("after done: updateLogFor=%q log=%v, want log preserved", nm.updateLogFor, nm.updateLog)
+	}
+	if got := nm.renderHelpContent(); !strings.Contains(got, "upgrading rg") {
+		t.Errorf("renderHelpContent after done = %q, want the persisted log", got)
+	}
+}

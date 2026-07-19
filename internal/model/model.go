@@ -13,6 +13,7 @@ import (
 	"github.com/lepeshko/keys/internal/loader"
 	"github.com/lepeshko/keys/internal/logx"
 	"github.com/lepeshko/keys/internal/ui"
+	"github.com/lepeshko/keys/internal/updater"
 	"github.com/lepeshko/keys/internal/version"
 )
 
@@ -81,6 +82,42 @@ const (
 	helpModeMan  = 1
 )
 
+// updateLogMaxLines caps the live update log buffer. Only the tail matters (the
+// final "installed"/error lines); older output can be dropped without loss.
+const updateLogMaxLines = 500
+
+// updateDetectedMsg carries the result of updater.Detect for a tool, run in a
+// tea.Cmd because detection spawns subprocesses (go version -m, cargo install
+// --list) and must never run on the Update thread. The handler enters the
+// confirm mode on success and shows a hint on ErrUnknownManager.
+type updateDetectedMsg struct {
+	tool string
+	plan updater.Plan
+	err  error
+}
+
+// updateChunkMsg carries one segment of the running update's merged
+// stdout+stderr. replace is set for a segment terminated by '\r' (progress
+// bars), so it overwrites the last buffered line instead of appending. ch is
+// the same channel the reader goroutine writes to, threaded through so the
+// handler can re-subscribe with waitForChunkCmd. (The channel is typed
+// updateLine rather than string — see the note there — so it can also carry the
+// completion+error item without a second channel.)
+type updateChunkMsg struct {
+	tool    string
+	line    string
+	replace bool
+	ch      chan updateLine
+}
+
+// updateDoneMsg signals the update subprocess finished (err is the exit error,
+// nil on success). The handler clears updatingFor and, on success, re-detects
+// the installed version so the ↑ marker clears.
+type updateDoneMsg struct {
+	tool string
+	err  error
+}
+
 type Model struct {
 	tools               []loader.Tool
 	versions            map[string]VersionInfo
@@ -122,6 +159,18 @@ type Model struct {
 	// doubles as the double-press guard and as the tick-loop / render gate.
 	spinner       spinner.Model
 	refreshingFor string
+
+	// updatingFor twins refreshingFor for the in-TUI update flow: it holds the
+	// name of the tool currently being updated (empty = idle), drives the card
+	// spinner and doubles as the single-update-at-a-time guard. updatePlan is
+	// the plan awaiting confirmation in modeConfirmUpdate. updateLog is the live
+	// merged stdout+stderr buffer for panel [3]; updateLogFor is the tool it
+	// belongs to, so navigating away shows normal help and navigating back shows
+	// the log again (the buffer survives until the next update starts).
+	updatingFor  string
+	updatePlan   updater.Plan
+	updateLog    []string
+	updateLogFor string
 
 	meta         []loader.ToolMeta
 	metaSelected int
@@ -320,9 +369,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case spinner.TickMsg:
-		// Animate only while a refresh is in flight; once refreshingFor is
-		// cleared (by the remoteMsg handler) the loop stops rescheduling itself.
-		if m.refreshingFor == "" {
+		// Animate while a refresh ([r]) or an update ([u]) is in flight; once
+		// both refreshingFor and updatingFor are cleared (by the remoteMsg /
+		// updateDoneMsg handlers) the loop stops rescheduling itself.
+		if m.refreshingFor == "" && m.updatingFor == "" {
 			return m, nil
 		}
 		m.spinner, cmd = m.spinner.Update(msg)
@@ -382,6 +432,98 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case updateDetectedMsg:
+		// Detection result for a [u] press. Drop it if the target is no longer
+		// the selected tool (the user moved on) or an update is already running.
+		// ErrUnknownManager is not a dead-end dialog — just a hint pointing at
+		// update_cmd / manual install. On success, stash the plan and open the
+		// confirm dialog.
+		mt, ok := m.selectedMeta()
+		if !ok || mt.Name != msg.tool || m.updatingFor != "" {
+			return m, nil
+		}
+		if msg.err != nil {
+			if errors.Is(msg.err, updater.ErrUnknownManager) {
+				m.statusMsg = "no known updater for " + msg.tool + " — set update_cmd or [o] releases"
+			} else {
+				m.statusMsg = "update detect failed: " + msg.err.Error()
+			}
+			return m, nil
+		}
+		m.updatePlan = msg.plan
+		m.mode = modeConfirmUpdate
+		return m, nil
+
+	case updateChunkMsg:
+		// Fold one segment of the running update's output into the live buffer.
+		// A '\r'-terminated segment (progress bar) replaces the last line rather
+		// than appending, so a progress bar renders as one updating line. Only
+		// the active session's buffer is touched, but we always re-subscribe so
+		// the channel keeps draining to EOF (which yields updateDoneMsg).
+		if msg.tool == m.updateLogFor {
+			line := cleanTerminalOutput(msg.line)
+			if msg.replace && len(m.updateLog) > 0 {
+				m.updateLog[len(m.updateLog)-1] = line
+			} else {
+				m.updateLog = append(m.updateLog, line)
+			}
+			// Cap to the tail: the final lines (install result, errors) matter.
+			if len(m.updateLog) > updateLogMaxLines {
+				m.updateLog = m.updateLog[len(m.updateLog)-updateLogMaxLines:]
+			}
+			// Repaint [3] and autoscroll only when the updating tool is the one
+			// selected; a chunk for a backgrounded update leaves the visible
+			// panel (another tool's help) untouched.
+			if mt, ok := m.selectedMeta(); ok && mt.Name == m.updateLogFor {
+				m.helpViewport.SetContent(m.renderHelpContent())
+				m.helpViewport.GotoBottom()
+			}
+		}
+		return m, waitForChunkCmd(msg.tool, msg.ch)
+
+	case updateDoneMsg:
+		// The update subprocess finished. Clear the guard regardless of outcome
+		// so a new update can start and the spinner.TickMsg loop stops
+		// rescheduling itself; the live log in [3] survives until the next
+		// update begins. Re-render the card so its title drops the spinner.
+		m.updatingFor = ""
+		// A tool untracked mid-update is no longer in m.tools: just drop the
+		// guard — no re-fetch, no statusMsg reaching into a card that is gone.
+		t, ok := m.toolByName(msg.tool)
+		if !ok {
+			m.briefViewport.SetContent(m.renderCard())
+			return m, nil
+		}
+		if msg.err != nil {
+			m.statusMsg = "update failed — see [3]"
+			// A command that fails before emitting any output (empty argv, missing
+			// manager binary, StdoutPipe/Start error, immediate non-zero exit)
+			// leaves updateLog empty, so [3] would still read "starting update…"
+			// while the status bar points there for the reason. Seed the log with
+			// the error so [3] shows it. The argv never carries the token and
+			// msg.err is an exec/exit error, so this stays token-free.
+			if m.updateLogFor == msg.tool && len(m.updateLog) == 0 {
+				m.updateLog = append(m.updateLog, "update failed: "+msg.err.Error())
+				if mt, ok := m.selectedMeta(); ok && mt.Name == msg.tool {
+					m.helpViewport.SetContent(m.renderHelpContent())
+					m.helpViewport.GotoBottom()
+				}
+			}
+			// Record the failure for post-hoc research: manager, exit error and
+			// the tail of the log. The update argv never carries the token, and
+			// nothing here reads it, so the log stays token-free.
+			logx.Errorf("update failed: tool=%s manager=%s err=%v tail=%q",
+				msg.tool, m.updatePlan.Manager, msg.err, tailLines(m.updateLog, 5))
+			m.briefViewport.SetContent(m.renderCard())
+			return m, nil
+		}
+		// Success: re-detect the installed version. The installedMsg merge flips
+		// hasUpdate off, moves the tool out of the update group and remaps the
+		// cursor by name, so no extra bookkeeping is needed here.
+		m.statusMsg = "updated " + msg.tool
+		m.briefViewport.SetContent(m.renderCard())
+		return m, fetchInstalledCmd(t)
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
@@ -423,6 +565,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateUntrackConfirm(msg)
 		case modeRename:
 			return m.updateRenameInput(msg)
+		case modeConfirmUpdate:
+			return m.updateConfirmUpdate(msg)
 		case modeAPIStatus, modeTokenInput:
 			return m.updateAPIStatus(msg)
 		}
@@ -653,6 +797,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.focus = focusHelp
 				m.helpMode = helpModeHelp
 				if mt, ok := m.selectedMeta(); ok {
+					// An explicit [h] is intent to leave a completed update log
+					// (otherwise sticky on re-selection); drop it so help is
+					// reachable again. Keep the live log during an in-flight
+					// update (updatingFor == name).
+					if m.updateLogFor == mt.Name && m.updatingFor != mt.Name {
+						m.updateLogFor = ""
+					}
 					cached := m.helpCache[mt.Name]
 					if cached[helpModeHelp] == "" {
 						m.helpLoadingFor = mt.Name
@@ -669,6 +820,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.focus = focusHelp
 				m.helpMode = helpModeMan
 				if mt, ok := m.selectedMeta(); ok {
+					// See [h]: an explicit [m] also dismisses a completed update
+					// log so the man page is reachable again.
+					if m.updateLogFor == mt.Name && m.updatingFor != mt.Name {
+						m.updateLogFor = ""
+					}
 					cached := m.helpCache[mt.Name]
 					if cached[helpModeMan] == "" {
 						m.helpLoadingFor = mt.Name
@@ -713,6 +869,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.mode = modeConfirmUntrack
 					m.untrackTarget = mt.Name
 					return m, nil
+				}
+			} else if m.focus == focusBrief {
+				// Update the selected tool: only when it has a pending release
+				// (else a hint) and no update is already running (one at a time,
+				// no queue). Detection spawns subprocesses, so it runs in a
+				// tea.Cmd — the updateDetectedMsg handler opens the confirm mode.
+				if m.updatingFor != "" {
+					return m, nil
+				}
+				if t, ok := m.selectedTool(); ok {
+					if !m.hasUpdate(t.Name) {
+						m.statusMsg = "no update available for " + t.Name
+						return m, nil
+					}
+					return m, detectUpdateCmd(t)
 				}
 			}
 
@@ -795,12 +966,29 @@ func (m Model) selectedTool() (loader.Tool, bool) {
 	if !ok {
 		return loader.Tool{}, false
 	}
+	return m.toolByName(mt.Name)
+}
+
+// toolByName returns the tracked tool with the given name (and false when it is
+// no longer tracked — e.g. untracked mid-update). It backs updateDoneMsg's
+// re-fetch, which fires for a tool that need not be the selected one.
+func (m Model) toolByName(name string) (loader.Tool, bool) {
 	for _, t := range m.tools {
-		if t.Name == mt.Name {
+		if t.Name == name {
 			return t, true
 		}
 	}
 	return loader.Tool{}, false
+}
+
+// tailLines joins the last n entries of the update log into a single
+// space-separated string for the failure log line; fewer than n lines are all
+// returned. Kept small on purpose — the log record wants a hint, not the buffer.
+func tailLines(lines []string, n int) string {
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	return strings.Join(lines, " ")
 }
 
 // searchQuery returns the normalized (lowercase, trimmed) live query, or ""

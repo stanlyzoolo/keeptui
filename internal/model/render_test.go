@@ -2997,3 +2997,192 @@ func TestRenderStatusBarFocusHelp(t *testing.T) {
 		}
 	})
 }
+
+// TestParseHelpEntriesReviewRegressions pins the parser fixes from the code
+// review: flag-prefixed continuation lines, justified man prose, and
+// multi-paragraph descriptions.
+func TestParseHelpEntriesReviewRegressions(t *testing.T) {
+	const wide = 200
+
+	t.Run("flag token in continuation stays inside the entry", func(t *testing.T) {
+		raw := strings.Join([]string{
+			"OPTIONS:",
+			"  --ignore",
+			"          Respect ignore files.",
+			"          This flag can be overridden with",
+			"          --no-ignore.",
+		}, "\n")
+		got := parseHelpEntries(raw, wide)
+		want := []entryRange{{start: 1, end: 5}}
+		if len(got) != 1 || got[0] != want[0] {
+			t.Errorf("parseHelpEntries = %v, want %v (deeper --no-ignore. is description, not a new entry)", got, want)
+		}
+	})
+
+	t.Run("justified man prose is not a subcommand row", func(t *testing.T) {
+		raw := strings.Join([]string{
+			"DESCRIPTION",
+			"     tree.  See also git-log(1) for details.",
+			"     branch.  Another justified sentence gap.",
+		}, "\n")
+		if got := parseHelpEntries(raw, wide); got != nil {
+			t.Errorf("parseHelpEntries = %v, want nil (sentence-period + double space is prose)", got)
+		}
+	})
+
+	t.Run("blank line inside a multi-paragraph description", func(t *testing.T) {
+		raw := strings.Join([]string{
+			"  -p, --paginate",
+			"          First paragraph of the description.",
+			"",
+			"          Second paragraph, same option.",
+			"  -q, --quiet",
+		}, "\n")
+		got := parseHelpEntries(raw, wide)
+		want := []entryRange{{start: 0, end: 4}, {start: 4, end: 5}}
+		if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+			t.Errorf("parseHelpEntries = %v, want %v (blank line keeps the paragraphs together)", got, want)
+		}
+	})
+
+	t.Run("blank line before the next entry still terminates", func(t *testing.T) {
+		raw := strings.Join([]string{
+			"  completion  Generate the autocompletion script",
+			"",
+			"  help        Help about any command",
+		}, "\n")
+		got := parseHelpEntries(raw, wide)
+		if len(got) != 2 || got[0] != (entryRange{start: 0, end: 1}) || got[1] != (entryRange{start: 2, end: 3}) {
+			t.Errorf("parseHelpEntries = %v, want two single-line entries", got)
+		}
+	})
+}
+
+// TestHelpNavArrowsKeepScrolling: with entries present, only j/k drive the
+// cursor — the arrows keep their 3-line scroll so prose stays reachable.
+func TestHelpNavArrowsKeepScrolling(t *testing.T) {
+	m := helpNavScrollModel()
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	nm := updated.(Model)
+	if nm.helpNavIdx != -1 {
+		t.Errorf("helpNavIdx = %d, want -1 (down arrow must not activate the cursor)", nm.helpNavIdx)
+	}
+	if nm.helpViewport.YOffset != 3 {
+		t.Errorf("YOffset = %d, want 3 (arrow line scroll)", nm.helpViewport.YOffset)
+	}
+
+	nm.helpNavIdx = 1
+	updated, _ = nm.Update(tea.KeyMsg{Type: tea.KeyUp})
+	nm = updated.(Model)
+	if nm.helpNavIdx != 1 {
+		t.Errorf("helpNavIdx = %d, want 1 (up arrow must not move the cursor)", nm.helpNavIdx)
+	}
+	if nm.helpViewport.YOffset != 0 {
+		t.Errorf("YOffset = %d, want 0 (scrolled back up)", nm.helpViewport.YOffset)
+	}
+}
+
+// TestHelpNavStartDirection: activation with no entry on screen goes to the
+// nearest entry in the movement direction, not blindly to the first
+// below-window entry.
+func TestHelpNavStartDirection(t *testing.T) {
+	// 12 lines of prose, then two entries, then more prose.
+	raw := "INTRO:\n" + strings.TrimRight(strings.Repeat("intro prose line\n", 11), "\n") +
+		"\n  --alpha\n          about alpha\n  --beta\n          about beta"
+	m := newTestModel(focusHelp)
+	m.helpW = 62
+	m.helpCache["git"] = [2]string{helpModeHelp: raw}
+	m.setHelpContent()
+	m.helpViewport = viewport.New(60, 4)
+	m.helpViewport.SetContent(m.renderHelpContent())
+	if len(m.helpEntries) != 2 {
+		t.Fatalf("helpEntries = %v, want 2", m.helpEntries)
+	}
+
+	t.Run("j goes to next entry below the window", func(t *testing.T) {
+		vm := m
+		vm.helpViewport.SetYOffset(0) // window [0,4): prose only
+		updated, _ := vm.Update(keyRunes("j"))
+		nm := updated.(Model)
+		if nm.helpNavIdx != 0 {
+			t.Errorf("helpNavIdx = %d, want 0 (next entry below)", nm.helpNavIdx)
+		}
+	})
+	t.Run("k goes to previous entry above the window", func(t *testing.T) {
+		vm := m
+		vm.helpViewport.SetContent(vm.renderHelpContent() + "\n" + strings.Repeat("tail\n", 20))
+		vm.helpViewport.SetYOffset(18) // window past both entries
+		updated, _ := vm.Update(keyRunes("k"))
+		nm := updated.(Model)
+		if want := len(nm.helpEntries) - 1; nm.helpNavIdx != want {
+			t.Errorf("helpNavIdx = %d, want %d (previous entry above)", nm.helpNavIdx, want)
+		}
+	})
+}
+
+// TestHelpOutputMsgHiddenModeKeepsCursor: a late fetch result for the mode
+// that is not on screen must not reset an active spotlight cursor.
+func TestHelpOutputMsgHiddenModeKeepsCursor(t *testing.T) {
+	m := helpNavModel() // displaying helpModeHelp
+	m.helpNavIdx = 1
+
+	updated, _ := m.Update(helpOutputMsg{toolName: "git", mode: helpModeMan, output: "MAN(1) page text"})
+	nm := updated.(Model)
+	if nm.helpNavIdx != 1 {
+		t.Errorf("helpNavIdx = %d, want 1 (hidden-mode arrival must not reset)", nm.helpNavIdx)
+	}
+	if nm.helpCache["git"][helpModeMan] == "" {
+		t.Errorf("man output was not cached")
+	}
+
+	// Same tool, displayed mode: text on screen changed — recompute + reset.
+	updated, _ = nm.Update(helpOutputMsg{toolName: "git", mode: helpModeHelp, output: navHelpFixture})
+	nm = updated.(Model)
+	if nm.helpNavIdx != -1 {
+		t.Errorf("helpNavIdx = %d, want -1 after displayed-mode arrival", nm.helpNavIdx)
+	}
+}
+
+// TestResizeHeightOnlyKeepsCursor: a resize that does not change the wrap
+// width leaves the entry ranges valid, so the cursor survives; a width
+// change recomputes and resets.
+func TestResizeHeightOnlyKeepsCursor(t *testing.T) {
+	m := newTestModel(focusHelp)
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 30})
+	m = updated.(Model)
+	m.helpCache["git"] = [2]string{helpModeHelp: navHelpFixture}
+	m.setHelpContent()
+	if len(m.helpEntries) != 2 {
+		t.Fatalf("helpEntries = %v, want 2", m.helpEntries)
+	}
+	m.helpNavIdx = 1
+
+	updated, _ = m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	nm := updated.(Model)
+	if nm.helpNavIdx != 1 {
+		t.Errorf("helpNavIdx = %d, want 1 (height-only resize keeps the cursor)", nm.helpNavIdx)
+	}
+
+	updated, _ = nm.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
+	nm = updated.(Model)
+	if nm.helpNavIdx != -1 {
+		t.Errorf("helpNavIdx = %d, want -1 (width change recomputes and resets)", nm.helpNavIdx)
+	}
+}
+
+// TestHelpBaseCache: setHelpContent caches the colorized base and the normal
+// render path serves it; the spotlight is applied over the cache.
+func TestHelpBaseCache(t *testing.T) {
+	forceColorProfile(t)
+	m := helpNavModel()
+	if m.helpBase == "" {
+		t.Fatalf("helpBase empty after setHelpContent")
+	}
+	if got := m.renderHelpContent(); got != m.helpBase {
+		t.Errorf("cursor-off render differs from cached base")
+	}
+	m.helpNavIdx = 0
+	if got := m.renderHelpContent(); got == m.helpBase || !strings.Contains(got, "38;2;136;136;136") {
+		t.Errorf("spotlight render did not dim over the cached base")
+	}
+}

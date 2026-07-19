@@ -166,6 +166,21 @@ Approach A from brainstorm: a **heuristic entry index over the already-wrapped l
 - [x] update `CLAUDE.md`: new "Help navigation" bullet in the TUI state-machine section (entry heuristic incl. the source-line/wrapLine mapping rationale, `setHelpContent` vs style-only split, activation/esc/scroll rules, status-bar swap) + `parseHelpEntries`/`wrapLine` added to the `textutil.go` row
 - [x] move this plan to `docs/plans/completed/`
 
+## Post-review fixes (workflow code review, 10 confirmed findings)
+
+All addressed in a follow-up commit:
+
+1. ➕ `helpNavStart(delta)` replaces `firstVisibleEntry` — requires the entry to *intersect* the window; with none visible, activation goes to the nearest entry in the movement direction (j → next below, k → previous above) instead of jumping to a below-the-fold entry.
+2. ➕ Only `j`/`k` navigate; `↑`/`↓` keep their 3-line scroll — prose between/after entries stays keyboard-reachable (the bar shows both hints).
+3. ➕ `continuesEntry`: a deeper-indented line beginning with a flag token (`…overridden with\n --no-ignore.`) is description, not a new entry.
+4. ➕ `helpEntrySubcmdRe` word class drops `.` — justified man prose (`tree.  See also…`) no longer reads as a subcommand row.
+5. ➕ Blank lines inside a deeper-indented description no longer terminate the entry (multi-paragraph man/clap descriptions stay one entry); a blank before a same-indent line still terminates.
+6. ➕ `helpOutputMsg` recompute gated on `msg.mode == m.helpMode` — a late fetch for the hidden mode doesn't reset an active cursor.
+7. ➕ Resize recompute gated on `helpWrapWidth()` change — height-only resizes keep the cursor.
+8. ➕ `m.helpBase` caches the wrapped+colorized content (built in `setHelpContent`); cursor-move repaints stop re-running the colorize regex over the whole document.
+9. ➕ `clearHelpNav()` extracts the triplicated clear-and-repaint block (esc, `/`, `setFocus`).
+10. ➕ `colorizeHelp` now calls `isHelpSectionHeader` — one header definition for styling and parsing.
+
 ## Post-Completion
 
 **Manual verification**:

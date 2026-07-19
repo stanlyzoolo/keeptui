@@ -252,8 +252,7 @@ func colorizeHelp(s string) string {
 	const reset = "\x1b[0m"
 	lines := strings.Split(s, "\n")
 	for i, line := range lines {
-		trimmed := strings.TrimRight(line, " ")
-		if trimmed != "" && trimmed[0] != ' ' && trimmed[0] != '\t' && strings.HasSuffix(trimmed, ":") {
+		if isHelpSectionHeader(line) {
 			lines[i] = ui.HelpSectionStyle.Render(line)
 			continue
 		}
@@ -301,15 +300,18 @@ var helpEntryFlagRe = regexp.MustCompile(`^\s*--?[a-zA-Z]`)
 // dash followed by 2+ spaces and description text (the shape of cobra/clap
 // command blocks). Indentation is required so unindented prose ("Usage: keys
 // [flags]", section text) never starts an entry; the word class has no ':' so
-// inline labels like "Note:" don't match.
-var helpEntrySubcmdRe = regexp.MustCompile(`^\s+[A-Za-z][A-Za-z0-9_.-]*\s{2,}\S`)
+// inline labels like "Note:" don't match, and no '.' so justified man-page
+// prose ("tree.  See also git-log(1)" — two spaces after a sentence period)
+// doesn't read as a subcommand row.
+var helpEntrySubcmdRe = regexp.MustCompile(`^\s+[A-Za-z][A-Za-z0-9_-]*\s{2,}\S`)
 
 func isHelpEntryStart(line string) bool {
 	return helpEntryFlagRe.MatchString(line) || helpEntrySubcmdRe.MatchString(line)
 }
 
-// isHelpSectionHeader mirrors colorizeHelp's header rule: an unindented line
-// ending in ':'.
+// isHelpSectionHeader is the single definition of a help section header — an
+// unindented line ending in ':'. Both colorizeHelp (styling) and
+// parseHelpEntries (entry boundaries) use it, so the two can't drift.
 func isHelpSectionHeader(line string) bool {
 	trimmed := strings.TrimRight(line, " ")
 	return trimmed != "" && trimmed[0] != ' ' && trimmed[0] != '\t' && strings.HasSuffix(trimmed, ":")
@@ -337,9 +339,11 @@ func helpIndent(line string) int {
 // viewport actually shows.
 //
 // An entry starts at a flag line or an indented subcommand row and continues
-// through lines indented deeper than its start line, ending at a blank line,
-// a section header, or the next entry start. Headers, Usage and free prose
-// belong to no entry.
+// through lines indented deeper than its start line — including deeper lines
+// that merely begin with a flag token ("…can be overridden with\n
+// --no-ignore.") and blank lines separating paragraphs of one description —
+// ending at a section header or the next line at the entry's own indent or
+// shallower. Headers, Usage and free prose belong to no entry.
 func parseHelpEntries(raw string, width int) []entryRange {
 	if raw == "" {
 		return nil
@@ -369,7 +373,23 @@ func parseHelpEntries(raw string, width int) []entryRange {
 		j := i + 1
 		for j < len(src) {
 			l := src[j]
-			if strings.TrimSpace(l) == "" || isHelpSectionHeader(l) || isHelpEntryStart(l) || helpIndent(l) <= indent {
+			if strings.TrimSpace(l) == "" {
+				// A blank line inside a multi-paragraph description does not
+				// end the entry (man pages and clap v4 separate paragraphs of
+				// one option with blank lines at the same deep indent): look
+				// past the blank run — if the next non-blank line still
+				// continues this entry, the paragraphs belong together.
+				k := j
+				for k < len(src) && strings.TrimSpace(src[k]) == "" {
+					k++
+				}
+				if k < len(src) && continuesEntry(src[k], indent) {
+					j = k + 1
+					continue
+				}
+				break
+			}
+			if !continuesEntry(l, indent) {
 				break
 			}
 			j++
@@ -378,6 +398,15 @@ func parseHelpEntries(raw string, width int) []entryRange {
 		i = j
 	}
 	return entries
+}
+
+// continuesEntry reports whether line belongs to the description block of an
+// entry whose start line has the given indent: deeper-indented and not a
+// section header. A deeper line that happens to begin with a flag token is a
+// description continuation, not a new entry — only a line at the entry's own
+// indent or shallower can start the next one.
+func continuesEntry(line string, indent int) bool {
+	return !isHelpSectionHeader(line) && helpIndent(line) > indent
 }
 
 func findMatches(text, query string) []int {

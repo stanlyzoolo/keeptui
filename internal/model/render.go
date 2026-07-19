@@ -126,12 +126,12 @@ func (m Model) renderStatusBar() string {
 		return m.renderHintsBar(style, hints)
 	}
 	if m.focus == focusHelp {
-		// With a navigable entry index j/k (and the arrows) drive the
-		// spotlight cursor, so the scroll label would lie; without entries
-		// (update log, placeholders, prose) they scroll as before.
+		// With a navigable entry index j/k drive the spotlight cursor while
+		// the arrows keep their line scroll — advertise both; without
+		// entries (update log, placeholders, prose) j/k scroll too.
 		scrollOrNav := keyHint("↑↓") + " scroll  "
 		if len(m.helpEntries) > 0 {
-			scrollOrNav = keyHint("j/k") + " navigate  "
+			scrollOrNav = keyHint("j/k") + " navigate  " + scrollOrNav
 		}
 		hints := scrollOrNav + keyHint("h") + " --help  " + keyHint("m") + " man  " + keyHint("/") + " search  " + keyHint("←") + " back  " + keyHint("q") + " quit"
 		if m.helpNavIdx >= 0 {
@@ -958,10 +958,18 @@ func (m Model) renderHelpContent() string {
 		}
 		return ui.MetaNoteStyle.Render("Press [m] for man page\nPress [h] for --help")
 	}
-	text := wrapText(cached[m.helpMode], m.helpWrapWidth())
 	if m.mode != modeHelpSearch || m.helpSearch.Value() == "" {
-		return m.applySpotlight(colorizeHelp(text))
+		// Cursor moves and clear-cursor repaints hit this path once per
+		// keystroke: reuse the base cached by setHelpContent instead of
+		// re-running the colorize regex over a whole man page each time.
+		// The fallback covers renders on models that haven't gone through
+		// setHelpContent (direct test construction).
+		if m.helpBase != "" {
+			return m.applySpotlight(m.helpBase)
+		}
+		return m.applySpotlight(colorizeHelp(wrapText(cached[m.helpMode], m.helpWrapWidth())))
 	}
+	text := wrapText(cached[m.helpMode], m.helpWrapWidth())
 	query := m.helpSearch.Value()
 	lines := strings.Split(text, "\n")
 	result := make([]string, len(lines))

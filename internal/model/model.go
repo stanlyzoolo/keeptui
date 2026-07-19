@@ -187,8 +187,12 @@ type Model struct {
 	// coordinates. helpNavIdx is the spotlight cursor over them: -1 = off
 	// (plain reading; the panel renders full-color). Empty helpEntries (update
 	// log, placeholders, prose-only help) leaves j/k as plain scroll.
+	// helpBase caches the wrapped+colorized full-color content, recomputed
+	// only in setHelpContent — cursor moves repaint per keystroke and must not
+	// re-run the colorizeHelp regex over a whole man page each time.
 	helpEntries []entryRange
 	helpNavIdx  int
+	helpBase    string
 
 	toolsW int
 	briefW int
@@ -436,7 +440,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			cached[msg.mode] = "No man page for " + msg.toolName + ".\nPress [h] for --help."
 		}
 		m.helpCache[msg.toolName] = cached
-		if mt, ok := m.selectedMeta(); ok && mt.Name == msg.toolName {
+		// Recompute only when the arrival changes the text on screen: the
+		// selected tool AND the displayed mode. A late fetch for the hidden
+		// mode (slow --help landing after the user switched to [m]) must not
+		// reset an active spotlight cursor over unchanged visible text.
+		if mt, ok := m.selectedMeta(); ok && mt.Name == msg.toolName && msg.mode == m.helpMode {
 			m.setHelpContent()
 		}
 		return m, nil
@@ -534,6 +542,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, fetchInstalledCmd(t)
 
 	case tea.WindowSizeMsg:
+		prevWrapW := m.helpWrapWidth()
 		m.width = msg.Width
 		m.height = msg.Height
 		m.toolsW, m.briefW, m.helpW = m.calcPanelWidths()
@@ -554,10 +563,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.briefViewport.Height = vpH
 			m.helpViewport.Width = m.helpW - 1
 			m.helpViewport.Height = vpH
-			// The wrap width changed with the panel width: re-wrap the help
-			// text and recompute the entry index (resetting the cursor —
-			// stale wrapped-line ranges would dim the wrong lines).
-			m.setHelpContent()
+			// Re-wrap and recompute the entry index (resetting the cursor —
+			// stale wrapped-line ranges would dim the wrong lines) only when
+			// the wrap width actually changed: a height-only resize (tmux bar
+			// toggle, vertical resize) leaves every entry range valid, so an
+			// active spotlight survives it.
+			if m.helpWrapWidth() != prevWrapW {
+				m.setHelpContent()
+			}
 		}
 		m.toolsViewport.SetContent(m.renderLeftContent())
 		m.syncToolsViewport()
@@ -694,9 +707,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// First esc only exits the navigation cursor (spotlight off,
 				// scroll position kept); the next esc walks focus left as
 				// usual.
-				if m.helpNavIdx >= 0 {
-					m.helpNavIdx = -1
-					m.helpViewport.SetContent(m.renderHelpContent())
+				if m.clearHelpNav() {
 					return m, nil
 				}
 				m.setFocus(focusBrief)
@@ -740,11 +751,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.selectMeta((m.metaSelected + 1) % n)
 				}
 			} else {
-				// In [3] with a navigable entry index, j/k drive the spotlight
-				// cursor instead of scrolling (PgUp/PgDn/g/G/wheel stay pure
-				// scroll); with no entries (update log, placeholders, prose)
-				// they keep scrolling as before.
-				if m.focus == focusHelp && len(m.helpEntries) > 0 {
+				// In [3] with a navigable entry index, j drives the spotlight
+				// cursor; the arrows deliberately keep their line scroll so
+				// prose between and after entries stays reachable without a
+				// mouse (PgUp/PgDn/g/G/wheel stay pure scroll too). With no
+				// entries (update log, placeholders, prose) j scrolls as
+				// before.
+				if msg.String() == "j" && m.focus == focusHelp && len(m.helpEntries) > 0 {
 					m.helpNavStep(1)
 					return m, nil
 				}
@@ -768,7 +781,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.selectMeta((m.metaSelected - 1 + n) % n)
 				}
 			} else {
-				if m.focus == focusHelp && len(m.helpEntries) > 0 {
+				// See "j": only the letter key navigates, arrows keep line
+				// scroll.
+				if msg.String() == "k" && m.focus == focusHelp && len(m.helpEntries) > 0 {
 					m.helpNavStep(-1)
 					return m, nil
 				}
@@ -813,12 +828,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "/":
 			if m.focus == focusBrief || m.focus == focusHelp {
 				// The help search owns the panel's highlighting: drop an
-				// active spotlight cursor (and repaint, or the dim would
-				// linger — nothing re-renders help until the first keystroke).
-				if m.helpNavIdx >= 0 {
-					m.helpNavIdx = -1
-					m.helpViewport.SetContent(m.renderHelpContent())
-				}
+				// active spotlight cursor before entering the mode.
+				m.clearHelpNav()
 				m.mode = modeHelpSearch
 				m.helpSearch.Focus()
 				return m, textinput.Blink
@@ -1149,27 +1160,48 @@ func (m Model) helpWrapWidth() int {
 func (m *Model) setHelpContent() {
 	m.helpEntries = nil
 	m.helpNavIdx = -1
+	m.helpBase = ""
 	// The update log and the loading state render instead of help text; both
 	// leave the entry index empty so j/k stay plain scroll. A cache miss or
 	// stored "No --help output…" fallback yields no entries via the parser.
 	if mt, ok := m.selectedMeta(); ok && m.updateLogFor != mt.Name && m.helpLoadingFor != mt.Name {
-		m.helpEntries = parseHelpEntries(m.rawHelpText(), m.helpWrapWidth())
+		if raw := m.rawHelpText(); raw != "" {
+			m.helpEntries = parseHelpEntries(raw, m.helpWrapWidth())
+			// Built here, not via renderHelpContent: the render can be in the
+			// search-highlight branch mid-search, and the cache must always
+			// hold the plain full-color base the spotlight dims against.
+			m.helpBase = colorizeHelp(wrapText(raw, m.helpWrapWidth()))
+		}
 	}
 	m.helpViewport.SetContent(m.renderHelpContent())
 }
 
+// clearHelpNav turns the spotlight cursor off and repaints the help viewport
+// when it was on, reporting whether it was. Every path that deactivates
+// navigation (esc, entering help search, any focus move) must repaint through
+// here — clearing the index without the repaint leaves stale dimming on
+// screen, because nothing else re-renders help on those paths.
+func (m *Model) clearHelpNav() bool {
+	if m.helpNavIdx < 0 {
+		return false
+	}
+	m.helpNavIdx = -1
+	m.helpViewport.SetContent(m.renderHelpContent())
+	return true
+}
+
 // helpNavStep moves the [3] spotlight cursor. The first press lands on the
-// first entry visible in the current window — the user's reading position,
-// not the document top — later presses step by delta, clamped at the ends
-// (no wrap: cycling around a multi-screen man page is disorienting). The
-// repaint is style-only — the entry index is unchanged, so setHelpContent
-// (which would reset the cursor it just moved) must not run here.
+// entry at the user's reading position (helpNavStart) — not the document
+// top — later presses step by delta, clamped at the ends (no wrap: cycling
+// around a multi-screen man page is disorienting). The repaint is
+// style-only — the entry index is unchanged, so setHelpContent (which would
+// reset the cursor it just moved) must not run here.
 func (m *Model) helpNavStep(delta int) {
 	if len(m.helpEntries) == 0 {
 		return
 	}
 	if m.helpNavIdx < 0 {
-		m.helpNavIdx = m.firstVisibleEntry()
+		m.helpNavIdx = m.helpNavStart(delta)
 	} else {
 		m.helpNavIdx = min(max(m.helpNavIdx+delta, 0), len(m.helpEntries)-1)
 	}
@@ -1177,12 +1209,30 @@ func (m *Model) helpNavStep(delta int) {
 	m.scrollToNavEntry()
 }
 
-// firstVisibleEntry returns the first entry at least partially visible in
-// the window (its end is below the top edge); when the view is scrolled past
-// every entry, the last one.
-func (m Model) firstVisibleEntry() int {
+// helpNavStart picks the entry the first navigation press lands on: the
+// first entry intersecting the visible window. When no entry is on screen
+// (reading prose between option blocks), the nearest entry in the movement
+// direction — the next one below for j, the previous one above for k — so
+// activation continues from the reading position instead of jumping to an
+// arbitrary off-screen entry; clamped to the ends.
+func (m Model) helpNavStart(delta int) int {
+	top := m.helpViewport.YOffset
+	bottom := top + m.helpViewport.Height
 	for i, e := range m.helpEntries {
-		if e.end > m.helpViewport.YOffset {
+		if e.end > top && e.start < bottom {
+			return i
+		}
+	}
+	if delta < 0 {
+		for i := len(m.helpEntries) - 1; i >= 0; i-- {
+			if m.helpEntries[i].end <= top {
+				return i
+			}
+		}
+		return 0
+	}
+	for i, e := range m.helpEntries {
+		if e.start >= bottom {
 			return i
 		}
 	}
@@ -1215,14 +1265,9 @@ func (m *Model) setFocus(f int) {
 		return
 	}
 	m.focus = f
-	// The spotlight cursor is an attribute of actively reading [3]: any focus
-	// move clears it, and the help viewport must repaint when it was on —
-	// nothing else re-renders help on a focus change, so skipping this would
-	// leave stale dimming on screen.
-	if m.helpNavIdx >= 0 {
-		m.helpNavIdx = -1
-		m.helpViewport.SetContent(m.renderHelpContent())
-	}
+	// The spotlight cursor is an attribute of actively reading [3]: any
+	// focus move clears it (with the repaint clearHelpNav guarantees).
+	m.clearHelpNav()
 	m.setToolsContent()
 }
 

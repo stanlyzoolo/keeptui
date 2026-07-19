@@ -269,7 +269,9 @@ func (m Model) updateConfirmUpdate(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.updateLog = nil
 		m.updateLogFor = mt.Name
 		m.briefViewport.SetContent(m.renderCard())
-		m.helpViewport.SetContent(m.renderHelpContent())
+		// Text-change transition: [3] switches from help to the live log, so
+		// the entry index empties and any spotlight cursor resets.
+		m.setHelpContent()
 		return m, tea.Batch(
 			m.spinner.Tick,
 			startUpdateCmd(m.updatePlan, mt.Name),

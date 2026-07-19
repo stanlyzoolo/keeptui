@@ -110,6 +110,13 @@ var (
 	HelpMetaStyle = lipgloss.NewStyle().
 			Foreground(ColorMeta)
 
+	// HelpDimStyle repaints help lines outside the spotlighted entry while the
+	// [3] panel's navigation cursor is active. Same color as OverlayDimStyle
+	// today, but a separate name: the reading tint can be tuned without
+	// touching the overlay compositor.
+	HelpDimStyle = lipgloss.NewStyle().
+			Foreground(ColorDim)
+
 	MetaTagStyle = lipgloss.NewStyle().
 			Foreground(ColorMeta)
 

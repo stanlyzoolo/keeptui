@@ -231,14 +231,14 @@ func (m *Model) autoFetchCmdsForSelected() tea.Cmd {
 			// set helpLoadingFor) — a late helpOutputMsg or the "Loading..."
 			// state would clobber the log. Just render the log branch, scrolled
 			// to the tail so the newest output is visible on re-selection.
-			m.helpViewport.SetContent(m.renderHelpContent())
+			m.setHelpContent()
 			m.helpViewport.GotoBottom()
 		case m.helpCache[mt.Name][m.helpMode] == "":
 			m.helpLoadingFor = mt.Name
-			m.helpViewport.SetContent(m.renderHelpContent())
+			m.setHelpContent()
 			cmds = append(cmds, fetchHelpCmd(mt.Name, m.helpMode))
 		default:
-			m.helpViewport.SetContent(m.renderHelpContent())
+			m.setHelpContent()
 			m.helpViewport.GotoTop()
 		}
 	}

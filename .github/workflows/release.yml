@@ -48,13 +48,13 @@ jobs:
           if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
           go build -buildvcs=false -trimpath \
             -ldflags="-s -w -X main.version=${{ github.ref_name }}" \
-            -o "keys-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}" .
+            -o "keeptui-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}" .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: keys-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: keys-${{ matrix.goos }}-${{ matrix.goarch }}*
+          name: keeptui-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: keeptui-${{ matrix.goos }}-${{ matrix.goarch }}*
 
   release:
     name: Create Release
@@ -66,12 +66,12 @@ jobs:
           merge-multiple: true
 
       - name: Create checksums
-        run: sha256sum keys-* > checksums.txt
+        run: sha256sum keeptui-* > checksums.txt
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            keys-*
+            keeptui-*
             checksums.txt
           generate_release_notes: true

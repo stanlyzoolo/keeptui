@@ -35,16 +35,16 @@ tools right from the interface. Pure TUI — no subcommands.
 From source (requires Go 1.25+):
 
 ```bash
-git clone https://github.com/stanlyzoolo/keepkeys
-cd keepkeys
+git clone https://github.com/stanlyzoolo/keeptui
+cd keeptui
 go install .
 ```
 
-The binary lands in `~/go/bin/keys`. Make sure `~/go/bin` is on your `PATH`.
+The binary lands in `~/go/bin/keeptui`. Make sure `~/go/bin` is on your `PATH`.
 
 ## Usage
 
-Run `keys` — the three-panel interface opens. Focus moves with `←` / `→` or the
+Run `keeptui` — the three-panel interface opens. Focus moves with `←` / `→` or the
 digits `1` / `2` / `3` (each panel's number is written in its title).
 
 ### Panel `[1] Tools`
@@ -60,7 +60,7 @@ digits `1` / `2` / `3` (each panel's number is written in its title).
 | `esc`, `q`, `ctrl+c` | quit |
 
 When you enter a GitHub URL (`https://github.com/owner/repo`, with `.git`, without a
-scheme, or in SSH form `git@github.com:owner/repo.git`), `keys` puts the short tool
+scheme, or in SSH form `git@github.com:owner/repo.git`), `keeptui` puts the short tool
 name into `name` and the normalized `github.com/owner/repo` into the `github` field.
 A new tool gets the `trying` status.
 
@@ -101,7 +101,7 @@ the log stays available after completion — until the next update.
 ## Updating tools
 
 When the installed version lags behind the latest release (the `↑` marker), press `u`
-in the brief panel. `keys` detects the package manager the binary was installed with:
+in the brief panel. `keeptui` detects the package manager the binary was installed with:
 
 - `brew` — a `/Cellar/<formula>/…` path → `brew upgrade <formula>`;
 - `go` — buildinfo (`go version -m`) with a `path` field → `go install <module>@latest`;
@@ -116,7 +116,7 @@ marker disappears, and the tool leaves the update group. One update runs at a ti
 a command gets 10 minutes (a sudo password prompt inside it fails fast instead of
 hanging).
 
-If the manager cannot be detected (manual install), `keys` suggests setting the
+If the manager cannot be detected (manual install), `keeptui` suggests setting the
 `update_cmd` field or updating manually (`o` opens the releases page). `update_cmd`
 in `meta.yaml` always takes precedence over auto-detection and runs via `sh -c`
 (pipes and `&&` are fine):
@@ -129,7 +129,7 @@ in `meta.yaml` always takes precedence over auto-detection and runs via `sh -c`
 
 ## GitHub API and token
 
-`keys` fetches releases and repository cards through the GitHub REST API. Without a
+`keeptui` fetches releases and repository cards through the GitHub REST API. Without a
 token the limit is **60 requests per hour** per IP, with a token — **5000**. Each
 tool with a `github` field costs 3 requests, so a cold start with a large list and no
 token can hit the limit — cards stay empty until the window resets.
@@ -144,24 +144,24 @@ exhausted) and the reset time. Right in the overlay:
 - `r` — refresh the numbers; `esc` / `q` — close.
 
 The token source follows environment precedence: the `GITHUB_TOKEN` variable always
-wins over the file. A token entered in the TUI is stored in `~/.config/keys/token`
+wins over the file. A token entered in the TUI is stored in `~/.config/keeptui/token`
 with `0600` permissions; an environment token is never written to disk. When the
 quota is exhausted, already-loaded cards are not erased, and a card with no data
 shows the `rate limited — press [L]` hint.
 
 ## Data storage
 
-The tool list lives in `~/.config/keys/meta.yaml` — one entry per tool (`name`,
+The tool list lives in `~/.config/keeptui/meta.yaml` — one entry per tool (`name`,
 `status`, `added`, optionally `tags`, `note`, `github`, `update_cmd`). The file is
 fully managed from the TUI; editing it by hand is not required but safe — writes are
 atomic.
 
 | What | Where |
 |------|-------|
-| Tracker metadata | `~/.config/keys/meta.yaml` |
-| Version cache (24h TTL) | `~/.config/keys/cache.json` |
-| GitHub token (`0600`) | `~/.config/keys/token` |
-| Session error log | `~/.config/keys/logs/keeptui-<timestamp>.log` |
+| Tracker metadata | `~/.config/keeptui/meta.yaml` |
+| Version cache (24h TTL) | `~/.config/keeptui/cache.json` |
+| GitHub token (`0600`) | `~/.config/keeptui/token` |
+| Session error log | `~/.config/keeptui/logs/keeptui-<timestamp>.log` |
 
 The log is created lazily — only on the first error. A session with no errors leaves
 no file at all, so the presence of a file is itself the signal. The 20 most recent

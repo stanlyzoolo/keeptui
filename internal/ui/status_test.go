@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/lepeshko/keys/internal/loader"
+	"github.com/stanlyzoolo/keeptui/internal/loader"
 )
 
 func TestStatusStyle(t *testing.T) {

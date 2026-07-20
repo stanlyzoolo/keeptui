@@ -1,5 +1,5 @@
 // Package logx is a dependency-free, errors-only session logger. It writes one
-// plain-text file per session under ~/.config/keys/logs, created lazily on the
+// plain-text file per session under ~/.config/keeptui/logs, created lazily on the
 // first write. A session with no errors leaves no file at all — the presence of
 // a file is itself the signal that something went wrong.
 //
@@ -27,7 +27,7 @@ var (
 	dirOverride string // test seam; empty in production
 )
 
-// logDir resolves ~/.config/keys/logs via os.UserConfigDir, honoring the test
+// logDir resolves ~/.config/keeptui/logs via os.UserConfigDir, honoring the test
 // override. Mirrors loader.MetaPath's resolution. Caller holds mu.
 func logDir() string {
 	if dirOverride != "" {
@@ -37,7 +37,7 @@ func logDir() string {
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(base, "keys", "logs")
+	return filepath.Join(base, "keeptui", "logs")
 }
 
 // SetDirForTesting redirects the log directory and resets all logger state, so

@@ -2,7 +2,7 @@ package ui
 
 import (
 	"github.com/charmbracelet/lipgloss"
-	"github.com/lepeshko/keys/internal/loader"
+	"github.com/stanlyzoolo/keeptui/internal/loader"
 )
 
 func StatusStyle(s loader.Status) lipgloss.Style {

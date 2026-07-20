@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/lepeshko/keys/internal/loader"
-	"github.com/lepeshko/keys/internal/logx"
+	"github.com/stanlyzoolo/keeptui/internal/loader"
+	"github.com/stanlyzoolo/keeptui/internal/logx"
 )
 
 const cacheTTL = 24 * time.Hour
@@ -608,7 +608,7 @@ func cacheFilePath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, "keys", "cache.json"), nil
+	return filepath.Join(base, "keeptui", "cache.json"), nil
 }
 
 func LoadCache() Cache {

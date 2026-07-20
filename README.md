@@ -1,23 +1,11 @@
-# keys
+# keeptui
 
 A terminal TUI tracker for CLI tools: a list of tracked tools, a card with repository
 data, versions and notes, built-in `--help` / `man` viewing, and updating outdated
 tools right from the interface. Pure TUI — no subcommands; the only flags are
 `--version` and `--help`.
 
-```
-┌─ [1] Tools ────────┬─ [2] Brief ─────────────────────────┬─ [3] Help ──────────┐
-│ ⏺ neovim ↑         │ neovim — hyperextensible Vim editor │ Usage: nvim [opts]  │
-│   ripgrep          │                                     │                     │
-│   fzf              │ [info]                              │   -d    diff mode   │
-│   tmux             │ repo:      github.com/neovim/neovim │   -es   ex script   │
-│   yazi             │ installed: v0.10.4                  │   ...               │
-│                    │ latest:    v0.11.1 ↑ (2026-03-26)   │                     │
-│                    │ [notes]                             │                     │
-│                    │ status: ● active    tags: editor    │                     │
-└────────────────────┴─────────────────────────────────────┴─────────────────────┘
- [o] open repo  [c] changelog  [u] update  [s] status  [q] quit   ▮▮▮░░░ 12/60 [L]
-```
+![keeptui — three-panel overview: tracker list, tool card, help viewer, live search and the hotkeys overlay](demo/hero.gif)
 
 ## Features
 
@@ -124,6 +112,8 @@ While a tool is being updated, this panel (`[3] Update`) shows the live command 
 the log stays available after completion — until the next update.
 
 ## Updating tools
+
+![in-TUI update — detect the manager, confirm the command, stream the log into panel [3]](demo/update.gif)
 
 When the installed version lags behind the latest release (the `↑` marker), press `u`
 in the brief panel. `keeptui` detects the package manager the binary was installed with:

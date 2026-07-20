@@ -3239,10 +3239,10 @@ func TestRenderHotkeysSizeBudget(t *testing.T) {
 	if !strings.Contains(view, "close") {
 		t.Errorf("size budget: title close hint clipped off the top")
 	}
-	// Bottom-most Scrolling row: [ctrl+f/b] [space] [PgUp/PgDn] page — its
-	// trailing word survives only if nothing was clipped off the bottom or the
-	// right edge.
-	if !strings.Contains(view, "page") {
+	// Bottom-most, right-most row: [g/G] top / bottom (last Scrolling row in the
+	// last column) — its trailing word survives only if nothing was clipped off
+	// the bottom or the right edge.
+	if !strings.Contains(view, "top / bottom") {
 		t.Errorf("size budget: last Scrolling row clipped (bottom/right overflow)")
 	}
 	// The framed overlay must be <= the 20-row background height.

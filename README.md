@@ -1,120 +1,125 @@
 # keys
 
-Terminal TUI-трекер CLI-инструментов: список отслеживаемых инструментов, карточка с
-информацией о репозитории и встроенный просмотр `--help` / `man`. Чистый TUI — без
-подкоманд.
+A terminal TUI tracker for CLI tools: a list of tracked tools, a card with repository
+data, versions and notes, built-in `--help` / `man` viewing, and updating outdated
+tools right from the interface. Pure TUI — no subcommands.
 
 ```
-┌─ tools ───┬─ brief ───────────────────────────────┬─ --help ────────────┐
-│ ▸ neovim  │ neovim — Hyperextensible Vim editor    │ Usage: nvim [opts]  │
-│   tmux    │ ── info ─────────────────────────────  │                     │
-│ ▎ yazi    │ repo: github.com/neovim/neovim          │   -d        diff    │
-│   helix   │ installed: v0.9.5   latest: v0.10.1 ↑   │   -es       script  │
-│   fzf     │ ── notes ────────────────────────────  │   ...               │
-│   ...     │ status: ● active   tags: editor         │                     │
-└───────────┴─────────────────────────────────────────┴─────────────────────┘
-  [o] open repo  [c] changelog  [s] status  [e] note  [t] tags  [q] quit
+┌─ [1] Tools ────────┬─ [2] Brief ─────────────────────────┬─ [3] Help ──────────┐
+│ ⏺ neovim ↑         │ neovim — hyperextensible Vim editor │ Usage: nvim [opts]  │
+│   ripgrep          │                                     │                     │
+│   fzf              │ [info]                              │   -d    diff mode   │
+│   tmux             │ repo:      github.com/neovim/neovim │   -es   ex script   │
+│   yazi             │ installed: v0.10.4                  │   ...               │
+│                    │ latest:    v0.11.1 ↑ (2026-03-26)   │                     │
+│                    │ [notes]                             │                     │
+│                    │ status: ● active    tags: editor    │                     │
+└────────────────────┴─────────────────────────────────────┴─────────────────────┘
+ [o] open repo  [c] changelog  [u] update  [s] status  [q] quit   ▮▮▮░░░ 12/60 [L]
 ```
 
-## Возможности
+## Features
 
-- **Три панели**: tools (список трекера), brief (карточка инструмента), help (`--help` / `man`)
-- **Карточка инструмента** — репозиторий, звёзды, последний релиз, языки, статус сопровождения, заметка и теги
-- **Действия на карточке** — `o` открыть репозиторий, `c` открыть changelog/releases в браузере, `s` сменить статус, `e` заметка, `t` теги
-- **Версии и changelog** — установленная и актуальная версия с GitHub подгружаются автоматически; устаревшая установка помечается `↑` в списке и подсветкой `latest:` в карточке
-- **Обновление из TUI** — `u` на карточке с меткой `↑` определяет пакетный менеджер (brew / go / cargo / pipx / npm) или использует заданную команду `update_cmd`, показывает её для подтверждения и запускает с живым выводом в панели help
-- **Поиск** — `/` в панели tools фильтрует список по имени и тегам с подсветкой совпадения и счётчиком `N/M` (`↑` / `↓` — по совпадениям, `enter` — открыть карточку, `esc` — отмена); в панели help ищет по тексту `--help` / `man` с подсветкой совпадений
-- **Трекер инструментов** — статусы, теги и заметки прямо в TUI
-- **Мышь** — поддержка скролла и клика
+- **Three panels**: tools (the tracker list), brief (the tool card), help (`--help` / `man`)
+- **Tool card** — repository, stars, languages, installed and latest version with release date, status, note and tags
+- **Versions** — the installed version is detected locally, the latest is fetched from GitHub; an outdated install is marked with `↑` in the list and on the card, and tools with an available update are grouped at the top of the list
+- **In-TUI updates** — `u` on the card detects the package manager (brew / go / cargo / pipx / npm) or uses `update_cmd` from `meta.yaml`, shows the command for confirmation and streams its output into panel `[3]` in real time
+- **Help navigation** — `j` / `k` walk through flags and subcommands with the current entry highlighted; `/` searches the text
+- **List search** — `/` filters by name and tags with match highlighting and an `N/M` counter
+- **Tracker** — add by GitHub URL, statuses, tags and notes, all inside the TUI
+- **GitHub API gauge** — an API quota usage indicator in the status bar, token management via `L`
+- **Mouse** — scrolling and clicking on panels
 
-## Установка
+## Installation
 
-**Из исходников** (требуется Go 1.25+):
+From source (requires Go 1.25+):
 
 ```bash
-git clone https://github.com/lepeshko/keys
-cd keys
+git clone https://github.com/stanlyzoolo/keepkeys
+cd keepkeys
 go install .
 ```
 
-Бинарник попадает в `~/go/bin/keys`. Убедись, что `~/go/bin` есть в `PATH`.
+The binary lands in `~/go/bin/keys`. Make sure `~/go/bin` is on your `PATH`.
 
-## Использование
+## Usage
 
-`keys` — чистый TUI без подкоманд: запусти `keys` и работай в интерфейсе. Управление трекером
-(добавление/удаление/переименование инструментов), статусы, заметки и теги — всё внутри TUI.
+Run `keys` — the three-panel interface opens. Focus moves with `←` / `→` or the
+digits `1` / `2` / `3` (each panel's number is written in its title).
 
-```
-keys                          открыть TUI
-```
+### Panel `[1] Tools`
 
-Интерфейс состоит из трёх панелей; фокус переключается клавишами `←` / `→`:
+| Key | Action |
+|-----|--------|
+| `j / k`, `↑ / ↓` | navigate the list (wraps around the edges) |
+| `t` | track — add a tool by GitHub URL or short name |
+| `u` | untrack — remove (with confirmation) |
+| `r` | rename — fix the binary name when it differs from the repo name (e.g. `claude-code` → `claude`) |
+| `/` | search by name and tags: the matched substring is highlighted, tag-only matches show the tag dimmed, the status bar shows an `N/M` counter; `↑` / `↓` move through matches, `enter` opens the card, `esc` cancels and restores the previous selection |
+| `L` | GitHub API status — limits and token (see below) |
+| `esc`, `q`, `ctrl+c` | quit |
 
-- **tools** (слева) — список отслеживаемых инструментов;
-- **brief** (по центру) — карточка с информацией о репозитории, статусом, заметкой и тегами;
-- **help** (справа) — вывод `--help` / `man` для выбранного инструмента.
+When you enter a GitHub URL (`https://github.com/owner/repo`, with `.git`, without a
+scheme, or in SSH form `git@github.com:owner/repo.git`), `keys` puts the short tool
+name into `name` and the normalized `github.com/owner/repo` into the `github` field.
+A new tool gets the `trying` status.
 
-### Панель tools
+The selected row carries the `⏺` marker, which stays visible (dimmed) while another
+panel is focused. Tools with an available update are marked `↑` and gathered at the
+top of the list; the order in `meta.yaml` is never changed.
 
-| Клавиша | Действие |
-|---------|----------|
-| `↑ / ↓` | навигация по списку инструментов |
-| `t` | track — добавить по GitHub-ссылке или короткому имени |
-| `u` | untrack — удалить (с подтверждением `enter` / `esc`) |
-| `r` | rename — поправить имя бинарника, если оно отличается от имени репозитория (напр. `claude-code` → `claude`) |
-| `/` | поиск по списку: ввод фильтрует по имени и тегам (совпавшая подстрока подсвечивается, у матчей только по тегу тег показан тускло, в статус-баре счётчик `N/M`), `↑` / `↓` — по совпадениям, `enter` — открыть карточку, `esc` — отмена с возвратом к прежнему выбору (выбор во время поиска — только с клавиатуры, клики не работают) |
-| `L` | статус GitHub API — лимиты и токен (см. ниже) |
-| `→` | перейти к панели brief |
-| `q`, `ctrl+c` | выход |
+### Panel `[2] Brief`
 
-При вводе GitHub-ссылки (`https://github.com/owner/repo`, с `.git`, без схемы или в SSH-форме `git@github.com:owner/repo.git`) `keys` подставит короткое имя инструмента (`repo`) в `name` и нормализованный `github.com/owner/repo` в поле `github`. Новый инструмент получает статус `trying`.
+| Key | Action |
+|-----|--------|
+| `o` | open the repository in the browser |
+| `c` | open the changelog / releases page in the browser |
+| `u` | update the tool (available when marked `↑`); `enter` runs the shown command, `esc` cancels |
+| `r` | force-refresh the card data, bypassing the cache |
+| `s` | cycle the status (`active → trying → inactive → active`) |
+| `e` | edit the note |
+| `t` | edit the tags |
+| `↑ / ↓` | scroll the card |
 
-### Панель brief (карточка)
+Statuses: `active` (●) · `trying` (○) · `inactive` (✕) — shown on the card.
+Legacy `forgotten` / `archived` values from `meta.yaml` are automatically read as
+`inactive`.
 
-| Клавиша | Действие |
-|---------|----------|
-| `o` | открыть репозиторий в браузере |
-| `c` | открыть changelog / releases в браузере |
-| `u` | обновить инструмент (доступно, когда установленная версия устарела — метка `↑`); подтверждение команды `enter` / `esc`, живой вывод в панели help |
-| `r` | обновить данные карточки (форс-рефреш, минуя кэш) |
-| `s` | сменить статус (`active → trying → inactive → active`) |
-| `e` | редактировать заметку |
-| `t` | редактировать теги |
-| `↑ / ↓` | прокрутка карточки |
-| `←` / `→` | перейти к панели tools / help |
-| `q` | выход |
+### Panel `[3] Help`
 
-Статусы: `active` (●) · `trying` (○) · `inactive` (✕). В списке tools строки со статусом
-`trying`/`inactive` помечены левой кромкой `▎` в цвете статуса; выбранная строка отмечена
-маркером `▸`, который остаётся видимым (приглушённым) и при фокусе на других панелях.
-Старые значения `forgotten`/`archived` из `meta.yaml` автоматически читаются как `inactive`.
+| Key | Action |
+|-----|--------|
+| `h` / `m` | `--help` / `man` mode (the current one is shown in the panel title) |
+| `j / k` | navigate by entries — flags and subcommands; the current entry is highlighted, the rest is dimmed |
+| `↑ / ↓`, `PgUp / PgDn`, `g / G` | scroll the text |
+| `/` | search the text (`n` / `N` — next / previous match) |
+| `esc` | first turns off entry navigation, then moves focus away |
 
-### Панель help
+While a tool is being updated, this panel (`[3] Update`) shows the live command log;
+the log stays available after completion — until the next update.
 
-| Клавиша | Действие |
-|---------|----------|
-| `↑ / ↓` | прокрутка |
-| `h` | показать вывод `--help` |
-| `m` | показать `man` |
-| `/` | поиск по тексту (`n` / `N` — следующее / предыдущее совпадение) |
-| `←` | вернуться к панели brief |
-| `q` | выход |
+## Updating tools
 
-Текущий режим (`--help` или `man`) показан титулом в верхней рамке панели.
+When the installed version lags behind the latest release (the `↑` marker), press `u`
+in the brief panel. `keys` detects the package manager the binary was installed with:
 
-## Обновление инструментов
+- `brew` — a `/Cellar/<formula>/…` path → `brew upgrade <formula>`;
+- `go` — buildinfo (`go version -m`) with a `path` field → `go install <module>@latest`;
+- `cargo` — a binary in `~/.cargo/bin` → `cargo install <crate>`;
+- `pipx` — a venv in `~/.local/pipx/venvs/<pkg>/` → `pipx upgrade <pkg>`;
+- `npm` — a global `node_modules/<pkg>` → `npm install -g <pkg>`.
 
-Когда установленная версия отстаёт от последнего релиза (метка `↑`), нажми `u` в панели brief. `keys` определит пакетный менеджер, которым установлен бинарник:
+The command is shown in the status bar for confirmation (`enter` runs it, any other
+key cancels); its output streams into panel `[3] Update` in real time and the TUI
+stays responsive. After a successful update the version is re-detected, the `↑`
+marker disappears, and the tool leaves the update group. One update runs at a time;
+a command gets 10 minutes (a sudo password prompt inside it fails fast instead of
+hanging).
 
-- `brew` — путь вида `/Cellar/<formula>/…` → `brew upgrade <formula>`;
-- `go` — buildinfo (`go version -m`) с полем `path` → `go install <module>@latest`;
-- `cargo` — бинарник в `~/.cargo/bin` → `cargo install <crate>`;
-- `pipx` — venv в `~/.local/pipx/venvs/<pkg>/` → `pipx upgrade <pkg>`;
-- `npm` — глобальный `node_modules/<pkg>` → `npm install -g <pkg>`.
-
-Определённая команда показывается в статус-баре для подтверждения (`enter` — запустить, `esc` — отмена); её вывод стримится в панель help (`[3] Update`) в реальном времени, TUI при этом остаётся отзывчивым. После успешного обновления версия перечитывается, метка `↑` исчезает, инструмент уходит из группы обновлений. За раз выполняется одно обновление.
-
-Если менеджер определить не удалось (ручная установка), `keys` подскажет задать поле `update_cmd` или обновить вручную (`[o]` откроет releases). `update_cmd` в `meta.yaml` всегда имеет приоритет над автоопределением и выполняется через `sh -c` (можно писать пайпы и `&&`):
+If the manager cannot be detected (manual install), `keys` suggests setting the
+`update_cmd` field or updating manually (`o` opens the releases page). `update_cmd`
+in `meta.yaml` always takes precedence over auto-detection and runs via `sh -c`
+(pipes and `&&` are fine):
 
 ```yaml
 - name: mytool
@@ -122,45 +127,64 @@ keys                          открыть TUI
   update_cmd: mytool self-update
 ```
 
-## GitHub API и токен
+## GitHub API and token
 
-`keys` подтягивает последние релизы и карточки репозиториев через GitHub REST API. Без токена лимит — **60 запросов в час** на IP, с токеном — **5000**. Каждый инструмент с полем `github` стоит 3 запроса, поэтому холодный старт с большим списком без токена может упереться в лимит, и карточки останутся пустыми.
+`keys` fetches releases and repository cards through the GitHub REST API. Without a
+token the limit is **60 requests per hour** per IP, with a token — **5000**. Each
+tool with a `github` field costs 3 requests, so a cold start with a large list and no
+token can hit the limit — cards stay empty until the window resets.
 
-Клавиша `L` работает из любой панели (пока не активен другой режим ввода) и открывает оверлей статуса API: источник токена, остаток лимита с иконкой (`⚠` — мало, `✕` — исчерпан) и время сброса. Прямо в оверлее:
+Quota usage is visible in the right corner of the status bar (`▮▮▮░░░ 12/60`). The
+`L` key works from any panel (as long as no other input mode is active) and opens the
+API status overlay: token source, quota usage with an icon (`⚠` — low, `✕` —
+exhausted) and the reset time. Right in the overlay:
 
-- `[e]` — ввести токен (эхо скрыто); токен проверяется запросом к `/rate_limit` и сохраняется только при успехе;
-- `[d]` — удалить сохранённый токен (доступно только для токена из файла);
-- `[r]` — обновить цифры; `[esc]` — закрыть.
+- `e` — enter a token (echo hidden); the token is validated with a `/rate_limit` request and saved only on success;
+- `d` — remove the saved token (available only for the file-based token);
+- `r` — refresh the numbers; `esc` / `q` — close.
 
-Источник токена определяется с приоритетом окружения: переменная `GITHUB_TOKEN` всегда важнее файла. Токен, введённый в TUI, хранится в `~/.config/keys/token` с правами `0600`; токен из окружения на диск не пишется. При исчерпании лимита уже загруженные карточки не стираются, а карточка без данных показывает подсказку `rate limited — press [L]`.
+The token source follows environment precedence: the `GITHUB_TOKEN` variable always
+wins over the file. A token entered in the TUI is stored in `~/.config/keys/token`
+with `0600` permissions; an environment token is never written to disk. When the
+quota is exhausted, already-loaded cards are not erased, and a card with no data
+shows the `rate limited — press [L]` hint.
 
-## Хранение данных
+## Data storage
 
-Список инструментов живёт в `~/.config/keys/meta.yaml` — по записи на инструмент
-(`name`, `status`, `added`, опционально `tags`, `note`, `github`, `update_cmd`). Файл целиком
-управляется из TUI; редактировать его руками не обязательно, но безопасно.
+The tool list lives in `~/.config/keys/meta.yaml` — one entry per tool (`name`,
+`status`, `added`, optionally `tags`, `note`, `github`, `update_cmd`). The file is
+fully managed from the TUI; editing it by hand is not required but safe — writes are
+atomic.
 
-| Что | Где |
-|-----|-----|
-| Метаданные трекера | `~/.config/keys/meta.yaml` |
-| Кэш версий (TTL 24 ч) | `~/.config/keys/cache.json` |
-| GitHub-токен (`0600`) | `~/.config/keys/token` |
-| Лог ошибок сессии | `~/.config/keys/logs/keeptui-<timestamp>.log` |
+| What | Where |
+|------|-------|
+| Tracker metadata | `~/.config/keys/meta.yaml` |
+| Version cache (24h TTL) | `~/.config/keys/cache.json` |
+| GitHub token (`0600`) | `~/.config/keys/token` |
+| Session error log | `~/.config/keys/logs/keeptui-<timestamp>.log` |
 
-Лог создаётся лениво — только при первой ошибке. Сессия без ошибок не оставляет
-файла вовсе, поэтому само наличие файла уже сигнал. Хранятся 20 последних логов.
+The log is created lazily — only on the first error. A session with no errors leaves
+no file at all, so the presence of a file is itself the signal. The 20 most recent
+logs are kept.
 
-## Стек
+## Architecture
 
-- [Bubble Tea](https://github.com/charmbracelet/bubbletea) — TUI-фреймворк
-- [Bubbles](https://github.com/charmbracelet/bubbles) — текстовый ввод, viewport
-- [Lip Gloss](https://github.com/charmbracelet/lipgloss) — стилизация
-- [gopkg.in/yaml.v3](https://pkg.go.dev/gopkg.in/yaml.v3) — чтение/запись `meta.yaml`
+How the code is organized — the package graph, data flow, TUI state machine,
+subprocess sandbox — is described in [ARCHITECTURE.md](ARCHITECTURE.md).
 
-## Вклад в проект
+## Stack
 
-Баг-репорты и pull request'ы приветствуются. Перед отправкой прогони `go test -race ./...` и `go vet ./...` — CI проверяет то же самое.
+- [Bubble Tea](https://github.com/charmbracelet/bubbletea) — TUI framework
+- [Bubbles](https://github.com/charmbracelet/bubbles) — text input, viewport, spinner
+- [Lip Gloss](https://github.com/charmbracelet/lipgloss) — styling
+- [golang.org/x/mod/semver](https://pkg.go.dev/golang.org/x/mod/semver) — version comparison
+- [gopkg.in/yaml.v3](https://pkg.go.dev/gopkg.in/yaml.v3) — reading/writing `meta.yaml`
 
-## Лицензия
+## Contributing
+
+Bug reports and pull requests are welcome. Before submitting, run
+`go test -race ./...` and `go vet ./...` — CI checks the same.
+
+## License
 
 MIT

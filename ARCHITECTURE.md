@@ -1,6 +1,6 @@
 # Architecture
 
-`keys` is a terminal TUI tracker for CLI tools built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
+`keeptui` is a terminal TUI tracker for CLI tools built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 It is a pure TUI: `main.go` is a thin launcher that reads the tracker (`loader.LoadMeta()`),
 sets up the error journal (`logx`) and starts the Bubble Tea model (`model.New(meta)`).
 There are no subcommands or flags.
@@ -51,7 +51,7 @@ The `model` package is split across files within a single package:
 
 ## Data flow
 
-1. `loader.LoadMeta()` reads `~/.config/keys/meta.yaml` — the single source of
+1. `loader.LoadMeta()` reads `~/.config/keeptui/meta.yaml` — the single source of
    tracked tools.
 2. `model.New(meta)` builds the model; `Init()` fires the async fetches — results
    arrive as messages and are merged into the state.
@@ -71,7 +71,7 @@ the pure predicates `needsInstalled`/`needsRemote` skip what is already cached.
 ### Probe sandbox
 
 A tracked tool may respond to `--help` by booting its own TUI — that must not shred
-the `keys` screen. The protection has two layers:
+the `keeptui` screen. The protection has two layers:
 
 1. every probe goes through `proc.DetachTTY` — its own session, no controlling
    terminal: the child's attempt to open `/dev/tty` gets `ENXIO` instead of toggling
@@ -131,7 +131,7 @@ lives in `[3] Update` (a ~500-line buffer); the 10-minute deadline ends with
 
 Without a token — 60 requests/hour per IP, with a token — 5000. A tool with `github`
 costs 3 requests. Token: `GITHUB_TOKEN` from the environment always wins over the
-`~/.config/keys/token` file (`0600`); a token entered in the TUI is validated with a
+`~/.config/keeptui/token` file (`0600`); a token entered in the TUI is validated with a
 `/rate_limit` request before being written to disk.
 
 - **`doGH(req)`** — the single auth point: headers, the 5-second client, reading the
@@ -152,10 +152,10 @@ costs 3 requests. Token: `GITHUB_TOKEN` from the environment always wins over th
 
 | Data | Path |
 |---|---|
-| Tracker metadata | `~/.config/keys/meta.yaml` |
-| Version cache (24h TTL) | `~/.config/keys/cache.json` |
-| GitHub token (`0600`) | `~/.config/keys/token` |
-| Session error log | `~/.config/keys/logs/keeptui-<timestamp>.log` |
+| Tracker metadata | `~/.config/keeptui/meta.yaml` |
+| Version cache (24h TTL) | `~/.config/keeptui/cache.json` |
+| GitHub token (`0600`) | `~/.config/keeptui/token` |
+| Session error log | `~/.config/keeptui/logs/keeptui-<timestamp>.log` |
 
 `SaveMeta` writes atomically (temp file + `os.Rename` in the same directory) — a
 crash mid-write can never truncate `meta.yaml`.

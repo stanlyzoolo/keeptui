@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lepeshko/keys/internal/loader"
-	"github.com/lepeshko/keys/internal/logx"
+	"github.com/stanlyzoolo/keeptui/internal/loader"
+	"github.com/stanlyzoolo/keeptui/internal/logx"
 )
 
 func TestIsNewer(t *testing.T) {

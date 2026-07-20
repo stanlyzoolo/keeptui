@@ -26,7 +26,7 @@ func tokenFilePath() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(base, "keys", "token"), nil
+	return filepath.Join(base, "keeptui", "token"), nil
 }
 
 // loadTokenFromFile reads the token file into tokenMem exactly once. Any error

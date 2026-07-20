@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/lepeshko/keys/internal/logx"
+	"github.com/stanlyzoolo/keeptui/internal/logx"
 )
 
 // TestMain redirects logx to a throwaway directory for the whole package test

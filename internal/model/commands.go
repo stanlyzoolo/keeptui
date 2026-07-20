@@ -11,11 +11,11 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/lepeshko/keys/internal/loader"
-	"github.com/lepeshko/keys/internal/logx"
-	"github.com/lepeshko/keys/internal/proc"
-	"github.com/lepeshko/keys/internal/updater"
-	"github.com/lepeshko/keys/internal/version"
+	"github.com/stanlyzoolo/keeptui/internal/loader"
+	"github.com/stanlyzoolo/keeptui/internal/logx"
+	"github.com/stanlyzoolo/keeptui/internal/proc"
+	"github.com/stanlyzoolo/keeptui/internal/updater"
+	"github.com/stanlyzoolo/keeptui/internal/version"
 )
 
 // safeCmd wraps a command so a panic in its goroutine is recorded to the session
@@ -403,7 +403,7 @@ func fetchHelpCmd(name string, mode int) tea.Cmd {
 		// instead of masquerading as the other.
 		// Every probe runs detached from the controlling terminal: a tool
 		// that answers --help/-h/help by booting its own TUI would otherwise
-		// grab /dev/tty and shred keys' screen (see internal/proc).
+		// grab /dev/tty and shred keeptui's screen (see internal/proc).
 		if mode == helpModeMan {
 			cmd := exec.CommandContext(ctx, "man", name)
 			cmd.Env = append(os.Environ(), "MANPAGER=cat", "MANWIDTH=80", "TERM=dumb")

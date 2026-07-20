@@ -7,7 +7,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/lepeshko/keys/internal/logx"
+	"github.com/stanlyzoolo/keeptui/internal/logx"
 )
 
 type Status string
@@ -48,13 +48,13 @@ var testConfigDir string
 
 func MetaPath() string {
 	if testConfigDir != "" {
-		return filepath.Join(testConfigDir, "keys", "meta.yaml")
+		return filepath.Join(testConfigDir, "keeptui", "meta.yaml")
 	}
 	configDir, err := os.UserConfigDir()
 	if err != nil {
 		return ""
 	}
-	return filepath.Join(configDir, "keys", "meta.yaml")
+	return filepath.Join(configDir, "keeptui", "meta.yaml")
 }
 
 func LoadMeta() ([]ToolMeta, error) {

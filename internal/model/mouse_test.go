@@ -9,7 +9,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 
-	"github.com/lepeshko/keys/internal/loader"
+	"github.com/stanlyzoolo/keeptui/internal/loader"
 )
 
 // newMouseTestModel builds a ready Model (viewports sized via WindowSizeMsg)

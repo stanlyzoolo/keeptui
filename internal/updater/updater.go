@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/lepeshko/keys/internal/loader"
-	"github.com/lepeshko/keys/internal/proc"
+	"github.com/stanlyzoolo/keeptui/internal/loader"
+	"github.com/stanlyzoolo/keeptui/internal/proc"
 )
 
 // ErrUnknownManager is returned when no package manager can be attributed to a

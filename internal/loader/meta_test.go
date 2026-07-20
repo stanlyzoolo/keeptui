@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lepeshko/keys/internal/logx"
+	"github.com/stanlyzoolo/keeptui/internal/logx"
 )
 
 // useTempConfigDir points MetaPath at a per-test directory and restores the
@@ -36,7 +36,7 @@ func TestLoadMetaMissingFile(t *testing.T) {
 func TestLoadMetaMalformedYAML(t *testing.T) {
 	dir := useTempConfigDir(t)
 
-	path := filepath.Join(dir, "keys", "meta.yaml")
+	path := filepath.Join(dir, "keeptui", "meta.yaml")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestSaveMetaLoadMetaPreservesUpdateCmd(t *testing.T) {
 	}
 
 	// omitempty: a tool without update_cmd must not serialize the field.
-	onDisk, err := os.ReadFile(filepath.Join(dir, "keys", "meta.yaml"))
+	onDisk, err := os.ReadFile(filepath.Join(dir, "keeptui", "meta.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestSaveMetaLeavesNoTempFile(t *testing.T) {
 	if err := SaveMeta([]ToolMeta{{Name: "a", Status: StatusActive}}); err != nil {
 		t.Fatalf("SaveMeta: %v", err)
 	}
-	entries, err := os.ReadDir(filepath.Join(dir, "keys"))
+	entries, err := os.ReadDir(filepath.Join(dir, "keeptui"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func TestLoadMetaMigratesRetiredStatuses(t *testing.T) {
 - name: oddball
   status: bogus
 `
-	path := filepath.Join(dir, "keys", "meta.yaml")
+	path := filepath.Join(dir, "keeptui", "meta.yaml")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
 	}
@@ -247,7 +247,7 @@ func TestLoadMetaMigratesRetiredStatuses(t *testing.T) {
 func TestLoadMetaMigrationRoundTrip(t *testing.T) {
 	dir := useTempConfigDir(t)
 
-	path := filepath.Join(dir, "keys", "meta.yaml")
+	path := filepath.Join(dir, "keeptui", "meta.yaml")
 	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
 		t.Fatal(err)
 	}

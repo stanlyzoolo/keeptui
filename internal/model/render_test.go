@@ -18,10 +18,10 @@ import (
 	"github.com/mattn/go-runewidth"
 	"github.com/muesli/termenv"
 
-	"github.com/lepeshko/keys/internal/loader"
-	"github.com/lepeshko/keys/internal/logx"
-	"github.com/lepeshko/keys/internal/ui"
-	"github.com/lepeshko/keys/internal/version"
+	"github.com/stanlyzoolo/keeptui/internal/loader"
+	"github.com/stanlyzoolo/keeptui/internal/logx"
+	"github.com/stanlyzoolo/keeptui/internal/ui"
+	"github.com/stanlyzoolo/keeptui/internal/version"
 )
 
 // TestUpdateViewNoPanicNoLog confirms a normal Update/View cycle writes no log

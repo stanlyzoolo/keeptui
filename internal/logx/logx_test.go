@@ -45,7 +45,7 @@ func TestFirstErrorfCreatesFileWithHeader(t *testing.T) {
 	restore := SetDirForTesting(dir)
 	defer restore()
 
-	SetHeader("keys v1.4.0 darwin/arm64 tools=12 token=config")
+	SetHeader("keeptui v1.4.0 darwin/arm64 tools=12 token=config")
 	Errorf("something %s", "broke")
 
 	files := logFiles(t, dir)
@@ -60,7 +60,7 @@ func TestFirstErrorfCreatesFileWithHeader(t *testing.T) {
 	if len(lines) != 2 {
 		t.Fatalf("expected 2 lines (header + record), got %d: %q", len(lines), string(data))
 	}
-	if lines[0] != "keys v1.4.0 darwin/arm64 tools=12 token=config" {
+	if lines[0] != "keeptui v1.4.0 darwin/arm64 tools=12 token=config" {
 		t.Errorf("header line = %q", lines[0])
 	}
 	if !strings.Contains(lines[1], "ERROR something broke") {

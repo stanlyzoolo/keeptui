@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/lepeshko/keys/internal/loader"
+	"github.com/stanlyzoolo/keeptui/internal/loader"
 )
 
 func TestDetectFromPath(t *testing.T) {

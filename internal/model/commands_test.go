@@ -9,9 +9,9 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/lepeshko/keys/internal/loader"
-	"github.com/lepeshko/keys/internal/logx"
-	"github.com/lepeshko/keys/internal/updater"
+	"github.com/stanlyzoolo/keeptui/internal/loader"
+	"github.com/stanlyzoolo/keeptui/internal/logx"
+	"github.com/stanlyzoolo/keeptui/internal/updater"
 )
 
 func TestFetchHelpTakeoverLogs(t *testing.T) {

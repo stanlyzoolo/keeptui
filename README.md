@@ -33,6 +33,21 @@ tools right from the interface. Pure TUI — no subcommands; the only flags are
 
 ## Installation
 
+Homebrew (macOS / Linux):
+
+```bash
+brew install stanlyzoolo/apps/keeptui
+```
+
+Or tap once and install by name:
+
+```bash
+brew tap stanlyzoolo/apps
+brew install keeptui
+```
+
+Upgrade later with `brew upgrade keeptui`.
+
 From source (requires Go 1.25+):
 
 ```bash

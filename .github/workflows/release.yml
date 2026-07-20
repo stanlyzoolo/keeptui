@@ -9,69 +9,29 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        include:
-          - goos: darwin
-            goarch: arm64
-            os: macos-latest
-          - goos: darwin
-            goarch: amd64
-            os: macos-latest
-          - goos: linux
-            goarch: amd64
-            os: ubuntu-latest
-          - goos: linux
-            goarch: arm64
-            os: ubuntu-latest
-          - goos: windows
-            goarch: amd64
-            os: ubuntu-latest
-
+  goreleaser:
+    name: Release via GoReleaser
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # GoReleaser needs full history + tags for the changelog.
+          fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
-      - name: Build
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: release --clean
         env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "0"
-        run: |
-          EXT=""
-          if [ "$GOOS" = "windows" ]; then EXT=".exe"; fi
-          go build -buildvcs=false -trimpath \
-            -ldflags="-s -w -X main.version=${{ github.ref_name }}" \
-            -o "keeptui-${{ matrix.goos }}-${{ matrix.goarch }}${EXT}" .
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: keeptui-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: keeptui-${{ matrix.goos }}-${{ matrix.goarch }}*
-
-  release:
-    name: Create Release
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          merge-multiple: true
-
-      - name: Create checksums
-        run: sha256sum keeptui-* > checksums.txt
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            keeptui-*
-            checksums.txt
-          generate_release_notes: true
+          # Cuts the GitHub Release in this repo.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Pushes the updated formula to stanlyzoolo/homebrew-apps.
+          # Must be a PAT (classic: repo scope, or fine-grained: Contents RW
+          # on homebrew-apps) — the default GITHUB_TOKEN can't push to another repo.
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}

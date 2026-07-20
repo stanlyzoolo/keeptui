@@ -554,6 +554,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toolsViewport = viewport.New(m.toolsW-1, leftVpH)
 			m.briefViewport = viewport.New(m.briefW-1, vpH)
 			m.helpViewport = viewport.New(m.helpW-1, vpH)
+			// Zero the default pager keymap on all three viewports: every
+			// keyboard scroll binding lives explicitly in Update()'s switch, so
+			// the hidden defaults (d/u/f/b/space/h/l scrolling uncaught keys
+			// inconsistently) must never come back. Wheel scrolling rides
+			// MouseWheelEnabled — a separate field, still true — so it stays on.
+			m.toolsViewport.KeyMap = viewport.KeyMap{}
+			m.briefViewport.KeyMap = viewport.KeyMap{}
+			m.helpViewport.KeyMap = viewport.KeyMap{}
 			m.setHelpContent()
 			m.ready = true
 		} else {
@@ -595,6 +603,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateConfirmUpdate(msg)
 		case modeAPIStatus, modeTokenInput:
 			return m.updateAPIStatus(msg)
+		case modeHotkeys:
+			return m.updateHotkeys(msg)
 		}
 
 		if m.mode == modeHelpSearch {
@@ -761,15 +771,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.helpNavStep(1)
 					return m, nil
 				}
-				// Arrows scroll faster than line-by-line; j stays per-line.
-				step := 1
-				if msg.String() == "down" {
-					step = 3
-				}
+				// Unified scroll: j and ↓ both step 3 lines.
 				if m.focus == focusBrief {
-					m.briefViewport.ScrollDown(step)
+					m.briefViewport.ScrollDown(3)
 				} else if m.focus == focusHelp {
-					m.helpViewport.ScrollDown(step)
+					m.helpViewport.ScrollDown(3)
 				}
 				return m, nil
 			}
@@ -787,14 +793,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.helpNavStep(-1)
 					return m, nil
 				}
-				step := 1
-				if msg.String() == "up" {
-					step = 3
-				}
+				// Unified scroll: k and ↑ both step 3 lines.
 				if m.focus == focusBrief {
-					m.briefViewport.ScrollUp(step)
+					m.briefViewport.ScrollUp(3)
 				} else if m.focus == focusHelp {
-					m.helpViewport.ScrollUp(step)
+					m.helpViewport.ScrollUp(3)
 				}
 				return m, nil
 			}
@@ -804,14 +807,61 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				step := max(m.toolsViewport.Height, 1)
 				return m, m.selectMeta(max(m.metaSelected-step, 0))
 			}
+			if m.focus == focusBrief {
+				m.briefViewport.PageUp()
+			} else if m.focus == focusHelp {
+				m.helpViewport.PageUp()
+			}
+			return m, nil
 
-		case "pgdown", "ctrl+f":
+		case "pgdown", "ctrl+f", " ":
 			if m.focus == focusTools {
+				// space has no tools binding — kept out so it can't collide with a
+				// future list action; ctrl+f already pages the list.
+				if msg.String() == " " {
+					return m, nil
+				}
 				step := max(m.toolsViewport.Height, 1)
 				return m, m.selectMeta(min(m.metaSelected+step, max(len(m.filteredMeta())-1, 0)))
 			}
+			if m.focus == focusBrief {
+				m.briefViewport.PageDown()
+			} else if m.focus == focusHelp {
+				m.helpViewport.PageDown()
+			}
+			return m, nil
+
+		case "ctrl+d":
+			if m.focus == focusTools {
+				step := max(m.toolsViewport.Height/2, 1)
+				return m, m.selectMeta(min(m.metaSelected+step, max(len(m.filteredMeta())-1, 0)))
+			}
+			if m.focus == focusBrief {
+				m.briefViewport.HalfPageDown()
+			} else if m.focus == focusHelp {
+				m.helpViewport.HalfPageDown()
+			}
+			return m, nil
+
+		case "ctrl+u":
+			if m.focus == focusTools {
+				step := max(m.toolsViewport.Height/2, 1)
+				return m, m.selectMeta(max(m.metaSelected-step, 0))
+			}
+			if m.focus == focusBrief {
+				m.briefViewport.HalfPageUp()
+			} else if m.focus == focusHelp {
+				m.helpViewport.HalfPageUp()
+			}
+			return m, nil
 
 		case "g":
+			if m.focus == focusTools {
+				if len(m.filteredMeta()) > 0 {
+					return m, m.selectMeta(0)
+				}
+				return m, nil
+			}
 			if m.focus == focusBrief {
 				m.briefViewport.GotoTop()
 			} else if m.focus == focusHelp {
@@ -819,6 +869,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case "G":
+			if m.focus == focusTools {
+				if n := len(m.filteredMeta()); n > 0 {
+					return m, m.selectMeta(n - 1)
+				}
+				return m, nil
+			}
 			if m.focus == focusBrief {
 				m.briefViewport.GotoBottom()
 			} else if m.focus == focusHelp {
@@ -992,13 +1048,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mode = modeAPIStatus
 			m.tokenError = ""
 			return m, fetchRateCmd()
-		}
 
-		if m.focus == focusBrief {
-			m.briefViewport, cmd = m.briefViewport.Update(msg)
-		} else if m.focus == focusHelp {
-			m.helpViewport, cmd = m.helpViewport.Update(msg)
+		case "?":
+			// Open the static hotkeys-help overlay. Reached only in modeNormal —
+			// every input mode's handler returns earlier, so ? typed into a
+			// search/note/token field stays literal text.
+			m.mode = modeHotkeys
+			return m, nil
 		}
+		// No keyboard fall-through into viewport.Update: every scroll key is bound
+		// explicitly above, and the default pager keymap was zeroed (see
+		// WindowSizeMsg). An uncaught key is a deliberate no-op.
 	}
 
 	return m, cmd

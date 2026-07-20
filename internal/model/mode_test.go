@@ -183,6 +183,115 @@ func TestRenameCommit(t *testing.T) {
 	}
 }
 
+// TestHotkeysOverlayOpenClose verifies that ? opens the modeHotkeys overlay
+// from every focus and that esc, q, and a second ? each close it back to
+// modeNormal.
+func TestHotkeysOverlayOpenClose(t *testing.T) {
+	for _, focus := range []int{focusTools, focusBrief, focusHelp} {
+		m := newTestModel(focus)
+		updated, _ := m.Update(keyRunes("?"))
+		nm := updated.(Model)
+		if nm.mode != modeHotkeys {
+			t.Fatalf("focus %d: after ? mode = %d, want modeHotkeys", focus, nm.mode)
+		}
+		if !nm.overlayVisible() {
+			t.Errorf("focus %d: overlayVisible() = false, want true", focus)
+		}
+	}
+
+	closeKeys := []struct {
+		name string
+		key  tea.KeyMsg
+	}{
+		{"esc", tea.KeyMsg{Type: tea.KeyEsc}},
+		{"q", keyRunes("q")},
+		{"second ?", keyRunes("?")},
+	}
+	for _, ck := range closeKeys {
+		t.Run(ck.name, func(t *testing.T) {
+			m := newTestModel(focusTools)
+			m.mode = modeHotkeys
+			closed, _ := m.Update(ck.key)
+			if got := closed.(Model).mode; got != modeNormal {
+				t.Errorf("after %s mode = %d, want modeNormal", ck.name, got)
+			}
+		})
+	}
+
+	// ctrl+c quits the app from the overlay (honoring the "ctrl+c anywhere"
+	// hint the overlay itself renders), rather than merely closing it.
+	t.Run("ctrl+c quits", func(t *testing.T) {
+		m := newTestModel(focusTools)
+		m.mode = modeHotkeys
+		_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+		if cmd == nil {
+			t.Fatal("ctrl+c in modeHotkeys returned no cmd, want quit")
+		}
+		if _, isQuit := cmd().(tea.QuitMsg); !isQuit {
+			t.Error("ctrl+c in modeHotkeys did not quit")
+		}
+	})
+}
+
+// TestHotkeysOverlayNoOpKeys verifies an unrelated key keeps the overlay open
+// and changes nothing.
+func TestHotkeysOverlayNoOpKeys(t *testing.T) {
+	for _, key := range []tea.KeyMsg{keyRunes("x"), keyRunes("j"), keyRunes("L")} {
+		m := newTestModel(focusTools)
+		m.mode = modeHotkeys
+		prevFocus := m.focus
+		updated, _ := m.Update(key)
+		nm := updated.(Model)
+		if nm.mode != modeHotkeys {
+			t.Errorf("after %q mode = %d, want modeHotkeys (overlay stays open)", key.String(), nm.mode)
+		}
+		if nm.focus != prevFocus {
+			t.Errorf("after %q focus changed to %d, want unchanged %d", key.String(), nm.focus, prevFocus)
+		}
+	}
+}
+
+// TestHotkeysKeyStaysTextInInputModes verifies ? typed into an input mode lands
+// in that mode's textinput as literal text instead of opening the overlay.
+func TestHotkeysKeyStaysTextInInputModes(t *testing.T) {
+	tests := []struct {
+		name string
+		mode inputMode
+		set  func(m *Model)
+		get  func(m Model) string
+	}{
+		{"search", modeSearch, func(m *Model) { m.search.Focus() }, func(m Model) string { return m.search.Value() }},
+		{"note", modeEditNote, func(m *Model) { m.noteInput.Focus() }, func(m Model) string { return m.noteInput.Value() }},
+		{"token", modeTokenInput, func(m *Model) { m.tokenInput.Focus() }, func(m Model) string { return m.tokenInput.Value() }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := newTestModel(focusBrief)
+			m.mode = tt.mode
+			tt.set(&m)
+			updated, _ := m.Update(keyRunes("?"))
+			nm := updated.(Model)
+			if nm.mode != tt.mode {
+				t.Fatalf("? opened %d, want the input mode %d to stay", nm.mode, tt.mode)
+			}
+			if got := tt.get(nm); !strings.Contains(got, "?") {
+				t.Errorf("input value = %q, want it to contain the literal ?", got)
+			}
+		})
+	}
+}
+
+// TestHotkeysStatusBar verifies the modeHotkeys status bar renders the close
+// hint.
+func TestHotkeysStatusBar(t *testing.T) {
+	m := newTestModel(focusTools)
+	m.mode = modeHotkeys
+	bar := m.renderStatusBar()
+	if !strings.Contains(bar, "esc") || !strings.Contains(bar, "close") {
+		t.Errorf("modeHotkeys status bar = %q, want [esc] close", bar)
+	}
+}
+
 // TestModeGuards verifies that while one mode owns the input, other modes'
 // opening keys are consumed by the active input instead of switching state.
 func TestModeGuards(t *testing.T) {

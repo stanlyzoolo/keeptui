@@ -28,8 +28,12 @@ func (m Model) View() string {
 	right := m.renderHelp()
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, middle, right)
 	layout := lipgloss.JoinVertical(lipgloss.Left, body, m.renderStatusBar())
-	if m.apiOverlayVisible() {
-		layout = ui.PlaceOverlay(layout, m.renderAPIStatus())
+	if m.overlayVisible() {
+		fg := m.renderAPIStatus()
+		if m.mode == modeHotkeys {
+			fg = m.renderHotkeys()
+		}
+		layout = ui.PlaceOverlay(layout, fg)
 	}
 	// Vertical margin only; no horizontal margin so panels/status bar reach the
 	// terminal edges.
@@ -115,11 +119,14 @@ func (m Model) renderStatusBar() string {
 	if m.mode == modeAPIStatus {
 		return style.Render(keyHint("r") + " refresh  " + keyHint("esc") + " close")
 	}
+	if m.mode == modeHotkeys {
+		return style.Render(keyHint("esc") + " close")
+	}
 	if m.statusMsg != "" {
 		return style.Render(ui.SearchPromptStyle.Render(m.statusMsg))
 	}
 	if m.focus == focusBrief {
-		hints := keyHint("o") + " open repo  " + keyHint("c") + " changelog  " + keyHint("r") + " refresh  " + keyHint("s") + " status  " + keyHint("e") + " note  " + keyHint("t") + " tags  " + keyHint("q") + " quit"
+		hints := keyHint("o") + " open repo  " + keyHint("c") + " changelog  " + keyHint("r") + " refresh  " + keyHint("s") + " status  " + keyHint("e") + " note  " + keyHint("t") + " tags  " + keyHint("q") + " quit  " + keyHint("?") + " keys"
 		if mt, ok := m.selectedMeta(); ok && m.hasUpdate(mt.Name) {
 			hints = keyHint("u") + " update  " + hints
 		}
@@ -133,7 +140,7 @@ func (m Model) renderStatusBar() string {
 		if len(m.helpEntries) > 0 {
 			scrollOrNav = keyHint("j/k") + " navigate  " + scrollOrNav
 		}
-		hints := scrollOrNav + keyHint("h") + " --help  " + keyHint("m") + " man  " + keyHint("/") + " search  " + keyHint("←") + " back  " + keyHint("q") + " quit"
+		hints := scrollOrNav + keyHint("h") + " --help  " + keyHint("m") + " man  " + keyHint("/") + " search  " + keyHint("←") + " back  " + keyHint("q") + " quit  " + keyHint("?") + " keys"
 		if m.helpNavIdx >= 0 {
 			hints = keyHint("esc") + " exit nav  " + hints
 		}
@@ -144,7 +151,8 @@ func (m Model) renderStatusBar() string {
 			keyHint("t")+" track  "+
 			keyHint("u")+" untrack  "+
 			keyHint("r")+" rename  "+
-			keyHint("q")+" quit",
+			keyHint("q")+" quit  "+
+			keyHint("?")+" keys",
 	)
 }
 
@@ -370,6 +378,130 @@ func (m Model) renderAPIStatus() string {
 	b.WriteString(ui.InfoStyle.Render(hints))
 
 	return ui.OverlayBorder.Render(b.String())
+}
+
+// hotkeyRow is one binding line in the [?] overlay: a key cell (bracketed by
+// keyHint) and a 1-4 word description.
+type hotkeyRow struct{ key, desc string }
+
+// hotkeyGroup is a titled block of binding rows in one overlay column.
+type hotkeyGroup struct {
+	title string
+	rows  []hotkeyRow
+}
+
+// renderHotkeys builds the static [?] hotkeys overlay: a title row with the
+// close hint right-aligned, then a three-column grid of every normal-mode
+// binding, one binding per line, grouped and annotated by the panel/mode it
+// belongs to. Each group header is framed by a blank line above (except the
+// first in its column) and below for breathing room, and inside a column every
+// key cell is padded to the column's widest key so descriptions line up and the
+// keys never drift sideways. Styled like the [L] overlay (OverlayBorder frame,
+// SectionLabelStyle headers, keyHint keys, InfoStyle text). Hard size budget:
+// <= 20 rows x <= 76 cols framed, so it fits the 80x24 composited background
+// that PlaceOverlay clips off the bottom.
+func (m Model) renderHotkeys() string {
+	hdr := ui.SectionLabelStyle.Render
+	info := ui.InfoStyle.Render
+	// padTo right-pads a (possibly ANSI-styled) cell to a visible width so the
+	// descriptions line up; measured with lipgloss.Width, which strips ANSI.
+	padTo := func(s string, w int) string {
+		if d := w - lipgloss.Width(s); d > 0 {
+			return s + strings.Repeat(" ", d)
+		}
+		return s
+	}
+
+	// renderColumn stacks groups vertically: each header sits between a blank
+	// line above (except the first group) and below, then its rows follow with
+	// the key cell padded to the column's widest key so every description in the
+	// column starts at the same offset.
+	renderColumn := func(groups []hotkeyGroup) string {
+		keyW := 0
+		for _, g := range groups {
+			for _, r := range g.rows {
+				if w := lipgloss.Width(keyHint(r.key)); w > keyW {
+					keyW = w
+				}
+			}
+		}
+		var lines []string
+		for gi, g := range groups {
+			if gi > 0 {
+				lines = append(lines, "")
+			}
+			lines = append(lines, hdr(g.title), "")
+			for _, r := range g.rows {
+				lines = append(lines, padTo(keyHint(r.key), keyW)+"  "+info(r.desc))
+			}
+		}
+		return strings.Join(lines, "\n")
+	}
+
+	col1 := renderColumn([]hotkeyGroup{
+		{"Global", []hotkeyRow{
+			{"1/2/3", "focus panel"},
+			{"←/→", "move focus"},
+			{"esc / q", "back / quit"},
+			{"L", "API status"},
+			{"?", "this help"},
+		}},
+		{"[1] Tools", []hotkeyRow{
+			{"j/k ↑/↓", "select tool"},
+			{"g/G", "first / last"},
+			{"t", "track tool"},
+			{"u", "untrack tool"},
+			{"r", "rename tool"},
+			{"/", "filter tools"},
+		}},
+	})
+
+	col2 := renderColumn([]hotkeyGroup{
+		{"[2] Brief", []hotkeyRow{
+			{"o", "open repo"},
+			{"c", "changelog"},
+			{"r", "refresh"},
+			{"s", "cycle status"},
+			{"e", "edit note"},
+			{"t", "edit tags"},
+			{"u", "run update"},
+			{"h", "--help"},
+			{"m", "man page"},
+		}},
+	})
+
+	col3 := renderColumn([]hotkeyGroup{
+		{"[3] Help / Man", []hotkeyRow{
+			{"j/k", "entry nav"},
+			{"↑/↓", "scroll"},
+			{"esc", "exit nav"},
+			{"h/m", "help / man"},
+			{"/", "search"},
+			{"n/N", "next match"},
+		}},
+		{"Scrolling", []hotkeyRow{
+			{"j/k ↑/↓", "3 lines"},
+			{"ctrl+d/u", "half page"},
+			{"ctrl+f/b", "full page"},
+			{"PgUp/PgDn", "full page"},
+			{"g/G", "top / bottom"},
+		}},
+	})
+
+	grid := lipgloss.JoinHorizontal(lipgloss.Top, col1, "   ", col2, "   ", col3)
+
+	// Title row: heading left, close hint right-aligned to the grid width so the
+	// overlay reads as a single block, with a blank line below it separating the
+	// title from the grid.
+	title := hdr("Keyboard shortcuts")
+	closeHint := keyHint("esc") + " " + info("close")
+	titleRow := title + " " + closeHint
+	if pad := lipgloss.Width(grid) - lipgloss.Width(title) - lipgloss.Width(closeHint); pad > 0 {
+		titleRow = title + strings.Repeat(" ", pad) + closeHint
+	}
+
+	body := lipgloss.JoinVertical(lipgloss.Left, titleRow, "", grid)
+	return ui.OverlayBorder.Render(body)
 }
 
 func (m Model) calcVpHeight() int {
@@ -837,8 +969,8 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// Mouse policy: wheel scrolls in every mode, clicks (selection/focus) only
 	// in modeNormal — while an input mode owns the keyboard a click must not
 	// move selectedMeta() under it (wrong-target note/tags/rename commits).
-	// Under the [L] overlay nothing may move: scrolling there is invisible.
-	if !m.ready || m.apiOverlayVisible() {
+	// Under any overlay nothing may move: scrolling there is invisible.
+	if !m.ready || m.overlayVisible() {
 		return m, nil
 	}
 	clickable := m.mode == modeNormal

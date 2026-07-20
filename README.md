@@ -46,18 +46,23 @@ The binary lands in `~/go/bin/keeptui`. Make sure `~/go/bin` is on your `PATH`.
 ## Usage
 
 Run `keeptui` — the three-panel interface opens. Focus moves with `←` / `→` or the
-digits `1` / `2` / `3` (each panel's number is written in its title).
+digits `1` / `2` / `3` (each panel's number is written in its title). Press `?` at any
+time for the hotkeys overlay — every keybinding, grouped by panel.
 
 ### Panel `[1] Tools`
 
 | Key | Action |
 |-----|--------|
 | `j / k`, `↑ / ↓` | navigate the list (wraps around the edges) |
+| `PgUp / PgDn`, `ctrl+f / ctrl+b` | page the selection up / down |
+| `ctrl+d / ctrl+u` | move the selection half a page down / up |
+| `g / G` | jump to the first / last tool |
 | `t` | track — add a tool by GitHub URL or short name |
 | `u` | untrack — remove (with confirmation) |
 | `r` | rename — fix the binary name when it differs from the repo name (e.g. `claude-code` → `claude`) |
 | `/` | search by name and tags: the matched substring is highlighted, tag-only matches show the tag dimmed, the status bar shows an `N/M` counter; `↑` / `↓` move through matches, `enter` opens the card, `esc` cancels and restores the previous selection |
 | `L` | GitHub API status — limits and token (see below) |
+| `?` | hotkeys overlay — every keybinding, grouped by panel |
 | `esc`, `q`, `ctrl+c` | quit |
 
 When you enter a GitHub URL (`https://github.com/owner/repo`, with `.git`, without a
@@ -80,7 +85,9 @@ top of the list; the order in `meta.yaml` is never changed.
 | `s` | cycle the status (`active → trying → inactive → active`) |
 | `e` | edit the note |
 | `t` | edit the tags |
-| `↑ / ↓` | scroll the card |
+| `j / k`, `↑ / ↓` | scroll the card (3 lines) |
+| `ctrl+d / ctrl+u`, `ctrl+f / ctrl+b`, `PgUp / PgDn`, `space`, `g / G` | half-page / full-page scroll, top / bottom |
+| `?` | hotkeys overlay |
 
 Statuses: `active` (●) · `trying` (○) · `inactive` (✕) — shown on the card.
 Legacy `forgotten` / `archived` values from `meta.yaml` are automatically read as
@@ -91,9 +98,11 @@ Legacy `forgotten` / `archived` values from `meta.yaml` are automatically read a
 | Key | Action |
 |-----|--------|
 | `h` / `m` | `--help` / `man` mode (the current one is shown in the panel title) |
-| `j / k` | navigate by entries — flags and subcommands; the current entry is highlighted, the rest is dimmed |
-| `↑ / ↓`, `PgUp / PgDn`, `g / G` | scroll the text |
+| `j / k` | navigate by entries — flags and subcommands; the current entry is highlighted, the rest is dimmed (when there are no entries, `j / k` scroll 3 lines like the arrows) |
+| `↑ / ↓` | scroll the text (3 lines) |
+| `ctrl+d / ctrl+u`, `ctrl+f / ctrl+b`, `PgUp / PgDn`, `space`, `g / G` | half-page / full-page scroll, top / bottom |
 | `/` | search the text (`n` / `N` — next / previous match) |
+| `?` | hotkeys overlay |
 | `esc` | first turns off entry navigation, then moves focus away |
 
 While a tool is being updated, this panel (`[3] Update`) shows the live command log;

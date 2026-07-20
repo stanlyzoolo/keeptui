@@ -3,7 +3,9 @@
 `keeptui` is a terminal TUI tracker for CLI tools built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
 It is a pure TUI: `main.go` is a thin launcher that reads the tracker (`loader.LoadMeta()`),
 sets up the error journal (`logx`) and starts the Bubble Tea model (`model.New(meta)`).
-There are no subcommands or flags.
+The only CLI surface is `--version`/`-V` and `--help`/`-h` (handled in `main.go`
+before the TUI starts, so `keeptui` can be probed by version detectors — including
+itself); any other argument errors out instead of booting the TUI.
 
 ## Package map
 

@@ -28,8 +28,12 @@ func (m Model) View() string {
 	right := m.renderHelp()
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, middle, right)
 	layout := lipgloss.JoinVertical(lipgloss.Left, body, m.renderStatusBar())
-	if m.apiOverlayVisible() {
-		layout = ui.PlaceOverlay(layout, m.renderAPIStatus())
+	if m.overlayVisible() {
+		fg := m.renderAPIStatus()
+		if m.mode == modeHotkeys {
+			fg = m.renderHotkeys()
+		}
+		layout = ui.PlaceOverlay(layout, fg)
 	}
 	// Vertical margin only; no horizontal margin so panels/status bar reach the
 	// terminal edges.
@@ -115,11 +119,14 @@ func (m Model) renderStatusBar() string {
 	if m.mode == modeAPIStatus {
 		return style.Render(keyHint("r") + " refresh  " + keyHint("esc") + " close")
 	}
+	if m.mode == modeHotkeys {
+		return style.Render(keyHint("esc") + " close")
+	}
 	if m.statusMsg != "" {
 		return style.Render(ui.SearchPromptStyle.Render(m.statusMsg))
 	}
 	if m.focus == focusBrief {
-		hints := keyHint("o") + " open repo  " + keyHint("c") + " changelog  " + keyHint("r") + " refresh  " + keyHint("s") + " status  " + keyHint("e") + " note  " + keyHint("t") + " tags  " + keyHint("q") + " quit"
+		hints := keyHint("o") + " open repo  " + keyHint("c") + " changelog  " + keyHint("r") + " refresh  " + keyHint("s") + " status  " + keyHint("e") + " note  " + keyHint("t") + " tags  " + keyHint("q") + " quit  " + keyHint("?") + " keys"
 		if mt, ok := m.selectedMeta(); ok && m.hasUpdate(mt.Name) {
 			hints = keyHint("u") + " update  " + hints
 		}
@@ -133,7 +140,7 @@ func (m Model) renderStatusBar() string {
 		if len(m.helpEntries) > 0 {
 			scrollOrNav = keyHint("j/k") + " navigate  " + scrollOrNav
 		}
-		hints := scrollOrNav + keyHint("h") + " --help  " + keyHint("m") + " man  " + keyHint("/") + " search  " + keyHint("←") + " back  " + keyHint("q") + " quit"
+		hints := scrollOrNav + keyHint("h") + " --help  " + keyHint("m") + " man  " + keyHint("/") + " search  " + keyHint("←") + " back  " + keyHint("q") + " quit  " + keyHint("?") + " keys"
 		if m.helpNavIdx >= 0 {
 			hints = keyHint("esc") + " exit nav  " + hints
 		}
@@ -144,7 +151,8 @@ func (m Model) renderStatusBar() string {
 			keyHint("t")+" track  "+
 			keyHint("u")+" untrack  "+
 			keyHint("r")+" rename  "+
-			keyHint("q")+" quit",
+			keyHint("q")+" quit  "+
+			keyHint("?")+" keys",
 	)
 }
 
@@ -370,6 +378,86 @@ func (m Model) renderAPIStatus() string {
 	b.WriteString(ui.InfoStyle.Render(hints))
 
 	return ui.OverlayBorder.Render(b.String())
+}
+
+// renderHotkeys builds the static [?] hotkeys overlay: a title row with the
+// close hint right-aligned, then a two-column grid of every normal-mode
+// binding grouped and annotated by the panel/mode it belongs to. Styled like
+// the [L] overlay (OverlayBorder frame, SectionLabelStyle headers, keyHint
+// keys, InfoStyle text). Hard size budget: <= 18 content rows and <= 76 cols
+// framed, so it fits the 80x24 composited background (20 rows) that PlaceOverlay
+// clips off the bottom.
+func (m Model) renderHotkeys() string {
+	hdr := ui.SectionLabelStyle.Render
+	info := ui.InfoStyle.Render
+	// padTo right-pads a (possibly ANSI-styled) cell to a visible width so the
+	// second sub-column of a row lines up; measured with lipgloss.Width, which
+	// strips ANSI.
+	padTo := func(s string, w int) string {
+		if d := w - lipgloss.Width(s); d > 0 {
+			return s + strings.Repeat(" ", d)
+		}
+		return s
+	}
+
+	leftLines := []string{
+		hdr("Global"),
+		keyHint("1/2/3") + " " + info("focus panel"),
+		keyHint("←") + " " + keyHint("→/l") + " " + info("move focus"),
+		keyHint("esc") + " " + info("back / exit nav / quit"),
+		keyHint("q") + " " + info("quit  (ctrl+c anywhere)"),
+		keyHint("L") + " " + info("GitHub API status"),
+		keyHint("?") + " " + info("this help"),
+		"",
+		hdr("[1] Tools"),
+		keyHint("j/k") + " " + keyHint("↑/↓") + " " + info("select tool (wrap)"),
+		keyHint("g/G") + " " + info("first / last tool"),
+		keyHint("PgUp/PgDn") + " " + keyHint("ctrl+d/u") + " " + info("page/half"),
+		keyHint("t") + " " + info("track ") + keyHint("u") + " " + info("untrack ") + keyHint("r") + " " + info("rename"),
+		keyHint("/") + " " + info("filter by name or tag"),
+		info("  ") + keyHint("enter") + " " + info("open  ") + keyHint("↑/↓") + " " + info("move"),
+		info("  ") + keyHint("esc") + " " + info("cancel"),
+	}
+
+	rightLines := []string{
+		hdr("[2] Brief"),
+		padTo(keyHint("o")+" "+info("open repo"), 16) + keyHint("c") + " " + info("changelog"),
+		padTo(keyHint("r")+" "+info("refresh"), 16) + keyHint("s") + " " + info("cycle status"),
+		padTo(keyHint("e")+" "+info("edit note"), 16) + keyHint("t") + " " + info("edit tags"),
+		keyHint("u") + " " + info("run update (when ↑ shown)"),
+		padTo(keyHint("h")+" "+info("--help"), 16) + keyHint("m") + " " + info("man page"),
+		"",
+		hdr("[3] Help / Man"),
+		padTo(keyHint("j/k"), 7) + info("entry nav (spotlight)"),
+		padTo(keyHint("↑/↓"), 7) + padTo(info("scroll"), 9) + keyHint("esc") + " " + info("exit nav"),
+		padTo(keyHint("h/m"), 7) + info("--help / man page"),
+		keyHint("/") + " " + info("search  ") + keyHint("n/N") + " " + info("next (in search)"),
+		"",
+		hdr("Scrolling ([2]/[3])"),
+		keyHint("j/k") + " " + keyHint("↑/↓") + " " + info("3 lines"),
+		keyHint("ctrl+d/u") + " " + info("half  ") + keyHint("g/G") + " " + info("top/bottom"),
+		keyHint("ctrl+f/b") + " " + keyHint("space") + " " + keyHint("PgUp/PgDn") + " " + info("page"),
+	}
+
+	grid := lipgloss.JoinHorizontal(
+		lipgloss.Top,
+		strings.Join(leftLines, "\n"),
+		"   ",
+		strings.Join(rightLines, "\n"),
+	)
+
+	// Title row: heading left, close hint right-aligned to the grid width so the
+	// overlay reads as a single block. No separate bottom hint line — it would
+	// cost a row the 80x24 background can't spare.
+	title := hdr("Keyboard shortcuts")
+	closeHint := keyHint("esc") + " " + info("close")
+	titleRow := title + " " + closeHint
+	if pad := lipgloss.Width(grid) - lipgloss.Width(title) - lipgloss.Width(closeHint); pad > 0 {
+		titleRow = title + strings.Repeat(" ", pad) + closeHint
+	}
+
+	body := lipgloss.JoinVertical(lipgloss.Left, titleRow, grid)
+	return ui.OverlayBorder.Render(body)
 }
 
 func (m Model) calcVpHeight() int {
@@ -837,8 +925,8 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	// Mouse policy: wheel scrolls in every mode, clicks (selection/focus) only
 	// in modeNormal — while an input mode owns the keyboard a click must not
 	// move selectedMeta() under it (wrong-target note/tags/rename commits).
-	// Under the [L] overlay nothing may move: scrolling there is invisible.
-	if !m.ready || m.apiOverlayVisible() {
+	// Under any overlay nothing may move: scrolling there is invisible.
+	if !m.ready || m.overlayVisible() {
 		return m, nil
 	}
 	clickable := m.mode == modeNormal

@@ -30,12 +30,37 @@ const (
 	modeConfirmUpdate  // "u" in focusBrief: confirm the detected update command
 	modeAPIStatus      // "L": rate-limit / token overlay
 	modeTokenInput     // "e" inside the overlay: masked token entry
+	modeHotkeys        // "?": static hotkeys-help overlay
 )
 
 // apiOverlayVisible reports whether the API-status overlay is on screen —
 // true both while browsing it and while entering a token.
 func (m Model) apiOverlayVisible() bool {
 	return m.mode == modeAPIStatus || m.mode == modeTokenInput
+}
+
+// overlayVisible reports whether any modal overlay is composited over the
+// layout — the [L] API-status overlay (incl. token entry) or the [?] hotkeys
+// overlay. It is the single "modal on screen" predicate for View() and the
+// mouse gate, so a new overlay only has to extend this one helper.
+func (m Model) overlayVisible() bool {
+	return m.apiOverlayVisible() || m.mode == modeHotkeys
+}
+
+// updateHotkeys handles keys while the [?] hotkeys overlay is open: esc, q, or
+// a second ? closes it back to modeNormal; every other key is a no-op. The
+// overlay is static (no scrolling), mirroring the updateAPIStatus close
+// pattern. ctrl+c still quits — this handler runs before the global quit case,
+// so it must honor the overlay's own "ctrl+c anywhere" hint explicitly.
+func (m Model) updateHotkeys(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc", "q", "?":
+		m.mode = modeNormal
+		return m, nil
+	}
+	return m, nil
 }
 
 func (m Model) updateNoteEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

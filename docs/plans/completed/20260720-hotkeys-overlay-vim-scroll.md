@@ -116,14 +116,14 @@ Completeness rule: the overlay covers every binding of the normal mode and names
 - Modify: `internal/model/render.go`
 - Modify: `internal/model/mode_test.go`
 
-- [ ] add `modeHotkeys` to the `inputMode` enum (`mode.go`) with a comment (`"?": hotkeys overlay`); add `overlayVisible()` helper next to `apiOverlayVisible()` returning `apiOverlayVisible() || m.mode == modeHotkeys`
-- [ ] add `updateHotkeys(msg)` handler in `mode.go`: `esc`/`q`/`?` → `modeNormal`; any other key no-op (return `m, nil`)
-- [ ] dispatch `case modeHotkeys: return m.updateHotkeys(msg)` in the mode switch of `Update()` (`model.go:583-598`)
-- [ ] add `case "?"` to the normal-mode switch (next to `case "L"`, `model.go:988`): `m.mode = modeHotkeys; return m, nil`
-- [ ] add the `modeHotkeys` branch to `renderStatusBar()` (next to the `modeAPIStatus` branch): `[esc] close`
-- [ ] write tests: `?` opens `modeHotkeys` from each of the three focuses; `esc`, `q`, and `?` each close back to `modeNormal`; an unrelated key (e.g. `x`, `j`) keeps the overlay open and changes nothing
-- [ ] write tests: `?` typed in `modeSearch`, `modeEditNote`, and `modeTokenInput` lands in the textinput as literal text and does not open the overlay; status bar renders `[esc] close` in `modeHotkeys`
-- [ ] run `go test -race ./...` — must pass before task 2
+- [x] add `modeHotkeys` to the `inputMode` enum (`mode.go`) with a comment (`"?": hotkeys overlay`); add `overlayVisible()` helper next to `apiOverlayVisible()` returning `apiOverlayVisible() || m.mode == modeHotkeys`
+- [x] add `updateHotkeys(msg)` handler in `mode.go`: `esc`/`q`/`?` → `modeNormal`; any other key no-op (return `m, nil`)
+- [x] dispatch `case modeHotkeys: return m.updateHotkeys(msg)` in the mode switch of `Update()` (`model.go:583-598`)
+- [x] add `case "?"` to the normal-mode switch (next to `case "L"`, `model.go:988`): `m.mode = modeHotkeys; return m, nil`
+- [x] add the `modeHotkeys` branch to `renderStatusBar()` (next to the `modeAPIStatus` branch): `[esc] close`
+- [x] write tests: `?` opens `modeHotkeys` from each of the three focuses; `esc`, `q`, and `?` each close back to `modeNormal`; an unrelated key (e.g. `x`, `j`) keeps the overlay open and changes nothing
+- [x] write tests: `?` typed in `modeSearch`, `modeEditNote`, and `modeTokenInput` lands in the textinput as literal text and does not open the overlay; status bar renders `[esc] close` in `modeHotkeys`
+- [x] run `go test -race ./...` — must pass before task 2
 
 ### Task 2: renderHotkeys overlay, View compositing, mouse gate, `[?]` hints
 
@@ -132,15 +132,15 @@ Completeness rule: the overlay covers every binding of the normal mode and names
 - Modify: `internal/model/render_test.go`
 - Modify: `internal/model/mouse_test.go`
 
-- [ ] implement `renderHotkeys()` in `render.go` exactly per the content spec above: two-column static grid, per-group panel annotations, aligned key column, `ui.OverlayBorder` frame, `SectionLabelStyle`/`keyHint`/`InfoStyle` styling, `[esc] close` right-aligned in the title row; **hard budget ≤ 18 content rows × ≤ 76 cols** (≤ 20 rows framed — the 80×24 background height)
-- [ ] composite in `View()`: replace the `apiOverlayVisible()` check with `overlayVisible()` and pick the fg by mode (`modeHotkeys` → `renderHotkeys()`, else `renderAPIStatus()`)
-- [ ] extend the `handleMouse` gate (`render.go:841`) from `m.apiOverlayVisible()` to `m.overlayVisible()` and reword the `:840` comment from "[L] overlay" to "any overlay"
-- [ ] append `keyHint("?") + " keys"` after `[q] quit` in all three normal focus bars (`renderStatusBar` focusTools/focusBrief/focusHelp branches)
-- [ ] write tests: `View()` in `modeHotkeys` contains every group header (`Global`, `[1] Tools`, `[2] Brief`, `[3] Help / Man`, `Scrolling`) and a per-panel spot-check key from each group; background dimmed (mirror the existing `[L]` overlay render tests)
-- [ ] write test (size budget): at 80×24 the composited `View()` still contains the `[esc] close` hint and the last `Scrolling` row — i.e. the overlay fits the 20-row background and `PlaceOverlay` clipped nothing
-- [ ] write tests: mouse click and wheel are no-ops while `modeHotkeys` is open (selection, focus, and viewport offsets unchanged); `[?] keys` hint present in all three normal focus bars
-- [ ] re-run `TestRenderStatusBarGauge` (`render_test.go:1005`): the focusBrief bar at width 160 must still fit the full gauge after the `[?] keys` hint lands — bump the test width only if genuinely needed and note it here
-- [ ] run `go test -race ./...` — must pass before task 3
+- [x] implement `renderHotkeys()` in `render.go` exactly per the content spec above: two-column static grid, per-group panel annotations, aligned key column, `ui.OverlayBorder` frame, `SectionLabelStyle`/`keyHint`/`InfoStyle` styling, `[esc] close` right-aligned in the title row; **hard budget ≤ 18 content rows × ≤ 76 cols** (≤ 20 rows framed — the 80×24 background height)
+- [x] composite in `View()`: replace the `apiOverlayVisible()` check with `overlayVisible()` and pick the fg by mode (`modeHotkeys` → `renderHotkeys()`, else `renderAPIStatus()`)
+- [x] extend the `handleMouse` gate (`render.go:841`) from `m.apiOverlayVisible()` to `m.overlayVisible()` and reword the `:840` comment from "[L] overlay" to "any overlay"
+- [x] append `keyHint("?") + " keys"` after `[q] quit` in all three normal focus bars (`renderStatusBar` focusTools/focusBrief/focusHelp branches)
+- [x] write tests: `View()` in `modeHotkeys` contains every group header (`Global`, `[1] Tools`, `[2] Brief`, `[3] Help / Man`, `Scrolling`) and a per-panel spot-check key from each group; background dimmed (mirror the existing `[L]` overlay render tests)
+- [x] write test (size budget): at 80×24 the composited `View()` still contains the `[esc] close` hint and the last `Scrolling` row — i.e. the overlay fits the 20-row background and `PlaceOverlay` clipped nothing
+- [x] write tests: mouse click and wheel are no-ops while `modeHotkeys` is open (selection, focus, and viewport offsets unchanged); `[?] keys` hint present in all three normal focus bars
+- [x] re-run `TestRenderStatusBarGauge` (`render_test.go:1005`): the focusBrief bar at width 160 must still fit the full gauge after the `[?] keys` hint lands — bump the test width only if genuinely needed and note it here
+- [x] run `go test -race ./...` — must pass before task 3
 
 ### Task 3: unified scrolling — zero the implicit keymap and bind every scroll key explicitly (one atomic change)
 
@@ -152,31 +152,31 @@ Completeness rule: the overlay covers every binding of the normal mode and names
 - Modify: `internal/model/mouse_test.go`
 - Create or extend: `internal/model/scroll_test.go` (new home for the scroll-matrix tests; extend `update_test.go` instead if creating a file feels heavier than the repo style)
 
-- [ ] zero the keymap of all three viewports right after `viewport.New` (`model.go:554-556`): `m.toolsViewport.KeyMap = viewport.KeyMap{}` (same for brief/help) with a comment: every keyboard scroll binding lives in `Update()`'s switch — the default pager keymap must never come back (hidden `d`/`u`/`f`/`b`/`space`/`h`/`l` bindings; wheel is `MouseWheelEnabled`, a separate field, and stays on)
-- [ ] delete the keyboard fall-through `briefViewport.Update(msg)`/`helpViewport.Update(msg)` at `model.go:997-1001`
-- [ ] unify the line step: `j`/`k` in brief/help scroll 3 lines (same as arrows) — drop the `step := 1` / conditional-3 logic in the `j`/`k` cases; `[3]` spotlight nav (`helpEntries` non-empty) stays exactly as-is
-- [ ] add `case "ctrl+d"` / `case "ctrl+u"`: brief/help → `HalfPageDown()`/`HalfPageUp()`; focusTools → selection ±`max(toolsViewport.Height/2, 1)` clamped, via `m.selectMeta`
-- [ ] extend `case "pgdown", "ctrl+f"` / `case "pgup", "ctrl+b"` (and add `" "` to the pgdown case): keep the focusTools behavior, add brief/help → `PageDown()`/`PageUp()`; `space` pages down in brief/help only (no tools binding — nothing to page there that `ctrl+f` doesn't already do; keep `space` out of focusTools so it can't collide with future list actions)
-- [ ] extend `case "g"` / `case "G"`: focusTools → first/last tool with the guard shape from Technical Details; brief/help behavior unchanged
-- [ ] update `TestHelpNavEmptyEntriesScrolls` (`render_test.go:2947`) to expect `YOffset == 3` — the old 1-line step is the behavior this plan changes; verify the helpNav **spotlight** tests pass unmodified
-- [ ] write tests (scroll matrix): in `focusBrief` and `focusHelp` (entries empty) `j` and `↓` both move `YOffset` by 3 (`k`/`↑` symmetric); `ctrl+d`/`ctrl+u` half-page brief/help and move tools selection by half a page clamped at both ends; `ctrl+f`/`ctrl+b`/`pgup`/`pgdown`/`space` full-page brief/help; `g`/`G` in focusTools land on first/last (card follows via `selectMeta`) and are no-ops on an empty tool list
-- [ ] write regression tests (hidden keymap is gone): `u`, `d`, `f`, `b` in `focusHelp` leave `YOffset` unchanged; `h`/`l` leave `XOffset` of brief/help viewports at 0 (no horizontal shift after the focus change)
-- [ ] write regression test (wheel survives keymap zeroing): wheel-down over each of tools/brief/help advances that viewport's `YOffset` (extend `mouse_test.go:179`, which covers tools only)
-- [ ] run `go test -race ./...` — must pass before task 4
+- [x] zero the keymap of all three viewports right after `viewport.New` (`model.go:554-556`): `m.toolsViewport.KeyMap = viewport.KeyMap{}` (same for brief/help) with a comment: every keyboard scroll binding lives in `Update()`'s switch — the default pager keymap must never come back (hidden `d`/`u`/`f`/`b`/`space`/`h`/`l` bindings; wheel is `MouseWheelEnabled`, a separate field, and stays on)
+- [x] delete the keyboard fall-through `briefViewport.Update(msg)`/`helpViewport.Update(msg)` at `model.go:997-1001`
+- [x] unify the line step: `j`/`k` in brief/help scroll 3 lines (same as arrows) — drop the `step := 1` / conditional-3 logic in the `j`/`k` cases; `[3]` spotlight nav (`helpEntries` non-empty) stays exactly as-is
+- [x] add `case "ctrl+d"` / `case "ctrl+u"`: brief/help → `HalfPageDown()`/`HalfPageUp()`; focusTools → selection ±`max(toolsViewport.Height/2, 1)` clamped, via `m.selectMeta`
+- [x] extend `case "pgdown", "ctrl+f"` / `case "pgup", "ctrl+b"` (and add `" "` to the pgdown case): keep the focusTools behavior, add brief/help → `PageDown()`/`PageUp()`; `space` pages down in brief/help only (no tools binding — nothing to page there that `ctrl+f` doesn't already do; keep `space` out of focusTools so it can't collide with future list actions)
+- [x] extend `case "g"` / `case "G"`: focusTools → first/last tool with the guard shape from Technical Details; brief/help behavior unchanged
+- [x] update `TestHelpNavEmptyEntriesScrolls` (`render_test.go:2947`) to expect `YOffset == 3` — the old 1-line step is the behavior this plan changes; verify the helpNav **spotlight** tests pass unmodified
+- [x] write tests (scroll matrix): in `focusBrief` and `focusHelp` (entries empty) `j` and `↓` both move `YOffset` by 3 (`k`/`↑` symmetric); `ctrl+d`/`ctrl+u` half-page brief/help and move tools selection by half a page clamped at both ends; `ctrl+f`/`ctrl+b`/`pgup`/`pgdown`/`space` full-page brief/help; `g`/`G` in focusTools land on first/last (card follows via `selectMeta`) and are no-ops on an empty tool list
+- [x] write regression tests (hidden keymap is gone): `u`, `d`, `f`, `b` in `focusHelp` leave `YOffset` unchanged; `h`/`l` leave `XOffset` of brief/help viewports at 0 (no horizontal shift after the focus change)
+- [x] write regression test (wheel survives keymap zeroing): wheel-down over each of tools/brief/help advances that viewport's `YOffset` (extend `mouse_test.go:179`, which covers tools only)
+- [x] run `go test -race ./...` — must pass before task 4
 
 ### Task 4: Verify acceptance criteria
 
-- [ ] verify all requirements from Overview are implemented (`?` overlay from every focus with full per-panel key inventory; unified steps; no hidden keymap; `space` kept, `d`/`u`/`f`/`b` unbound)
-- [ ] verify edge cases: empty tool list (`g`/`G`/`ctrl+d`), tiny terminal (overlay clipping, hint-bar gauge downgrade), `?` inside every input mode
-- [ ] run full suite: `go build . && go vet ./... && go test -race ./...`
-- [ ] run `golangci-lint run`
-- [ ] verify helpNav spotlight tests and existing mouse/overlay tests unchanged and green (`TestHelpNavEmptyEntriesScrolls` is the one sanctioned update)
+- [x] verify all requirements from Overview are implemented (`?` overlay from every focus with full per-panel key inventory; unified steps; no hidden keymap; `space` kept, `d`/`u`/`f`/`b` unbound)
+- [x] verify edge cases: empty tool list (`g`/`G`/`ctrl+d`), tiny terminal (overlay clipping, hint-bar gauge downgrade), `?` inside every input mode
+- [x] run full suite: `go build . && go vet ./... && go test -race ./...`
+- [x] run `golangci-lint run`
+- [x] verify helpNav spotlight tests and existing mouse/overlay tests unchanged and green (`TestHelpNavEmptyEntriesScrolls` is the one sanctioned update)
 
 ### Task 5: [Final] Update documentation
 
-- [ ] CLAUDE.md: overlay compositing section — rewrite the "the API-status overlay is the single `ui.PlaceOverlay` caller" sentence (two callers behind `overlayVisible()`); mouse policy (`overlayVisible()` gate); help-bar section (`[?] keys` hint); new bullet for the `[?]` overlay (modeHotkeys); scrolling-policy paragraph (empty `viewport.KeyMap`, why it must stay empty, unified steps table incl. `space`)
-- [ ] README: sync the keybindings table if one exists
-- [ ] move this plan to `docs/plans/completed/`
+- [x] CLAUDE.md: overlay compositing section — rewrite the "the API-status overlay is the single `ui.PlaceOverlay` caller" sentence (two callers behind `overlayVisible()`); mouse policy (`overlayVisible()` gate); help-bar section (`[?] keys` hint); new bullet for the `[?]` overlay (modeHotkeys); scrolling-policy paragraph (empty `viewport.KeyMap`, why it must stay empty, unified steps table incl. `space`)
+- [x] README: sync the keybindings table if one exists
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 

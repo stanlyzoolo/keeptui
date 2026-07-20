@@ -2955,8 +2955,8 @@ func TestHelpNavEmptyEntriesScrolls(t *testing.T) {
 	if nm.helpNavIdx != -1 {
 		t.Errorf("helpNavIdx = %d, want -1 (no entries, no cursor)", nm.helpNavIdx)
 	}
-	if nm.helpViewport.YOffset != 1 {
-		t.Errorf("YOffset = %d, want 1 (plain scroll)", nm.helpViewport.YOffset)
+	if nm.helpViewport.YOffset != 3 {
+		t.Errorf("YOffset = %d, want 3 (unified 3-line scroll)", nm.helpViewport.YOffset)
 	}
 }
 
@@ -3184,5 +3184,87 @@ func TestHelpBaseCache(t *testing.T) {
 	m.helpNavIdx = 0
 	if got := m.renderHelpContent(); got == m.helpBase || !strings.Contains(got, "38;2;136;136;136") {
 		t.Errorf("spotlight render did not dim over the cached base")
+	}
+}
+
+// hotkeysViewModel builds a ready 80x24 model in modeHotkeys for View-level
+// overlay assertions.
+func hotkeysViewModel() Model {
+	m := New([]loader.ToolMeta{{Name: "git"}})
+	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = updated.(Model)
+	m.mode = modeHotkeys
+	return m
+}
+
+// TestRenderHotkeysOverlayContent: View in modeHotkeys shows every group header
+// and a per-group spot-check key/description.
+func TestRenderHotkeysOverlayContent(t *testing.T) {
+	m := hotkeysViewModel()
+	view := m.View()
+	for _, want := range []string{
+		"Keyboard shortcuts",
+		"Global", "[1] Tools", "[2] Brief", "[3] Help / Man", "Scrolling",
+		"focus panel",  // Global
+		"select tool",  // [1] Tools
+		"open repo",    // [2] Brief
+		"entry nav",    // [3] Help / Man
+		"3 lines",      // Scrolling
+		"close",        // title close hint
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("hotkeys View missing %q", want)
+		}
+	}
+}
+
+// TestRenderHotkeysDimsBackground: the overlay dims the composited background,
+// mirroring the [L] overlay.
+func TestRenderHotkeysDimsBackground(t *testing.T) {
+	forceColorProfile(t)
+	const dimSeq = "38;2;136;136;136" // ui.ColorDim #888888
+	m := hotkeysViewModel()
+	if !strings.Contains(m.View(), dimSeq) {
+		t.Errorf("hotkeys overlay did not dim the background")
+	}
+}
+
+// TestRenderHotkeysSizeBudget: at 80x24 the overlay fits the 20-row background
+// with no PlaceOverlay clipping — both the top title's close hint and the
+// bottom Scrolling row survive.
+func TestRenderHotkeysSizeBudget(t *testing.T) {
+	m := hotkeysViewModel()
+	view := m.View()
+	// Title row (top of the overlay).
+	if !strings.Contains(view, "close") {
+		t.Errorf("size budget: title close hint clipped off the top")
+	}
+	// Bottom-most Scrolling row: [ctrl+f/b] [space] [PgUp/PgDn] page — its
+	// trailing word survives only if nothing was clipped off the bottom or the
+	// right edge.
+	if !strings.Contains(view, "page") {
+		t.Errorf("size budget: last Scrolling row clipped (bottom/right overflow)")
+	}
+	// The framed overlay must be <= the 20-row background height.
+	if h := lipgloss.Height(m.renderHotkeys()); h > 20 {
+		t.Errorf("overlay framed height = %d, want <= 20 (80x24 background)", h)
+	}
+	if w := lipgloss.Width(m.renderHotkeys()); w > 76 {
+		t.Errorf("overlay framed width = %d, want <= 76", w)
+	}
+}
+
+// TestHotkeysHintInFocusBars: the [?] keys hint appears in all three normal
+// focus status bars.
+func TestHotkeysHintInFocusBars(t *testing.T) {
+	for _, focus := range []int{focusTools, focusBrief, focusHelp} {
+		m := New([]loader.ToolMeta{{Name: "git"}})
+		updated, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+		m = updated.(Model)
+		m.focus = focus
+		bar := m.renderStatusBar()
+		if !strings.Contains(bar, "[?]") || !strings.Contains(bar, "keys") {
+			t.Errorf("focus %d bar missing [?] keys hint: %q", focus, bar)
+		}
 	}
 }

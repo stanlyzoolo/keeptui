@@ -1,0 +1,83 @@
+# GoReleaser config — builds cross-platform binaries, cuts the GitHub Release,
+# and publishes/updates the Homebrew formula in stanlyzoolo/homebrew-apps.
+# Run locally with `goreleaser release --snapshot --clean` to dry-run (no publish).
+version: 2
+
+project_name: keeptui
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: keeptui
+    main: .
+    binary: keeptui
+    env:
+      - CGO_ENABLED=0
+    flags:
+      - -trimpath
+      - -buildvcs=false
+    # {{ .Tag }} keeps the leading "v" (e.g. v1.2.3) so `keeptui --version`
+    # output stays identical to the pre-GoReleaser releases and a keeptui
+    # tracking itself still parses its own version.
+    ldflags:
+      - -s -w -X main.version={{ .Tag }}
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      # matches the old workflow: no windows/arm64 build
+      - goos: windows
+        goarch: arm64
+
+archives:
+  - id: keeptui
+    # umputun-style names: darwin→macos, amd64→x86_64 (cosmetic; the URLs
+    # in the generated formula follow whatever this produces).
+    name_template: >-
+      {{ .ProjectName }}_{{ .Tag }}_
+      {{- if eq .Os "darwin" }}macos{{ else }}{{ .Os }}{{ end }}_
+      {{- if eq .Arch "amd64" }}x86_64{{ else }}{{ .Arch }}{{ end }}
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  sort: asc
+
+release:
+  github:
+    owner: stanlyzoolo
+    name: keeptui
+
+brews:
+  - name: keeptui
+    repository:
+      owner: stanlyzoolo
+      name: homebrew-apps
+      # PAT with write access to the tap repo, set as a secret in THIS repo.
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    directory: Formula
+    homepage: "https://github.com/stanlyzoolo/keeptui"
+    description: "Terminal TUI tracker for CLI tools"
+    license: MIT
+    commit_author:
+      name: goreleaser-bot
+      email: bot@goreleaser.com
+    install: |
+      bin.install "keeptui"
+    test: |
+      system "#{bin}/keeptui", "--version"

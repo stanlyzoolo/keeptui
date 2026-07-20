@@ -2,7 +2,8 @@
 
 A terminal TUI tracker for CLI tools: a list of tracked tools, a card with repository
 data, versions and notes, built-in `--help` / `man` viewing, and updating outdated
-tools right from the interface. Pure TUI — no subcommands.
+tools right from the interface. Pure TUI — no subcommands; the only flags are
+`--version` and `--help`.
 
 ```
 ┌─ [1] Tools ────────┬─ [2] Brief ─────────────────────────┬─ [3] Help ──────────┐

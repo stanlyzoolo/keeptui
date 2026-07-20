@@ -13,15 +13,15 @@ go vet ./...        # static analysis
 golangci-lint run   # lint (config in .golangci.yml; requires golangci-lint v2)
 ```
 
-CI (`.github/workflows/ci.yml`) runs build / vet / `test -race` / golangci-lint on every push and PR to `main`. Release is triggered by pushing a `v*` tag; GitHub Actions builds for darwin/linux/windows via `.github/workflows/release.yml`, injecting the tag with `-ldflags "-X main.version=<tag>"`. `main.version` (default `"dev"`) exists so that ldflag actually takes effect — it seeds the session-log header; local builds show `dev`.
+CI (`.github/workflows/ci.yml`) runs build / vet / `test -race` / golangci-lint on every push and PR to `main`. Release is triggered by pushing a `v*` tag; GitHub Actions builds for darwin/linux/windows via `.github/workflows/release.yml`, injecting the tag with `-ldflags "-X main.version=<tag>"`. `main.version` (default `"dev"`) exists so that ldflag actually takes effect — it seeds the session-log header and the `--version` output via `buildVersion()`, which falls back to the module version from `debug.ReadBuildInfo()` (set by `go install …@<tag>` and VCS-stamped `go build`) when the ldflag wasn't injected; only a build with no usable buildinfo shows `dev`.
 
 ## Architecture
 
-**`keeptui`** is a terminal TUI tracker for CLI tools built with Bubble Tea. It is a pure TUI app — there is no CLI; running `keeptui` launches the interface directly.
+**`keeptui`** is a terminal TUI tracker for CLI tools built with Bubble Tea. It is a pure TUI app — running `keeptui` launches the interface directly; the only CLI surface is `--version`/`--help`.
 
 ### Entry point
 
-`main.go` is a thin launcher: it loads tracker metadata via `loader.LoadMeta()` and starts the Bubble Tea TUI with `model.New(meta)`. There are no subcommands or flags.
+`main.go` is a thin launcher: it loads tracker metadata via `loader.LoadMeta()` and starts the Bubble Tea TUI with `model.New(meta)`. Before that, `handleCLI` answers `--version`/`-V`/`-v`/`version` (prints `keeptui <version>` — dotted-numeric on release/`go install` builds, so `version.InstalledVersion`'s regex parses it and a keeptui tracked inside keeptui shows as installed) and `--help`/`-h`/`help` (static usage text); **any other argument exits 2 with usage on stderr** — falling through to the TUI is what used to make a probed keeptui boot Bubble Tea on a detached TTY, fail with `could not open a new TTY`, and litter `logs/` with junk session files. There are no other subcommands or flags.
 
 ### Package overview
 

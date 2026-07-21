@@ -304,13 +304,34 @@ GitHub ref, including uninstalled ones — exactly the tools being evaluated
 
 ### Task 6: Verify acceptance criteria
 
-- [ ] verify all requirements from Overview are implemented (README default on
+- [x] verify all requirements from Overview are implemented (README default on
       selection, `[h]`/`[m]`/`[r]` switching, uninstalled-tool case, quota = 1 lazy
-      request/tool/24h)
-- [ ] verify edge cases: no GitHub ref, no README (404), rate limit with and without
-      cached content, rename mid-session, live update log priority
-- [ ] run full suite: `go test -race ./...`
-- [ ] run `go vet ./...` and `golangci-lint run`
+      request/tool/24h) — `New()` sets `helpMode = helpModeReadme` (model.go:295);
+      `Init()` seeds only the *selected* tool's README (model.go:328) and
+      `autoFetchCmdsForSelected` fires `fetchReadmeCmd` on selection moves in readme
+      mode only (commands.go:286-295); `[r]` in `focusHelp` (model.go:1070-1088)
+      covers the gap when the selection moved under `[h]`/`[m]`. The fetch keys off
+      `t.GitHub`, never off an installed binary, so an uninstalled tracked tool gets
+      a full panel. Quota: `getReadme` short-circuits on
+      `ReadmeCheckedAt < cacheTTL && Readme != ""` (github.go:541) and `needsReadme`
+      gates on a present `readmeData` entry, so a session-cached negative never
+      refetches → 1 request/tool/24h. Tests: `TestReadmeIsDefaultHelpMode`,
+      `TestReadmeKeyBranches`, `TestInitFetchesReadmeForSelected`,
+      `TestInitSkipsReadmeWithoutRepo`, `TestGetReadmeSuccessAndCache`
+- [x] verify edge cases: no GitHub ref, no README (404), rate limit with and without
+      cached content, rename mid-session, live update log priority — all four
+      placeholders live in `readmeContent` (render.go:1072-1093) and are pinned by
+      `TestReadmePlaceholders`; cached-content-wins on error holds at both layers
+      (`getReadme` returns `entry.Readme` for a non-`ErrNoReadme` failure,
+      github.go:549; the `readmeMsg` handler keeps `prev.content`, model.go:371-374 —
+      `TestGetReadmeFailureKeepsCached`, `TestReadmeMsgKeepsKnownContent`); rename
+      drops the stale key (mode.go:259, asserted at render_test.go:1890); the update
+      log keeps panel [3] in all three paths (`renderHelpContent` log branch ahead of
+      the readme branch, `setHelpContent`'s `updateLogFor != mt.Name` gate, the
+      readme case placed after the `updateLogFor` case in `autoFetchCmdsForSelected`)
+      — `TestReadmeKeyUpdateLogPriority`
+- [x] run full suite: `go test -race ./...` — all 8 packages ok
+- [x] run `go vet ./...` and `golangci-lint run` — both clean (0 issues)
 
 ### Task 7: [Final] Update documentation
 

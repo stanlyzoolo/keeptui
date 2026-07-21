@@ -154,6 +154,45 @@ func changelogCmd(githubField, toolName string, force bool) tea.Cmd {
 	})
 }
 
+// fetchReadmeCmd fetches the repository README for a tool (cached 24h in
+// cache.json, so a warm start makes no request). Mirrors fetchChangelogCmd.
+func fetchReadmeCmd(githubField, toolName string) tea.Cmd {
+	return readmeCmd(githubField, toolName, false)
+}
+
+// refreshReadmeCmd is the force variant of fetchReadmeCmd: it bypasses the
+// cache TTL via version.RefreshReadme. Emits the same readmeMsg.
+func refreshReadmeCmd(githubField, toolName string) tea.Cmd {
+	return readmeCmd(githubField, toolName, true)
+}
+
+func readmeCmd(githubField, toolName string, force bool) tea.Cmd {
+	ctx := "fetchReadmeCmd"
+	if force {
+		ctx = "refreshReadmeCmd"
+	}
+	return safeCmd(ctx, func() tea.Msg {
+		var (
+			content string
+			err     error
+		)
+		if force {
+			content, err = version.RefreshReadme(githubField)
+		} else {
+			content, err = version.GetReadme(githubField)
+		}
+		// ErrNoReadme is a conclusive 404, not a malfunction: logging it would
+		// re-create the session log on every launch for a repo that simply has
+		// no README, defeating "a log file means something went wrong" (the
+		// same rule classifyStatus applies to 404s and InstalledVersion to a
+		// tool that is not on PATH). Rate limits are already logged by doGH.
+		if err != nil && !errors.Is(err, version.ErrNoReadme) && !errors.Is(err, version.ErrRateLimited) {
+			logx.Errorf("model.%s: %s: %v", ctx, toolName, err)
+		}
+		return readmeMsg{toolName: toolName, content: content, err: err}
+	})
+}
+
 // needsInstalled reports whether local detection for t has not yet run.
 // Detected locally, so it fires regardless of GitHub, matching Init(). It keys
 // off InstalledKnown, not Installed=="", so a tool that was probed and found
@@ -179,6 +218,24 @@ func (m *Model) needsRemote(t loader.Tool) bool {
 	return info.Latest == ""
 }
 
+// needsReadme reports whether the README fetch for t must still run. Requires a
+// GitHub ref, no request already in flight, and no session entry at all — an
+// entry holding an error counts as answered, so a 404 or a rate limit is not
+// retried on every cursor movement (a force refresh clears the entry
+// explicitly). The in-flight check is what keeps the "one request per visited
+// tool" budget honest: the entry appears only when the response lands, so
+// without it a j/k bounce back onto the same tool would fire a second request.
+func (m *Model) needsReadme(t loader.Tool) bool {
+	if t.GitHub == "" {
+		return false
+	}
+	if m.readmeLoading[t.Name] {
+		return false
+	}
+	_, ok := m.readmeData[t.Name]
+	return !ok
+}
+
 // refreshSelectedCmd force-refreshes t's data, bypassing the cache TTL: the repo
 // pass (release + repo info + languages) and the changelog are re-fetched and the
 // installed version is re-detected locally. While the repo pass is in flight
@@ -196,11 +253,20 @@ func (m *Model) refreshSelectedCmd(t loader.Tool) tea.Cmd {
 	}
 	m.refreshingFor = t.Name
 	m.briefViewport.SetContent(m.renderCard())
+	// Drop the session entry so a cached negative (404, rate limit) can recover:
+	// the forced fetch is the only thing that ever revisits it. The deletion
+	// makes needsReadme true again, so the forced request must be marked in
+	// flight or a selection move during the window would fire a second one
+	// (refreshingFor does not cover it — remoteMsg clears that flag as soon as
+	// the repo pass lands, which can be well before the README does).
+	delete(m.readmeData, t.Name)
+	m.markReadmeLoading(t.Name)
 	return tea.Batch(
 		m.spinner.Tick,
 		fetchInstalledCmd(t),
 		refreshRemoteCmd(t),
 		refreshChangelogCmd(t.GitHub, t.Name),
+		refreshReadmeCmd(t.GitHub, t.Name),
 	)
 }
 
@@ -233,6 +299,21 @@ func (m *Model) autoFetchCmdsForSelected() tea.Cmd {
 			// to the tail so the newest output is visible on re-selection.
 			m.setHelpContent()
 			m.helpViewport.GotoBottom()
+		case m.helpMode == helpModeReadme:
+			// README mode owns [3]: repaint from the session cache and fetch it
+			// once per tool. Deliberately ahead of the helpCache case — that one
+			// would index the [2]string out of range with mode 2 and spawn a
+			// --help subprocess the panel would never show.
+			m.setHelpContent()
+			m.helpViewport.GotoTop()
+			// needsReadme covers the [r] refresh window too: that path deletes
+			// the session entry (so a cached negative can recover) and marks its
+			// own forced fetch in flight, so leaving and re-entering the tool
+			// meanwhile does not spend a second request.
+			if t, ok := m.selectedTool(); ok && m.needsReadme(t) {
+				m.markReadmeLoading(t.Name)
+				cmds = append(cmds, fetchReadmeCmd(t.GitHub, t.Name))
+			}
 		case m.helpCache[mt.Name][m.helpMode] == "":
 			m.helpLoadingFor = mt.Name
 			m.setHelpContent()

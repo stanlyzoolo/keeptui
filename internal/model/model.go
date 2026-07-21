@@ -77,9 +77,24 @@ type helpOutputMsg struct {
 	err      error
 }
 
+// readmeMsg carries the repository README for a tool, fetched once per tool per
+// cache TTL. It mirrors changelogMsg: the whole message is stored in
+// m.readmeData, so a 404 (ErrNoReadme) or a rate-limit error is a session-cached
+// negative result and selection moves never re-fire the fetch.
+type readmeMsg struct {
+	toolName string
+	content  string
+	err      error
+}
+
 const (
 	helpModeHelp = 0
 	helpModeMan  = 1
+	// helpModeReadme is the third source of panel [3]: the repository README,
+	// fetched from the GitHub API rather than probed locally. Note helpCache is
+	// a [2]string indexed by mode — every index site must branch on this mode
+	// before reaching the array.
+	helpModeReadme = 2
 )
 
 // updateLogMaxLines caps the live update log buffer. Only the tail matters (the
@@ -178,9 +193,22 @@ type Model struct {
 	helpMode       int
 	helpLoadingFor string
 	helpCache      map[string][2]string
-	helpSearch     textinput.Model
-	helpMatches    []int
-	helpMatchIdx   int
+	// readmeData is the session cache for helpModeReadme, keyed by tool name.
+	// The whole message is stored (content or error), so a negative result is
+	// remembered for the session instead of refetched on every selection move;
+	// a force refresh ([r] in the brief panel) clears the entry.
+	readmeData map[string]readmeMsg
+	// readmeLoading holds the tools whose README request is in flight — the
+	// readme twin of helpLoadingFor, but a set rather than a single name: the
+	// entry lands in readmeData only when the response arrives, so without it
+	// two selection moves onto the same tool inside that window (j then k, a
+	// click back) would each spend a GitHub request. Cleared by readmeMsg.
+	readmeLoading map[string]bool
+	// readmeRender memoizes the last glamour render (see readme.go).
+	readmeRender readmeRenderCache
+	helpSearch   textinput.Model
+	helpMatches  []int
+	helpMatchIdx int
 
 	// helpEntries indexes the navigable entries (flag/subcommand line plus its
 	// description block) of the current help text, in wrapped display-line
@@ -193,6 +221,11 @@ type Model struct {
 	helpEntries []entryRange
 	helpNavIdx  int
 	helpBase    string
+
+	// darkBG is the terminal background resolved once at construction
+	// (lipgloss caches the probe) and handed to renderReadme, so glamour never
+	// runs its own OSC background query against Bubble Tea's input reader.
+	darkBG bool
 
 	toolsW int
 	briefW int
@@ -251,6 +284,8 @@ func New(meta []loader.ToolMeta) Model {
 		repoCards:     make(map[string]version.RepoCard),
 		changelogData: make(map[string]changelogMsg),
 		helpCache:     make(map[string][2]string),
+		readmeData:    make(map[string]readmeMsg),
+		readmeLoading: make(map[string]bool),
 		search:        ti,
 		noteInput:     ni,
 		tagsInput:     tgi,
@@ -261,6 +296,11 @@ func New(meta []loader.ToolMeta) Model {
 		spinner:       sp,
 		meta:          meta,
 		helpNavIdx:    -1,
+		// The README is the default source of [3]: it is the only one that
+		// exists for a tracked-but-not-installed tool, which is exactly the
+		// state where docs matter most.
+		helpMode: helpModeReadme,
+		darkBG:   lipgloss.HasDarkBackground(),
 	}
 
 	return m
@@ -280,8 +320,11 @@ func (m Model) Init() tea.Cmd {
 	if m.mode == modeSearch {
 		cmds = append(cmds, textinput.Blink)
 	}
-	// Auto-fetch --help and changelog for initial selected tool
-	if mt, ok := m.selectedMeta(); ok {
+	// Auto-fetch --help and changelog for initial selected tool. The --help probe
+	// spawns a subprocess, so it only runs when [3] actually shows it: in the
+	// default readme mode the capture would never be rendered (same reasoning as
+	// the readme case in autoFetchCmdsForSelected).
+	if mt, ok := m.selectedMeta(); ok && m.helpMode == helpModeHelp {
 		cached := m.helpCache[mt.Name]
 		if cached[helpModeHelp] == "" {
 			cmds = append(cmds, fetchHelpCmd(mt.Name, helpModeHelp))
@@ -289,6 +332,13 @@ func (m Model) Init() tea.Cmd {
 	}
 	if t, ok := m.selectedTool(); ok && t.GitHub != "" {
 		cmds = append(cmds, fetchChangelogCmd(t.GitHub, t.Name))
+		// Startup fires the panel-[3] sources directly rather than through
+		// autoFetchCmdsForSelected, so the README needs its own seed — otherwise
+		// the default readme panel shows a placeholder until the selection moves.
+		// The mark reaches the model Bubble Tea keeps even though Init's receiver
+		// is a copy: a map header points at the same table.
+		m.markReadmeLoading(t.Name)
+		cmds = append(cmds, fetchReadmeCmd(t.GitHub, t.Name))
 	}
 	return tea.Batch(cmds...)
 }
@@ -325,6 +375,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.changelogData[msg.toolName] = msg
 		m.briefViewport.SetContent(m.renderCard())
+		return m, nil
+
+	case readmeMsg:
+		delete(m.readmeLoading, msg.toolName)
+		// Known-content-wins merge, like the repo cards: a later failure (rate
+		// limit, network) must not blank a README that was already fetched.
+		if msg.err != nil && msg.content == "" {
+			if prev, ok := m.readmeData[msg.toolName]; ok && prev.content != "" {
+				prev.err = msg.err
+				m.readmeData[msg.toolName] = prev
+				return m, nil
+			}
+		}
+		m.readmeData[msg.toolName] = msg
+		// Repaint only when the arrival changes what is on screen: the selected
+		// tool AND the displayed mode.
+		if mt, ok := m.selectedMeta(); ok && mt.Name == msg.toolName && m.helpMode == helpModeReadme {
+			m.setHelpContent()
+		}
 		return m, nil
 
 	case remoteMsg:
@@ -414,6 +483,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tokenError = ""
 		if msg.rate.Known {
 			m.rate = msg.rate
+		}
+		// A rate-limited README is a session-cached negative that needsReadme
+		// treats as answered — drop those entries so the backfill can actually
+		// retry them, which is what the "rate limited — press [L]" placeholder
+		// promises. Fetched content and 404s stay.
+		for name, data := range m.readmeData {
+			if data.content == "" && errors.Is(data.err, version.ErrRateLimited) {
+				delete(m.readmeData, name)
+			}
 		}
 		// Backfill cards now that the higher limit is available.
 		return m, m.autoFetchCmdsForSelected()
@@ -696,8 +774,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Re-sync the help panel like selectMeta does: a prior
 					// arrow move may have left it on "Loading..." for a tool
 					// this reset just unselected, and the stale fetch landing
-					// later won't repaint an unselected tool's panel.
-					m.helpViewport.SetContent(m.renderHelpContent())
+					// later won't repaint an unselected tool's panel. It must go
+					// through setHelpContent, not a bare SetContent: the readme
+					// branch of renderHelpContent serves helpBase, which only
+					// setHelpContent re-renders for the new selection —
+					// otherwise [3] shows the previous tool's README under the
+					// new tool's name. No fetch is fired here (one per keystroke
+					// would spend the quota on rows merely typed past); the
+					// commit/rollback exits go through selectMeta and pick it up.
+					m.setHelpContent()
 					m.helpViewport.GotoTop()
 				}
 				return m, cmd
@@ -883,6 +968,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "/":
 			if m.focus == focusBrief || m.focus == focusHelp {
+				// The README is glamour-rendered ANSI: highlightMatch would tear
+				// it apart, so search simply doesn't apply in readme mode (v1).
+				// Guarded on the shared entry path — [2] enters help search too.
+				if m.helpMode == helpModeReadme {
+					return m, nil
+				}
 				// The help search owns the panel's highlighting: drop an
 				// active spotlight cursor before entering the mode.
 				m.clearHelpNav()
@@ -902,45 +993,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "h":
 			if m.focus == focusBrief || m.focus == focusHelp {
 				m.focus = focusHelp
-				m.helpMode = helpModeHelp
-				if mt, ok := m.selectedMeta(); ok {
-					// An explicit [h] is intent to leave a completed update log
-					// (otherwise sticky on re-selection); drop it so help is
-					// reachable again. Keep the live log during an in-flight
-					// update (updatingFor == name).
-					if m.updateLogFor == mt.Name && m.updatingFor != mt.Name {
-						m.updateLogFor = ""
-					}
-					cached := m.helpCache[mt.Name]
-					if cached[helpModeHelp] == "" {
-						m.helpLoadingFor = mt.Name
-						m.setHelpContent()
-						return m, fetchHelpCmd(mt.Name, helpModeHelp)
-					}
-					m.setHelpContent()
-					m.helpViewport.GotoTop()
-				}
+				return m, m.switchHelpMode(helpModeHelp)
 			}
 
 		case "m":
 			if m.focus == focusBrief || m.focus == focusHelp {
 				m.focus = focusHelp
-				m.helpMode = helpModeMan
-				if mt, ok := m.selectedMeta(); ok {
-					// See [h]: an explicit [m] also dismisses a completed update
-					// log so the man page is reachable again.
-					if m.updateLogFor == mt.Name && m.updatingFor != mt.Name {
-						m.updateLogFor = ""
-					}
-					cached := m.helpCache[mt.Name]
-					if cached[helpModeMan] == "" {
-						m.helpLoadingFor = mt.Name
-						m.setHelpContent()
-						return m, fetchHelpCmd(mt.Name, helpModeMan)
-					}
-					m.setHelpContent()
-					m.helpViewport.GotoTop()
-				}
+				return m, m.switchHelpMode(helpModeMan)
 			}
 
 		case "e":
@@ -1006,6 +1065,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if t, ok := m.selectedTool(); ok {
 					return m, m.refreshSelectedCmd(t)
 				}
+			} else if m.focus == focusHelp {
+				// Third source of [3]: back to the README. Only in focusHelp —
+				// r stays rename in [1] and refresh in [2].
+				return m, m.switchHelpMode(helpModeReadme)
 			}
 
 		case "o":
@@ -1202,6 +1265,19 @@ func (m *Model) selectMeta(idx int) tea.Cmd {
 	return m.autoFetchCmdsForSelected()
 }
 
+// markReadmeLoading records that a README request for name is in flight, so
+// needsReadme stops returning true until the readmeMsg lands. Every site that
+// fires fetchReadmeCmd/refreshReadmeCmd must call it. The lazy map creation
+// keeps hand-built Models (tests, which skip New) from panicking on a nil map;
+// there the mark is simply a no-op, which is what a model with no session
+// caches wants anyway.
+func (m *Model) markReadmeLoading(name string) {
+	if m.readmeLoading == nil {
+		m.readmeLoading = make(map[string]bool)
+	}
+	m.readmeLoading[name] = true
+}
+
 // helpWrapWidth is the single source of the help panel's inner wrap width.
 // renderHelpContent and setHelpContent must wrap identically — entry ranges
 // are wrapped-line indices, so a width divergence would desync the spotlight
@@ -1224,16 +1300,69 @@ func (m *Model) setHelpContent() {
 	// The update log and the loading state render instead of help text; both
 	// leave the entry index empty so j/k stay plain scroll. A cache miss or
 	// stored "No --help output…" fallback yields no entries via the parser.
-	if mt, ok := m.selectedMeta(); ok && m.updateLogFor != mt.Name && m.helpLoadingFor != mt.Name {
-		if raw := m.rawHelpText(); raw != "" {
-			m.helpEntries = parseHelpEntries(raw, m.helpWrapWidth())
-			// Built here, not via renderHelpContent: the render can be in the
-			// search-highlight branch mid-search, and the cache must always
-			// hold the plain full-color base the spotlight dims against.
-			m.helpBase = colorizeHelp(wrapText(raw, m.helpWrapWidth()))
+	if mt, ok := m.selectedMeta(); ok && m.updateLogFor != mt.Name {
+		switch {
+		case m.helpMode == helpModeReadme:
+			// README mode: helpBase holds the glamour render (memoized — this
+			// runs on every selection move and resize). Entries stay empty, so
+			// j/k are plain scroll and colorizeHelp/parseHelpEntries never touch
+			// the ANSI output glamour produces.
+			if data, has := m.readmeData[mt.Name]; has && data.content != "" {
+				m.helpBase = m.readmeRender.render(mt.Name, data.content, m.helpWrapWidth(), m.darkBG)
+			}
+		case m.helpLoadingFor != mt.Name:
+			if raw := m.rawHelpText(); raw != "" {
+				m.helpEntries = parseHelpEntries(raw, m.helpWrapWidth())
+				// Built here, not via renderHelpContent: the render can be in the
+				// search-highlight branch mid-search, and the cache must always
+				// hold the plain full-color base the spotlight dims against.
+				m.helpBase = colorizeHelp(wrapText(raw, m.helpWrapWidth()))
+			}
 		}
 	}
 	m.helpViewport.SetContent(m.renderHelpContent())
+}
+
+// switchHelpMode points panel [3] at one of its three sources and returns the
+// fetch command for that source when it is not cached yet. Shared by [h], [m]
+// and [r] — the three keys differ only in which source they select, so the
+// log dismissal, repaint and scroll-to-top live here once. Focus stays with the
+// caller: [h]/[m] fire from [2] as well and move focus, [r] is focusHelp-only.
+func (m *Model) switchHelpMode(mode int) tea.Cmd {
+	m.helpMode = mode
+	mt, ok := m.selectedMeta()
+	if !ok {
+		return nil
+	}
+	// An explicit mode switch is intent to leave a completed update log
+	// (otherwise sticky on re-selection); a live update (updatingFor == name)
+	// keeps the panel.
+	if m.updateLogFor == mt.Name && m.updatingFor != mt.Name {
+		m.updateLogFor = ""
+	}
+	// README first: helpCache is a [2]string and mode 2 would index it out of
+	// range. Its source is readmeData, and a selection moved while [h]/[m] was
+	// showing never fetched it (autoFetchCmdsForSelected only fetches in readme
+	// mode), so the switch has to cover that gap.
+	if mode == helpModeReadme {
+		m.setHelpContent()
+		m.helpViewport.GotoTop()
+		// needsReadme is false while a request is in flight, including the one
+		// a [r] refresh in [2] just fired (see autoFetchCmdsForSelected).
+		if t, ok := m.selectedTool(); ok && m.needsReadme(t) {
+			m.markReadmeLoading(t.Name)
+			return fetchReadmeCmd(t.GitHub, t.Name)
+		}
+		return nil
+	}
+	if m.helpCache[mt.Name][mode] == "" {
+		m.helpLoadingFor = mt.Name
+		m.setHelpContent()
+		return fetchHelpCmd(mt.Name, mode)
+	}
+	m.setHelpContent()
+	m.helpViewport.GotoTop()
+	return nil
 }
 
 // clearHelpNav turns the spotlight cursor off and repaints the help viewport

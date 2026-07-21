@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -126,46 +127,80 @@ func (m Model) renderStatusBar() string {
 		return style.Render(ui.SearchPromptStyle.Render(m.statusMsg))
 	}
 	if m.focus == focusBrief {
-		hints := keyHint("o") + " open repo  " + keyHint("c") + " changelog  " + keyHint("r") + " refresh  " + keyHint("s") + " status  " + keyHint("e") + " note  " + keyHint("t") + " tags  " + keyHint("q") + " quit  " + keyHint("?") + " keys"
+		hints := []string{
+			keyHint("o") + " open repo",
+			keyHint("c") + " changelog",
+			keyHint("r") + " refresh",
+			keyHint("s") + " status",
+			keyHint("e") + " note",
+			keyHint("t") + " tags",
+			keyHint("q") + " quit",
+			keyHint("?") + " keys",
+		}
 		if mt, ok := m.selectedMeta(); ok && m.hasUpdate(mt.Name) {
-			hints = keyHint("u") + " update  " + hints
+			hints = append([]string{keyHint("u") + " update"}, hints...)
 		}
 		return m.renderHintsBar(style, hints)
 	}
 	if m.focus == focusHelp {
+		var hints []string
 		// With a navigable entry index j/k drive the spotlight cursor while
 		// the arrows keep their line scroll — advertise both; without
 		// entries (update log, placeholders, prose) j/k scroll too.
-		scrollOrNav := keyHint("↑↓") + " scroll  "
-		if len(m.helpEntries) > 0 {
-			scrollOrNav = keyHint("j/k") + " navigate  " + scrollOrNav
-		}
-		hints := scrollOrNav + keyHint("h") + " --help  " + keyHint("m") + " man  " + keyHint("/") + " search  " + keyHint("←") + " back  " + keyHint("q") + " quit  " + keyHint("?") + " keys"
 		if m.helpNavIdx >= 0 {
-			hints = keyHint("esc") + " exit nav  " + hints
+			hints = append(hints, keyHint("esc")+" exit nav")
 		}
+		if len(m.helpEntries) > 0 {
+			hints = append(hints, keyHint("j/k")+" navigate")
+		}
+		hints = append(hints,
+			keyHint("↑↓")+" scroll",
+			keyHint("h")+" --help",
+			keyHint("m")+" man",
+			keyHint("r")+" readme",
+		)
+		// The help search tears glamour's ANSI apart, so [/] is a no-op in
+		// readme mode — don't advertise a key that does nothing there.
+		if m.helpMode != helpModeReadme {
+			hints = append(hints, keyHint("/")+" search")
+		}
+		hints = append(hints, keyHint("←")+" back", keyHint("q")+" quit", keyHint("?")+" keys")
 		return m.renderHintsBar(style, hints)
 	}
-	return m.renderHintsBar(style,
-		keyHint("/")+" search  "+
-			keyHint("t")+" track  "+
-			keyHint("u")+" untrack  "+
-			keyHint("r")+" rename  "+
-			keyHint("q")+" quit  "+
-			keyHint("?")+" keys",
-	)
+	return m.renderHintsBar(style, []string{
+		keyHint("/") + " search",
+		keyHint("t") + " track",
+		keyHint("u") + " untrack",
+		keyHint("r") + " rename",
+		keyHint("q") + " quit",
+		keyHint("?") + " keys",
+	})
 }
 
 // rateGaugeMinGap is the minimum blank columns between the hint bar and the
 // right-aligned API-usage gauge; below it the gauge is downgraded or dropped.
 const rateGaugeMinGap = 2
 
-// renderHintsBar lays out the left-aligned hints with the API-usage gauge pinned
-// to the right corner. It downgrades full → compact → hidden as terminal width
-// shrinks so the hints are never truncated. inner is HelpStyle's content width
-// (m.width-2, the border sits outside it).
-func (m Model) renderHintsBar(style lipgloss.Style, hints string) string {
+// hintSep separates two hint cells in the status bar.
+const hintSep = "  "
+
+// renderHintsBar lays out the left-aligned hint cells with the API-usage gauge
+// pinned to the right corner. inner is HelpStyle's content width (m.width-2, the
+// border sits outside it).
+//
+// The bar must stay exactly one line: HelpStyle is width-constrained, so a hint
+// list wider than inner wraps to a second row and View() returns m.height+1
+// lines — one row past the terminal, which scrolls the top border off the alt
+// screen. Cells are therefore dropped from the right (they are ordered
+// most-important first) until the joined hints fit; the least useful reminders
+// ([?] keys, [q] quit) are the first to go on a narrow terminal. Only then is
+// the gauge placed, downgrading full → compact → hidden.
+func (m Model) renderHintsBar(style lipgloss.Style, cells []string) string {
 	inner := m.width - 2
+	for len(cells) > 1 && lipgloss.Width(strings.Join(cells, hintSep)) > inner {
+		cells = cells[:len(cells)-1]
+	}
+	hints := strings.Join(cells, hintSep)
 	place := func(gauge string) (string, bool) {
 		if gauge == "" {
 			return "", false
@@ -393,8 +428,11 @@ type hotkeyGroup struct {
 // renderHotkeys builds the static [?] hotkeys overlay: a title row with the
 // close hint right-aligned, then a three-column grid of every normal-mode
 // binding, one binding per line, grouped and annotated by the panel/mode it
-// belongs to. Each group header is framed by a blank line above (except the
-// first in its column) and below for breathing room, and inside a column every
+// belongs to. Each group header is preceded by a blank line (except the first
+// in its column) and sits directly above its own rows — the blank line that
+// used to follow the header was reclaimed when the readme row pushed the
+// tallest column past the row budget, and no column partition of the five
+// groups fits 20 rows with it. Inside a column every
 // key cell is padded to the column's widest key so descriptions line up and the
 // keys never drift sideways. Styled like the [L] overlay (OverlayBorder frame,
 // SectionLabelStyle headers, keyHint keys, InfoStyle text). Hard size budget:
@@ -412,10 +450,10 @@ func (m Model) renderHotkeys() string {
 		return s
 	}
 
-	// renderColumn stacks groups vertically: each header sits between a blank
-	// line above (except the first group) and below, then its rows follow with
-	// the key cell padded to the column's widest key so every description in the
-	// column starts at the same offset.
+	// renderColumn stacks groups vertically: a blank line separates groups
+	// (none above the first), the header sits directly on top of its rows, and
+	// every key cell is padded to the column's widest key so every description
+	// in the column starts at the same offset.
 	renderColumn := func(groups []hotkeyGroup) string {
 		keyW := 0
 		for _, g := range groups {
@@ -430,7 +468,7 @@ func (m Model) renderHotkeys() string {
 			if gi > 0 {
 				lines = append(lines, "")
 			}
-			lines = append(lines, hdr(g.title), "")
+			lines = append(lines, hdr(g.title))
 			for _, r := range g.rows {
 				lines = append(lines, padTo(keyHint(r.key), keyW)+"  "+info(r.desc))
 			}
@@ -471,11 +509,12 @@ func (m Model) renderHotkeys() string {
 	})
 
 	col3 := renderColumn([]hotkeyGroup{
-		{"[3] Help / Man", []hotkeyRow{
+		{"[3] Help / Man / Readme", []hotkeyRow{
 			{"j/k", "entry nav"},
 			{"↑/↓", "scroll"},
 			{"esc", "exit nav"},
 			{"h/m", "help / man"},
+			{"r", "readme"},
 			{"/", "search"},
 			{"n/N", "next match"},
 		}},
@@ -683,8 +722,11 @@ func (m Model) renderHelp() string {
 	}
 
 	title := "[3] Help"
-	if m.helpMode == helpModeMan {
+	switch m.helpMode {
+	case helpModeMan:
 		title = "[3] Man"
+	case helpModeReadme:
+		title = "[3] Readme"
 	}
 	// While the selected tool's live update log is showing, the panel is the
 	// update log, not help — mirror that in the inset title.
@@ -1049,11 +1091,43 @@ func (m Model) rawHelpText() string {
 	if !ok {
 		return ""
 	}
+	// README content is not a probe capture and lives in readmeData, not the
+	// [2]string helpCache — indexing it with helpModeReadme would panic.
+	if m.helpMode == helpModeReadme {
+		return ""
+	}
 	cached, has := m.helpCache[mt.Name]
 	if !has {
 		return ""
 	}
 	return cached[m.helpMode]
+}
+
+// readmeContent returns the rendered README for the selected tool plus a flag
+// telling whether it is real content (false = the string is a placeholder).
+func (m Model) readmeContent(name string) (string, bool) {
+	data, ok := m.readmeData[name]
+	// helpBase must be non-empty too: glamour renders a README that carries no
+	// visible markdown (HTML comments, badges-only whitespace) to an empty
+	// string, and returning that as real content paints a blank panel with no
+	// way out. Such a render falls through to the generic placeholder below.
+	if ok && data.content != "" && m.helpBase != "" {
+		return m.helpBase, true
+	}
+	t, found := m.toolByName(name)
+	if !found || t.GitHub == "" {
+		return "No repo for " + name + ".\nPress [h] for --help.", false
+	}
+	if !ok {
+		return "Loading...", false
+	}
+	switch {
+	case errors.Is(data.err, version.ErrNoReadme):
+		return "No README in " + t.GitHub + ".\nPress [h] for --help.", false
+	case errors.Is(data.err, version.ErrRateLimited):
+		return "rate limited — press [L]", false
+	}
+	return "No README for " + name + ".\nPress [h] for --help.", false
 }
 
 func (m Model) renderHelpContent() string {
@@ -1073,6 +1147,18 @@ func (m Model) renderHelpContent() string {
 			return ui.MetaNoteStyle.Render("starting update…")
 		}
 		return wrapText(strings.Join(m.updateLog, "\n"), m.helpWrapWidth())
+	}
+
+	// README mode: content comes from readmeData (glamour-rendered into helpBase
+	// by setHelpContent), never from the [2]string helpCache. Placed after the
+	// update-log branch, which keeps priority, and ahead of every helpCache
+	// index — mode 2 is out of range for that array.
+	if m.helpMode == helpModeReadme {
+		text, real := m.readmeContent(mt.Name)
+		if !real {
+			return ui.MetaNoteStyle.Render(text)
+		}
+		return text
 	}
 
 	// Gate per tool, not on "any fetch in flight": another tool's fetch may

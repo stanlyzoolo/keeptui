@@ -17,12 +17,15 @@ func keyRunes(s string) tea.KeyMsg {
 }
 
 // newTestModel builds a Model via New so every textinput is initialized, with
-// one tracked tool selected.
+// one tracked tool selected. Panel [3] is pinned to --help mode: most callers
+// assert on the helpCache/spotlight plumbing, which only exists there. Tests
+// of the readme default drive New() directly or set helpMode themselves.
 func newTestModel(focus int) Model {
 	m := New([]loader.ToolMeta{{Name: "git", Tags: []string{"vcs"}, Note: "old note"}})
 	m.width = 80
 	m.height = 24
 	m.focus = focus
+	m.helpMode = helpModeHelp
 	return m
 }
 
@@ -331,6 +334,9 @@ func newSearchTestModel() Model {
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = updated.(Model)
 	m.focus = focusTools
+	// These tests assert on the --help panel plumbing (helpCache, helpLoadingFor),
+	// so they opt out of the readme mode New() starts in.
+	m.helpMode = helpModeHelp
 	return m
 }
 
@@ -1366,4 +1372,148 @@ func TestHelpNavIdxResetTriggers(t *testing.T) {
 			t.Errorf("helpNavIdx = %d, want -1 after entering help search", nm.helpNavIdx)
 		}
 	})
+}
+
+// TestReadmeIsDefaultHelpMode: New starts panel [3] on the README — the only
+// source that exists for a tracked-but-uninstalled tool. A full
+// select→render cycle must survive that mode: helpCache is a [2]string and an
+// unguarded index with helpModeReadme (2) panics.
+func TestReadmeIsDefaultHelpMode(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := New([]loader.ToolMeta{
+		{Name: "rg", GitHub: "BurntSushi/ripgrep"},
+		{Name: "fd"},
+	})
+	if m.helpMode != helpModeReadme {
+		t.Fatalf("New().helpMode = %d, want helpModeReadme (%d)", m.helpMode, helpModeReadme)
+	}
+	m = mustModel(m.Update(tea.WindowSizeMsg{Width: 80, Height: 24}))
+	_ = m.View()
+	// Selection move: auto-fetch + repaint of every panel.
+	m = mustModel(m.Update(keyRunes("j")))
+	_ = m.View()
+	// The help panel's own key paths (scroll, would-be entry nav) in mode 2.
+	m = mustModel(m.Update(keyRunes("3")))
+	for _, k := range []string{"j", "k", "g", "G"} {
+		m = mustModel(m.Update(keyRunes(k)))
+	}
+	_ = m.View()
+	if m.helpMode != helpModeReadme {
+		t.Errorf("helpMode = %d, want the README mode to stick", m.helpMode)
+	}
+}
+
+// TestReadmeKeyBranches: [r] is the third panel-[3] source switch and fires
+// only in focusHelp — rename in [1] and refresh in [2] keep the key.
+func TestReadmeKeyBranches(t *testing.T) {
+	t.Run("help focus switches to readme", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		m := newTestModel(focusHelp)
+		// Size the viewport and give it enough content to actually scroll:
+		// on a 0x0 viewport SetYOffset clamps to 0 and the GotoTop assertion
+		// below would pass no matter what the [r] branch does.
+		m = mustModel(m.Update(tea.WindowSizeMsg{Width: 100, Height: 30}))
+		m.focus = focusHelp
+		m.helpMode = helpModeHelp
+		m.helpCache["git"] = [2]string{helpModeHelp: strings.Repeat("--flag  does a thing\n", 200)}
+		m.setHelpContent()
+		m.helpViewport.SetYOffset(3)
+		if m.helpViewport.YOffset != 3 {
+			t.Fatalf("setup: YOffset = %d, want 3 (the viewport must be scrollable)", m.helpViewport.YOffset)
+		}
+		nm := mustModel(m.Update(keyRunes("r")))
+		if nm.helpMode != helpModeReadme {
+			t.Errorf("helpMode = %d, want helpModeReadme", nm.helpMode)
+		}
+		if nm.mode != modeNormal {
+			t.Errorf("mode = %d, want modeNormal (r is not rename in [3])", nm.mode)
+		}
+		if nm.helpViewport.YOffset != 0 {
+			t.Errorf("YOffset = %d, want 0 (GotoTop on the mode switch)", nm.helpViewport.YOffset)
+		}
+	})
+	t.Run("tools focus still renames", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		m := newTestModel(focusTools)
+		nm := mustModel(m.Update(keyRunes("r")))
+		if nm.mode != modeRename {
+			t.Errorf("mode = %d, want modeRename", nm.mode)
+		}
+		if nm.helpMode != helpModeHelp {
+			t.Errorf("helpMode = %d, want it untouched by the rename branch", nm.helpMode)
+		}
+	})
+	t.Run("brief focus still refreshes", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		m := newTestModel(focusBrief)
+		nm := mustModel(m.Update(keyRunes("r")))
+		if nm.helpMode != helpModeHelp {
+			t.Errorf("helpMode = %d, want it untouched by the refresh branch", nm.helpMode)
+		}
+		if nm.statusMsg != "no repo to refresh" {
+			t.Errorf("statusMsg = %q, want the refresh branch's message", nm.statusMsg)
+		}
+	})
+	t.Run("readme fetch fires when the tool was never fetched", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		m := New([]loader.ToolMeta{{Name: "rg", GitHub: "BurntSushi/ripgrep"}})
+		m.width, m.height = 80, 24
+		m.helpMode, m.focus = helpModeMan, focusHelp
+		updated, cmd := m.Update(keyRunes("r"))
+		if updated.(Model).helpMode != helpModeReadme {
+			t.Fatalf("helpMode = %d, want helpModeReadme", updated.(Model).helpMode)
+		}
+		if cmd == nil {
+			t.Error("switching to an unfetched README returned nil cmd, want the fetch")
+		}
+	})
+}
+
+// TestReadmeKeyUpdateLogPriority mirrors [h]/[m]: an explicit [r] dismisses a
+// finished update log, but a live one keeps panel [3].
+func TestReadmeKeyUpdateLogPriority(t *testing.T) {
+	t.Run("live log survives", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		m := newTestModel(focusHelp)
+		m.updateLogFor, m.updatingFor = "git", "git"
+		m.updateLog = []string{"==> brew upgrade"}
+		nm := mustModel(m.Update(keyRunes("r")))
+		if nm.updateLogFor != "git" {
+			t.Fatalf("updateLogFor = %q, want the live log kept", nm.updateLogFor)
+		}
+		if !strings.Contains(nm.renderHelpContent(), "brew upgrade") {
+			t.Error("panel [3] must keep showing the live update log")
+		}
+	})
+	t.Run("completed log is dismissed", func(t *testing.T) {
+		t.Setenv("HOME", t.TempDir())
+		m := newTestModel(focusHelp)
+		m.updateLogFor = "git"
+		m.updateLog = []string{"==> brew upgrade"}
+		nm := mustModel(m.Update(keyRunes("r")))
+		if nm.updateLogFor != "" {
+			t.Errorf("updateLogFor = %q, want the completed log dismissed", nm.updateLogFor)
+		}
+	})
+}
+
+// TestHelpSearchNoOpInReadmeMode: glamour output is ANSI that highlightMatch
+// would tear apart, so / does nothing in README mode — from both entry
+// focuses. The tool-list search in [1] is unaffected.
+func TestHelpSearchNoOpInReadmeMode(t *testing.T) {
+	for _, focus := range []int{focusBrief, focusHelp} {
+		t.Setenv("HOME", t.TempDir())
+		m := newTestModel(focus)
+		m.helpMode = helpModeReadme
+		nm := mustModel(m.Update(keyRunes("/")))
+		if nm.mode != modeNormal {
+			t.Errorf("focus %d: mode = %d, want modeNormal (/ is a no-op in README mode)", focus, nm.mode)
+		}
+	}
+	m := newTestModel(focusTools)
+	m.helpMode = helpModeReadme
+	nm := mustModel(m.Update(keyRunes("/")))
+	if nm.mode != modeSearch {
+		t.Errorf("mode = %d, want modeSearch — the tool-list search is unaffected", nm.mode)
+	}
 }

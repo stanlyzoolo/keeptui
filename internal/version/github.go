@@ -112,8 +112,15 @@ func shouldReplaceRate(cur, snap RateLimit, now time.Time) bool {
 // header and, when a token resolves, an Authorization header, then accounts for
 // the rate-limit headers on the response. This is the single auth + accounting
 // point for all GitHub calls; callers keep their own status-code handling.
+//
+// Accept is only defaulted when the caller set none, so a fetcher that needs a
+// different media type (fetchReadme asks for raw markdown) can pre-set it and
+// still ride the shared auth + rate-accounting path instead of a second HTTP
+// code path.
 func doGH(req *http.Request) (*http.Response, error) {
-	req.Header.Set("Accept", "application/vnd.github.v3+json")
+	if req.Header.Get("Accept") == "" {
+		req.Header.Set("Accept", "application/vnd.github.v3+json")
+	}
 	if token := resolveToken(); token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -140,6 +147,17 @@ var ErrTokenInvalid = errors.New("github token invalid")
 // so it must not block a cache entry from being marked fresh; otherwise a repo
 // without releases would re-fetch all three endpoints on every start.
 var errNoReleases = errors.New("no releases found")
+
+// ErrNoReadme signals that a repo's /readme returned 404 — the repository has
+// no README file at all. Like errNoReleases this is a conclusive answer, so the
+// UI shows a tool-named placeholder instead of an error, and the model caches
+// the negative for the session rather than refetching on every selection move.
+var ErrNoReadme = errors.New("no readme found")
+
+// readmeMaxBytes caps a fetched README. Well past any real tool's docs, but it
+// keeps a pathological repository from bloating cache.json and from stalling the
+// update loop in glamour (rendering is synchronous, and cost grows with size).
+const readmeMaxBytes = 512 << 10
 
 // classifyStatus maps a non-2xx GitHub response to an error. A 403 or 429 whose
 // own X-RateLimit-Remaining header reads 0 is rate-limit exhaustion and returns
@@ -272,6 +290,13 @@ type CacheEntry struct {
 	About       string         `json:"about,omitempty"`
 	Stars       int            `json:"stars,omitempty"`
 	Languages   map[string]int `json:"languages,omitempty"`
+	Readme      string         `json:"readme,omitempty"`
+	// ReadmeCheckedAt is deliberately separate from CheckedAt: the repo-card
+	// freshness gate in getRepoData is CheckedAt-only with no content check, so
+	// a successful README fetch stamping the shared timestamp would mark a
+	// deliberately stale (rate-limited) repo pass as fresh and serve a blank
+	// card for the whole TTL. Two timestamps keep the poison guards independent.
+	ReadmeCheckedAt time.Time `json:"readme_checked_at,omitzero"`
 }
 
 // RepoCard holds full repository metadata for display in the TUI.
@@ -474,20 +499,107 @@ func getChangelog(githubField string, force bool) (ReleaseInfo, error) {
 		return ReleaseInfo{}, err
 	}
 
+	// Mutate a copy of the existing entry instead of building a literal: a
+	// literal only carries the fields it knows about and silently wipes every
+	// other one (Readme/ReadmeCheckedAt) on each changelog fetch.
 	updateCacheEntry(repo, func(existing CacheEntry) CacheEntry {
-		return CacheEntry{
-			Latest:      info.Tag,
-			Body:        info.Body,
-			HtmlUrl:     info.HtmlUrl,
-			PublishedAt: info.PublishedAt,
-			CheckedAt:   time.Now(),
-			RepoStatus:  existing.RepoStatus,
-			About:       existing.About,
-			Stars:       existing.Stars,
-			Languages:   existing.Languages,
-		}
+		e := existing
+		e.Latest = info.Tag
+		e.Body = info.Body
+		e.HtmlUrl = info.HtmlUrl
+		e.PublishedAt = info.PublishedAt
+		e.CheckedAt = time.Now()
+		return e
 	})
 	return info, nil
+}
+
+// GetReadme returns the raw README markdown for a tool's github field, served
+// from cache.json while within TTL and fetched otherwise. It costs one request
+// per tool per TTL window.
+func GetReadme(githubField string) (string, error) {
+	return getReadme(githubField, false)
+}
+
+// RefreshReadme force-refreshes a tool's README, bypassing the cache TTL. On a
+// fetch error it still falls back to a cached README when one is present.
+func RefreshReadme(githubField string) (string, error) {
+	return getReadme(githubField, true)
+}
+
+// getReadme is the shared implementation. force skips only the freshness
+// short-circuit; the fetch and cached-fallback logic are identical on both
+// paths. A failed fetch never advances ReadmeCheckedAt, so a rate-limited or
+// offline attempt does not poison the entry as fresh-but-blank for the TTL.
+func getReadme(githubField string, force bool) (string, error) {
+	if githubField == "" {
+		return "", fmt.Errorf("no github field")
+	}
+	repo := extractRepo(githubField)
+	if repo == "" {
+		return "", fmt.Errorf("cannot parse github field: %q", githubField)
+	}
+
+	cache := LoadCache()
+	entry, cached := cache[repo]
+
+	if !force && cached && time.Since(entry.ReadmeCheckedAt) < cacheTTL && entry.Readme != "" {
+		return entry.Readme, nil
+	}
+
+	md, err := fetchReadme(repo)
+	if err != nil {
+		// Known content wins over a transient failure; a 404 has no content to
+		// fall back to and surfaces as ErrNoReadme.
+		if entry.Readme != "" && !errors.Is(err, ErrNoReadme) {
+			return entry.Readme, nil
+		}
+		return "", err
+	}
+
+	updateCacheEntry(repo, func(existing CacheEntry) CacheEntry {
+		e := existing
+		e.Readme = md
+		e.ReadmeCheckedAt = time.Now()
+		return e
+	})
+	return md, nil
+}
+
+// fetchReadme GETs /repos/{repo}/readme with the raw media type, so the response
+// body is the README markdown itself rather than a base64-wrapped JSON envelope.
+func fetchReadme(repo string) (string, error) {
+	url := apiBase() + "/repos/" + repo + "/readme"
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", err
+	}
+	// Pre-set Accept: doGH only defaults it when the caller left it empty.
+	req.Header.Set("Accept", "application/vnd.github.raw+json")
+	resp, err := doGH(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusNotFound {
+		return "", ErrNoReadme
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", classifyStatus(resp)
+	}
+	// Bounded read: the body is cached to disk and then glamour-parsed inside
+	// the Bubble Tea update loop, so an outsized README would both bloat
+	// cache.json and stall a keystroke. Truncation is marked so the panel does
+	// not silently look complete.
+	data, err := io.ReadAll(io.LimitReader(resp.Body, readmeMaxBytes+1))
+	if err != nil {
+		return "", err
+	}
+	if len(data) > readmeMaxBytes {
+		return string(data[:readmeMaxBytes]) + "\n\n*(README truncated)*\n", nil
+	}
+	return string(data), nil
 }
 
 func apiBase() string {

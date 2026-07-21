@@ -1,17 +1,20 @@
 package model
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/stanlyzoolo/keeptui/internal/loader"
 	"github.com/stanlyzoolo/keeptui/internal/logx"
 	"github.com/stanlyzoolo/keeptui/internal/updater"
+	"github.com/stanlyzoolo/keeptui/internal/version"
 )
 
 func TestFetchHelpTakeoverLogs(t *testing.T) {
@@ -304,3 +307,254 @@ var errUpdateTest = updateTestError("exit status 1")
 type updateTestError string
 
 func (e updateTestError) Error() string { return string(e) }
+
+// seedReadmeCache writes a warm cache.json entry so fetchReadmeCmd resolves
+// from disk instead of the network. HOME must already point at a temp dir
+// (version resolves the cache under os.UserConfigDir()).
+func seedReadmeCache(t *testing.T, repo, readme string) {
+	t.Helper()
+	base, err := os.UserConfigDir()
+	if err != nil {
+		t.Fatalf("UserConfigDir: %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(base, "keeptui"), 0o755); err != nil {
+		t.Fatalf("mkdir cache: %v", err)
+	}
+	version.SaveCache(version.Cache{repo: {
+		Readme:          readme,
+		ReadmeCheckedAt: time.Now(),
+	}})
+}
+
+// TestFetchReadmeCmdServesCache: a warm cache entry round-trips through the
+// command into a readmeMsg without any network access.
+func TestFetchReadmeCmdServesCache(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	seedReadmeCache(t, "BurntSushi/ripgrep", "# ripgrep\n\nfast search")
+
+	msg, ok := fetchReadmeCmd("BurntSushi/ripgrep", "rg")().(readmeMsg)
+	if !ok {
+		t.Fatalf("unexpected msg type %T", msg)
+	}
+	if msg.toolName != "rg" {
+		t.Errorf("toolName = %q, want rg", msg.toolName)
+	}
+	if msg.err != nil {
+		t.Errorf("err = %v, want nil", msg.err)
+	}
+	if !strings.Contains(msg.content, "fast search") {
+		t.Errorf("content = %q, want the cached README", msg.content)
+	}
+}
+
+// TestNeedsReadme pins the fetch predicate: a GitHub ref is required, and any
+// stored answer — including a cached negative — counts as answered so cursor
+// movement never re-fires the request.
+func TestNeedsReadme(t *testing.T) {
+	m := newTestModel(focusTools)
+	withRepo := loader.Tool{Name: "rg", GitHub: "BurntSushi/ripgrep"}
+	noRepo := loader.Tool{Name: "local"}
+
+	if m.needsReadme(noRepo) {
+		t.Error("a tool with no GitHub ref must never fetch a README")
+	}
+	if !m.needsReadme(withRepo) {
+		t.Error("an unfetched tool with a repo must fetch")
+	}
+	m.readmeData["rg"] = readmeMsg{toolName: "rg", err: version.ErrNoReadme}
+	if m.needsReadme(withRepo) {
+		t.Error("a cached negative must not be retried on every selection move")
+	}
+}
+
+// TestAutoFetchReadmeModeSkipsHelp: in README mode the auto-fetch must not set
+// helpLoadingFor or spawn a --help subprocess (the helpCache branch would also
+// index its [2]string out of range with mode 2). It fires the README fetch
+// exactly once — a second pass with the answer cached adds no command.
+func TestAutoFetchReadmeModeSkipsHelp(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := New([]loader.ToolMeta{{Name: "rg", GitHub: "BurntSushi/ripgrep"}})
+	m.width, m.height = 80, 24
+	m.helpMode = helpModeReadme
+	// Pre-fill the other sources so only the README decision varies.
+	m.changelogData["rg"] = changelogMsg{toolName: "rg"}
+	m.versions["rg"] = VersionInfo{Installed: "14.0.0", InstalledKnown: true, Latest: "14.0.0"}
+	m.repoCards["rg"] = version.RepoCard{About: "search"}
+
+	cold := countBatchedCmds(m.autoFetchCmdsForSelected())
+	if m.helpLoadingFor != "" {
+		t.Errorf("helpLoadingFor = %q, want empty — README mode must not fetch --help", m.helpLoadingFor)
+	}
+	if cold != 1 {
+		t.Fatalf("cold auto-fetch batched %d cmds, want 1 (the README)", cold)
+	}
+
+	m.readmeData["rg"] = readmeMsg{toolName: "rg", content: "# rg"}
+	if warm := countBatchedCmds(m.autoFetchCmdsForSelected()); warm != 0 {
+		t.Errorf("warm auto-fetch batched %d cmds, want 0", warm)
+	}
+	if m.helpLoadingFor != "" {
+		t.Errorf("helpLoadingFor = %q, want empty", m.helpLoadingFor)
+	}
+}
+
+// TestAutoFetchUpdateLogKeepsPriority: a live update log still owns [3] even in
+// README mode — no README fetch is queued while the log is on screen.
+func TestAutoFetchUpdateLogKeepsPriority(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := New([]loader.ToolMeta{{Name: "rg", GitHub: "BurntSushi/ripgrep"}})
+	m.width, m.height = 80, 24
+	m.helpMode = helpModeReadme
+	m.changelogData["rg"] = changelogMsg{toolName: "rg"}
+	m.versions["rg"] = VersionInfo{Installed: "14.0.0", InstalledKnown: true, Latest: "14.0.0"}
+	m.repoCards["rg"] = version.RepoCard{About: "search"}
+	m.updateLogFor = "rg"
+	m.updateLog = []string{"==> brew upgrade"}
+
+	if n := countBatchedCmds(m.autoFetchCmdsForSelected()); n != 0 {
+		t.Errorf("auto-fetch batched %d cmds, want 0 while the update log is live", n)
+	}
+	if !strings.Contains(m.renderHelpContent(), "brew upgrade") {
+		t.Error("the live update log must keep panel [3]")
+	}
+}
+
+// TestRefreshSelectedForcesReadme: [r] drops the session entry (so a cached 404
+// or rate-limit can recover) and adds the forced README fetch to the batch.
+func TestRefreshSelectedForcesReadme(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := New([]loader.ToolMeta{{Name: "rg", GitHub: "BurntSushi/ripgrep"}})
+	m.width, m.height = 80, 24
+	m.readmeData["rg"] = readmeMsg{toolName: "rg", err: version.ErrNoReadme}
+
+	cmd := m.refreshSelectedCmd(loader.Tool{Name: "rg", GitHub: "BurntSushi/ripgrep"})
+	if _, still := m.readmeData["rg"]; still {
+		t.Error("a force refresh must clear the cached README answer")
+	}
+	// spinner + installed + remote + changelog + readme
+	if n := countBatchedCmds(cmd); n != 5 {
+		t.Errorf("refresh batched %d cmds, want 5 (incl. the README)", n)
+	}
+}
+
+// TestReadmeMsgKeepsKnownContent: a later failure (rate limit, network) must
+// not blank a README that already arrived — the same known-content-wins merge
+// the repo cards use.
+func TestReadmeMsgKeepsKnownContent(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := New([]loader.ToolMeta{{Name: "rg", GitHub: "BurntSushi/ripgrep"}})
+	m.width, m.height = 80, 24
+
+	m = mustModel(m.Update(readmeMsg{toolName: "rg", content: "# ripgrep"}))
+	if got := m.readmeData["rg"].content; got != "# ripgrep" {
+		t.Fatalf("content = %q, want the fetched README", got)
+	}
+
+	m = mustModel(m.Update(readmeMsg{toolName: "rg", err: version.ErrRateLimited}))
+	entry := m.readmeData["rg"]
+	if entry.content != "# ripgrep" {
+		t.Errorf("content = %q, want the known README to survive the failure", entry.content)
+	}
+	if !errors.Is(entry.err, version.ErrRateLimited) {
+		t.Errorf("err = %v, want the failure recorded alongside the content", entry.err)
+	}
+}
+
+// TestReadmeMsgStoresNegative: with nothing known yet, the error is stored as
+// the session answer so the panel can render a specific placeholder.
+func TestReadmeMsgStoresNegative(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := New([]loader.ToolMeta{{Name: "rg", GitHub: "BurntSushi/ripgrep"}})
+	m.width, m.height = 80, 24
+
+	m = mustModel(m.Update(readmeMsg{toolName: "rg", err: version.ErrNoReadme}))
+	if !errors.Is(m.readmeData["rg"].err, version.ErrNoReadme) {
+		t.Errorf("readmeData = %+v, want the 404 remembered", m.readmeData["rg"])
+	}
+}
+
+// TestReadmeMsgRepaintsSelected: an arrival for the selected tool in README
+// mode recomputes the panel; one for a hidden mode leaves it alone.
+func TestReadmeMsgRepaintsSelected(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := New([]loader.ToolMeta{{Name: "rg", GitHub: "BurntSushi/ripgrep"}})
+	m.width, m.height = 80, 24
+	m.helpMode = helpModeReadme
+
+	m = mustModel(m.Update(readmeMsg{toolName: "rg", content: "# ripgrep\n\nfast search"}))
+	if !strings.Contains(stripANSI(m.helpBase), "ripgrep") {
+		t.Errorf("helpBase = %q, want the rendered README", m.helpBase)
+	}
+
+	m.helpMode = helpModeHelp
+	m.helpBase = ""
+	m = mustModel(m.Update(readmeMsg{toolName: "rg", content: "# other"}))
+	if m.helpBase != "" {
+		t.Errorf("helpBase = %q, want no repaint while README mode is hidden", m.helpBase)
+	}
+}
+
+// TestInitFetchesReadmeForSelected: startup fires the panel-[3] sources
+// directly (not via autoFetchCmdsForSelected), so the README needs its own
+// seed — otherwise the default README panel would sit on a placeholder until
+// the selection moves. The readme fetch is appended last.
+func TestInitFetchesReadmeForSelected(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	seedReadmeCache(t, "BurntSushi/ripgrep", "# ripgrep")
+
+	m := New([]loader.ToolMeta{{Name: "rg", GitHub: "BurntSushi/ripgrep"}})
+	m.width, m.height = 80, 24
+
+	batch, ok := m.Init()().(tea.BatchMsg)
+	if !ok {
+		t.Fatal("Init must batch several commands")
+	}
+	msg, ok := batch[len(batch)-1]().(readmeMsg)
+	if !ok {
+		t.Fatalf("last Init command yielded %T, want readmeMsg", msg)
+	}
+	if msg.toolName != "rg" || !strings.Contains(msg.content, "ripgrep") {
+		t.Errorf("readmeMsg = %+v, want the selected tool's cached README", msg)
+	}
+}
+
+// TestInitSkipsReadmeWithoutRepo: a tool with no GitHub ref has nothing to
+// fetch, so Init queues no README command for it.
+func TestInitSkipsReadmeWithoutRepo(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := New([]loader.ToolMeta{{Name: "localtool"}})
+	m.width, m.height = 80, 24
+
+	batch, ok := m.Init()().(tea.BatchMsg)
+	if !ok {
+		t.Fatal("Init must batch several commands")
+	}
+	// rate + installed; no changelog, no readme — and no --help probe either,
+	// because the default panel [3] is the README (see the test below).
+	if len(batch) != 2 {
+		t.Errorf("Init batched %d cmds, want 2 for a tool with no repo", len(batch))
+	}
+}
+
+// TestInitHelpProbeFollowsHelpMode: the --help probe spawns a subprocess, so
+// startup only pays for it when panel [3] actually shows help. In the default
+// README mode the capture would never be rendered.
+func TestInitHelpProbeFollowsHelpMode(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	batchLen := func(mode int) int {
+		m := New([]loader.ToolMeta{{Name: "localtool"}})
+		m.width, m.height = 80, 24
+		m.helpMode = mode
+		batch, ok := m.Init()().(tea.BatchMsg)
+		if !ok {
+			t.Fatal("Init must batch several commands")
+		}
+		return len(batch)
+	}
+
+	readme, help := batchLen(helpModeReadme), batchLen(helpModeHelp)
+	if help != readme+1 {
+		t.Errorf("Init queued %d cmds in help mode and %d in readme mode, want exactly one more (the --help probe)", help, readme)
+	}
+}

@@ -33,7 +33,7 @@ CI (`.github/workflows/ci.yml`) runs build / vet / `test -race` / golangci-lint 
 | `internal/proc` | `DetachTTY` — runs tool probe subprocesses without a controlling terminal (`Setsid` on unix, `DETACHED_PROCESS` on Windows); `KillGroup` — process-group SIGKILL (negative pid; plain `Process.Kill` on Windows) for the update streamer's timeout path |
 | `internal/ui` | Lip Gloss styles and `PlaceOverlay` helper |
 | `internal/updater` | Detect the package manager that owns an installed binary and produce an update `Plan{Manager, Argv, Display}` (brew → go → cargo → pipx → npm chain; `update_cmd` override always wins). Bottom of the import graph like `version`: no TUI knowledge, depends only on `loader` for `Tool`. Pure `detectFromPath` core + OS-facing `Detect` wrapper; `testHomeDir` seam |
-| `internal/version` | Detect installed version locally; fetch latest from GitHub API with 24h cache; semver comparison (`IsNewer`) |
+| `internal/version` | Detect installed version locally (`--version`/`-V`, then a brew-directory fallback: `brewDirVersion` in `brew.go` reads the version from the `Caskroom/<name>`/`Cellar/<name>` directory names — no brew subprocess — so casks with no version CLI still resolve; a fallback hit suppresses the anomaly log; `testBrewPrefix` seam); fetch latest from GitHub API with 24h cache; semver comparison (`IsNewer`) |
 
 The `model` package is split by responsibility (one package, several files):
 

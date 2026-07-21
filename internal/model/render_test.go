@@ -855,6 +855,12 @@ func TestRenderPanelTitles(t *testing.T) {
 		t.Errorf("help-mode top border = %q, want [3] Help title", top)
 	}
 
+	m.helpMode = helpModeReadme
+	topReadme := stripANSI(strings.SplitN(m.renderHelp(), "\n", 2)[0])
+	if !strings.Contains(topReadme, " [3] Readme ") {
+		t.Errorf("readme-mode top border = %q, want [3] Readme title", topReadme)
+	}
+
 	m.helpMode = helpModeMan
 	lines := strings.Split(m.renderHelp(), "\n")
 	topMan := stripANSI(lines[0])
@@ -2650,6 +2656,7 @@ func TestUpdateLogPanelTitle(t *testing.T) {
 	m = updated.(Model)
 	m.updateLogFor = "rg"
 	m.updateLog = []string{"upgrading rg"}
+	m.helpMode = helpModeHelp // the mode the log falls back to on another tool
 
 	m.metaSelected = 0 // rg — the updating tool
 	m.helpViewport.SetContent(m.renderHelpContent())
@@ -3208,11 +3215,12 @@ func TestRenderHotkeysOverlayContent(t *testing.T) {
 	view := m.View()
 	for _, want := range []string{
 		"Keyboard shortcuts",
-		"Global", "[1] Tools", "[2] Brief", "[3] Help / Man", "Scrolling",
+		"Global", "[1] Tools", "[2] Brief", "[3] Help / Man / Readme", "Scrolling",
 		"focus panel",  // Global
 		"select tool",  // [1] Tools
 		"open repo",    // [2] Brief
-		"entry nav",    // [3] Help / Man
+		"entry nav",    // [3] Help / Man / Readme
+		"readme",       // [3] the third panel source
 		"3 lines",      // Scrolling
 		"close",        // title close hint
 	} {
@@ -3249,6 +3257,10 @@ func TestRenderHotkeysSizeBudget(t *testing.T) {
 	if !strings.Contains(view, "top / bottom") {
 		t.Errorf("size budget: last Scrolling row clipped (bottom/right overflow)")
 	}
+	// The readme row lives in the same (tallest) column, above Scrolling.
+	if !strings.Contains(view, "readme") {
+		t.Errorf("size budget: [3] readme row clipped")
+	}
 	// The framed overlay must be <= the 20-row background height.
 	if h := lipgloss.Height(m.renderHotkeys()); h > 20 {
 		t.Errorf("overlay framed height = %d, want <= 20 (80x24 background)", h)
@@ -3270,6 +3282,33 @@ func TestHotkeysHintInFocusBars(t *testing.T) {
 		if !strings.Contains(bar, "[?]") || !strings.Contains(bar, "keys") {
 			t.Errorf("focus %d bar missing [?] keys hint: %q", focus, bar)
 		}
+	}
+}
+
+// TestReadmeHintInHelpBar: the focusHelp bar advertises [r] readme next to the
+// [h]/[m] source switches, in every help mode (the key is always live there).
+func TestReadmeHintInHelpBar(t *testing.T) {
+	for _, mode := range []int{helpModeHelp, helpModeMan, helpModeReadme} {
+		m := New([]loader.ToolMeta{{Name: "git"}})
+		m = mustModel(m.Update(tea.WindowSizeMsg{Width: 120, Height: 24}))
+		m.focus = focusHelp
+		m.helpMode = mode
+		bar := m.renderStatusBar()
+		if !strings.Contains(bar, "[r]") || !strings.Contains(bar, "readme") {
+			t.Errorf("mode %d focusHelp bar missing [r] readme hint: %q", mode, bar)
+		}
+		for _, want := range []string{"--help", "man"} {
+			if !strings.Contains(bar, want) {
+				t.Errorf("mode %d focusHelp bar lost %q hint: %q", mode, want, bar)
+			}
+		}
+	}
+	// The other focus bars keep their own r binding (rename / refresh).
+	m := New([]loader.ToolMeta{{Name: "git"}})
+	m = mustModel(m.Update(tea.WindowSizeMsg{Width: 120, Height: 24}))
+	m.focus = focusTools
+	if bar := m.renderStatusBar(); strings.Contains(bar, "readme") {
+		t.Errorf("focusTools bar leaked readme hint: %q", bar)
 	}
 }
 

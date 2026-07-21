@@ -141,7 +141,7 @@ func (m Model) renderStatusBar() string {
 		if len(m.helpEntries) > 0 {
 			scrollOrNav = keyHint("j/k") + " navigate  " + scrollOrNav
 		}
-		hints := scrollOrNav + keyHint("h") + " --help  " + keyHint("m") + " man  " + keyHint("/") + " search  " + keyHint("←") + " back  " + keyHint("q") + " quit  " + keyHint("?") + " keys"
+		hints := scrollOrNav + keyHint("h") + " --help  " + keyHint("m") + " man  " + keyHint("r") + " readme  " + keyHint("/") + " search  " + keyHint("←") + " back  " + keyHint("q") + " quit  " + keyHint("?") + " keys"
 		if m.helpNavIdx >= 0 {
 			hints = keyHint("esc") + " exit nav  " + hints
 		}
@@ -394,8 +394,11 @@ type hotkeyGroup struct {
 // renderHotkeys builds the static [?] hotkeys overlay: a title row with the
 // close hint right-aligned, then a three-column grid of every normal-mode
 // binding, one binding per line, grouped and annotated by the panel/mode it
-// belongs to. Each group header is framed by a blank line above (except the
-// first in its column) and below for breathing room, and inside a column every
+// belongs to. Each group header is preceded by a blank line (except the first
+// in its column) and sits directly above its own rows — the blank line that
+// used to follow the header was reclaimed when the readme row pushed the
+// tallest column past the row budget, and no column partition of the five
+// groups fits 20 rows with it. Inside a column every
 // key cell is padded to the column's widest key so descriptions line up and the
 // keys never drift sideways. Styled like the [L] overlay (OverlayBorder frame,
 // SectionLabelStyle headers, keyHint keys, InfoStyle text). Hard size budget:
@@ -413,10 +416,10 @@ func (m Model) renderHotkeys() string {
 		return s
 	}
 
-	// renderColumn stacks groups vertically: each header sits between a blank
-	// line above (except the first group) and below, then its rows follow with
-	// the key cell padded to the column's widest key so every description in the
-	// column starts at the same offset.
+	// renderColumn stacks groups vertically: a blank line separates groups
+	// (none above the first), the header sits directly on top of its rows, and
+	// every key cell is padded to the column's widest key so every description
+	// in the column starts at the same offset.
 	renderColumn := func(groups []hotkeyGroup) string {
 		keyW := 0
 		for _, g := range groups {
@@ -431,7 +434,7 @@ func (m Model) renderHotkeys() string {
 			if gi > 0 {
 				lines = append(lines, "")
 			}
-			lines = append(lines, hdr(g.title), "")
+			lines = append(lines, hdr(g.title))
 			for _, r := range g.rows {
 				lines = append(lines, padTo(keyHint(r.key), keyW)+"  "+info(r.desc))
 			}
@@ -472,11 +475,12 @@ func (m Model) renderHotkeys() string {
 	})
 
 	col3 := renderColumn([]hotkeyGroup{
-		{"[3] Help / Man", []hotkeyRow{
+		{"[3] Help / Man / Readme", []hotkeyRow{
 			{"j/k", "entry nav"},
 			{"↑/↓", "scroll"},
 			{"esc", "exit nav"},
 			{"h/m", "help / man"},
+			{"r", "readme"},
 			{"/", "search"},
 			{"n/N", "next match"},
 		}},
@@ -684,8 +688,11 @@ func (m Model) renderHelp() string {
 	}
 
 	title := "[3] Help"
-	if m.helpMode == helpModeMan {
+	switch m.helpMode {
+	case helpModeMan:
 		title = "[3] Man"
+	case helpModeReadme:
+		title = "[3] Readme"
 	}
 	// While the selected tool's live update log is showing, the panel is the
 	// update log, not help — mirror that in the inset title.

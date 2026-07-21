@@ -285,14 +285,22 @@ GitHub ref, including uninstalled ones — exactly the tools being evaluated
 - Modify: `internal/model/render.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] panel title `[3] Readme` via the existing `insetPanelTitle` switch on `helpMode`
-- [ ] `focusHelp` status bar: add `[r] readme` alongside `[h] help` / `[m] man`
-- [ ] `[?]` overlay: add the `r` row to the panel-[3] group; verify the ≤20×76 budget
-      still holds (re-balance columns if needed); the `/` search row keeps its text —
-      search simply doesn't apply in readme mode (v1)
-- [ ] write tests: title follows the third mode, status bar shows the hint, hotkeys
-      overlay fits the size budget
-- [ ] run `go test -race ./internal/model/...` — must pass before task 6
+- [x] panel title `[3] Readme` via the existing `insetPanelTitle` switch on `helpMode`
+      (the `if helpModeMan` became a `switch m.helpMode`)
+- [x] `focusHelp` status bar: add `[r] readme` alongside `[h] help` / `[m] man`
+- [x] `[?]` overlay: add the `r` row to the panel-[3] group (header now
+      `[3] Help / Man / Readme`); the `/` search row keeps its text — ➕ no column
+      partition of the five groups fits 20 rows once the group has 7 rows
+      (`[3]`+`Scrolling` = 17 lines in any pairing, and `[3]` cannot pair with a
+      smaller group), so the blank line **below** each group header was reclaimed:
+      groups are still separated by a blank line above the header, the header now
+      sits directly on its rows. Result 19×75, inside the ≤20×76 budget
+- [x] write tests: title follows the third mode, status bar shows the hint (in all
+      three modes, and not leaked into the tools bar where `r` is rename), hotkeys
+      overlay content carries the readme row and still fits the size budget —
+      ➕ `TestUpdateLogPanelTitle` now pins `helpModeHelp` (it asserts the log
+      falls back to the `[3] Help` title on a non-updating tool)
+- [x] run `go test -race ./internal/model/...` — must pass before task 6
 
 ### Task 6: Verify acceptance criteria
 

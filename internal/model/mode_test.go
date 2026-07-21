@@ -1409,7 +1409,18 @@ func TestReadmeKeyBranches(t *testing.T) {
 	t.Run("help focus switches to readme", func(t *testing.T) {
 		t.Setenv("HOME", t.TempDir())
 		m := newTestModel(focusHelp)
+		// Size the viewport and give it enough content to actually scroll:
+		// on a 0x0 viewport SetYOffset clamps to 0 and the GotoTop assertion
+		// below would pass no matter what the [r] branch does.
+		m = mustModel(m.Update(tea.WindowSizeMsg{Width: 100, Height: 30}))
+		m.focus = focusHelp
+		m.helpMode = helpModeHelp
+		m.helpCache["git"] = [2]string{helpModeHelp: strings.Repeat("--flag  does a thing\n", 200)}
+		m.setHelpContent()
 		m.helpViewport.SetYOffset(3)
+		if m.helpViewport.YOffset != 3 {
+			t.Fatalf("setup: YOffset = %d, want 3 (the viewport must be scrollable)", m.helpViewport.YOffset)
+		}
 		nm := mustModel(m.Update(keyRunes("r")))
 		if nm.helpMode != helpModeReadme {
 			t.Errorf("helpMode = %d, want helpModeReadme", nm.helpMode)

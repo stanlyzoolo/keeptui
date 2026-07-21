@@ -141,7 +141,13 @@ func (m Model) renderStatusBar() string {
 		if len(m.helpEntries) > 0 {
 			scrollOrNav = keyHint("j/k") + " navigate  " + scrollOrNav
 		}
-		hints := scrollOrNav + keyHint("h") + " --help  " + keyHint("m") + " man  " + keyHint("r") + " readme  " + keyHint("/") + " search  " + keyHint("←") + " back  " + keyHint("q") + " quit  " + keyHint("?") + " keys"
+		// The help search tears glamour's ANSI apart, so [/] is a no-op in
+		// readme mode — don't advertise a key that does nothing there.
+		search := keyHint("/") + " search  "
+		if m.helpMode == helpModeReadme {
+			search = ""
+		}
+		hints := scrollOrNav + keyHint("h") + " --help  " + keyHint("m") + " man  " + keyHint("r") + " readme  " + search + keyHint("←") + " back  " + keyHint("q") + " quit  " + keyHint("?") + " keys"
 		if m.helpNavIdx >= 0 {
 			hints = keyHint("esc") + " exit nav  " + hints
 		}
@@ -1073,7 +1079,11 @@ func (m Model) rawHelpText() string {
 // telling whether it is real content (false = the string is a placeholder).
 func (m Model) readmeContent(name string) (string, bool) {
 	data, ok := m.readmeData[name]
-	if ok && data.content != "" {
+	// helpBase must be non-empty too: glamour renders a README that carries no
+	// visible markdown (HTML comments, badges-only whitespace) to an empty
+	// string, and returning that as real content paints a blank panel with no
+	// way out. Such a render falls through to the generic placeholder below.
+	if ok && data.content != "" && m.helpBase != "" {
 		return m.helpBase, true
 	}
 	t, found := m.toolByName(name)

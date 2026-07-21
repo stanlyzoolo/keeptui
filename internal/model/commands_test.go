@@ -529,8 +529,32 @@ func TestInitSkipsReadmeWithoutRepo(t *testing.T) {
 	if !ok {
 		t.Fatal("Init must batch several commands")
 	}
-	// rate + installed + help; no changelog, no readme.
-	if len(batch) != 3 {
-		t.Errorf("Init batched %d cmds, want 3 for a tool with no repo", len(batch))
+	// rate + installed; no changelog, no readme — and no --help probe either,
+	// because the default panel [3] is the README (see the test below).
+	if len(batch) != 2 {
+		t.Errorf("Init batched %d cmds, want 2 for a tool with no repo", len(batch))
+	}
+}
+
+// TestInitHelpProbeFollowsHelpMode: the --help probe spawns a subprocess, so
+// startup only pays for it when panel [3] actually shows help. In the default
+// README mode the capture would never be rendered.
+func TestInitHelpProbeFollowsHelpMode(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	batchLen := func(mode int) int {
+		m := New([]loader.ToolMeta{{Name: "localtool"}})
+		m.width, m.height = 80, 24
+		m.helpMode = mode
+		batch, ok := m.Init()().(tea.BatchMsg)
+		if !ok {
+			t.Fatal("Init must batch several commands")
+		}
+		return len(batch)
+	}
+
+	readme, help := batchLen(helpModeReadme), batchLen(helpModeHelp)
+	if help != readme+1 {
+		t.Errorf("Init queued %d cmds in help mode and %d in readme mode, want exactly one more (the --help probe)", help, readme)
 	}
 }

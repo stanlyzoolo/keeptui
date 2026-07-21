@@ -37,6 +37,10 @@ func readmeServer(t *testing.T, readme http.HandlerFunc) *httptest.Server {
 	origCacheDir := testCacheDir
 	testAPIBase = srv.URL
 	testCacheDir = t.TempDir()
+	// Redirect the token too: without this the tests read the developer's real
+	// ~/.config/keeptui/token and doGH sends it to this local server.
+	t.Setenv("GITHUB_TOKEN", "")
+	resetTokenState(t, t.TempDir())
 	t.Cleanup(func() {
 		srv.Close()
 		testAPIBase = origAPIBase
@@ -299,6 +303,57 @@ func TestGetReadmeDoesNotRefreshRepoCard(t *testing.T) {
 	// The repo pass must still retry and now fill About.
 	if d := GetRepoData("github.com/owner/repo"); d.About != "recovered" {
 		t.Errorf("About = %q, want %q (repo fetch retried)", d.About, "recovered")
+	}
+}
+
+// TestGetRepoDataPreservesReadme is the repo-card twin of
+// TestGetChangelogPreservesReadme: getRepoData's cache write runs at every
+// startup and every refresh, so a CacheEntry{...} literal there would wipe a
+// cached README on the very next version poll.
+func TestGetRepoDataPreservesReadme(t *testing.T) {
+	readmeServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("# keep me"))
+	})
+
+	if _, err := GetReadme("github.com/owner/repo"); err != nil {
+		t.Fatalf("setup GetReadme: %v", err)
+	}
+	before := LoadCache()["owner/repo"].ReadmeCheckedAt
+
+	if d := GetRepoData("github.com/owner/repo"); d.Latest != "v1.0.0" {
+		t.Fatalf("setup GetRepoData: Latest = %q, want v1.0.0", d.Latest)
+	}
+
+	entry := LoadCache()["owner/repo"]
+	if entry.Readme != "# keep me" {
+		t.Errorf("Readme = %q, want it preserved across a repo-data fetch", entry.Readme)
+	}
+	if !entry.ReadmeCheckedAt.Equal(before) {
+		t.Errorf("ReadmeCheckedAt = %v, want unchanged %v", entry.ReadmeCheckedAt, before)
+	}
+}
+
+// TestFetchReadmeTruncatesOversized verifies the bounded read: the body is
+// cached to disk and glamour-parsed on the update loop, so an outsized README
+// is cut off and marked rather than carried whole.
+func TestFetchReadmeTruncatesOversized(t *testing.T) {
+	huge := strings.Repeat("x", readmeMaxBytes+4096)
+	readmeServer(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(huge))
+	})
+
+	md, err := GetReadme("github.com/owner/repo")
+	if err != nil {
+		t.Fatalf("GetReadme: %v", err)
+	}
+	if len(md) > readmeMaxBytes+64 {
+		t.Errorf("README length = %d, want it capped near readmeMaxBytes (%d)", len(md), readmeMaxBytes)
+	}
+	if !strings.Contains(md, "README truncated") {
+		t.Error("a truncated README must say so, or the panel looks complete")
+	}
+	if !strings.HasPrefix(md, "xxx") {
+		t.Error("the retained prefix must be the real README content")
 	}
 }
 

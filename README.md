@@ -5,7 +5,7 @@ data, versions and notes, the rendered repository README plus built-in `--help` 
 viewing, and updating outdated tools right from the interface. Pure TUI — no
 subcommands; the only flags are `--version` and `--help`.
 
-![keeptui — three-panel overview: tracker list, tool card, help viewer, live search and the hotkeys overlay](demo/hero.gif)
+![keeptui — three-panel overview: tracker list, tool card, docs viewer (README / --help / man), live search and the hotkeys overlay](demo/hero.gif)
 
 ## Features
 
@@ -85,7 +85,7 @@ top of the list; the order in `meta.yaml` is never changed.
 | `o` | open the repository in the browser |
 | `c` | open the changelog / releases page in the browser |
 | `u` | update the tool (available when marked `↑`); `enter` runs the shown command, `esc` cancels |
-| `r` | force-refresh the card data, bypassing the cache |
+| `r` | force-refresh the tool's data (card, changelog, README, installed version), bypassing the cache |
 | `s` | cycle the status (`active → trying → inactive → active`) |
 | `e` | edit the note |
 | `t` | edit the tags |
@@ -106,8 +106,8 @@ not per tool — pick `--help` once and moving through the list keeps showing `-
 
 | Key | Action |
 |-----|--------|
-| `r` | README mode — the rendered repository README (the default) |
-| `h` / `m` | `--help` / `man` mode |
+| `r` | README mode — the rendered repository README (the default); works only while `[3]` is focused, in `[1]` `r` is rename and in `[2]` refresh |
+| `h` / `m` | `--help` / `man` mode (these two also work from `[2]`) |
 | `j / k` | navigate by entries — flags and subcommands; the current entry is highlighted, the rest is dimmed (when there are no entries — in README mode, for example — `j / k` scroll 3 lines like the arrows) |
 | `↑ / ↓` | scroll the text (3 lines) |
 | `ctrl+d / ctrl+u`, `ctrl+f / ctrl+b`, `PgUp / PgDn`, `space`, `g / G` | half-page / full-page scroll, top / bottom |
@@ -116,11 +116,14 @@ not per tool — pick `--help` once and moving through the list keeps showing `-
 | `esc` | first turns off entry navigation, then moves focus away |
 
 The README is loaded lazily — one request per tool, cached for 24 hours — and only
-for the tool you actually open in README mode, so browsing the list does not burn the
-API quota. A tool without a `github` field, a repository without a README, or an
-exhausted quota show a message with the way out (`No repo for <name>`,
-`No README in <owner/repo>`, `rate limited — press [L]`); `r` in the brief panel
-re-fetches, bypassing the cache.
+for the tool whose README you actually look at: while you stay in `--help` or `man`
+mode nothing is fetched at all. In README mode, though, moving to a tool for the first
+time does spend that one request, so walking a long list on a cold cache costs one
+request per tool visited. A tool without a `github` field, a repository without a
+README, an exhausted quota or a failed fetch show a message with the way out
+(`No repo for <name>`, `No README in <owner/repo>`, `rate limited — press [L]`,
+`No README for <name>`); `r` in the brief panel re-fetches, bypassing the cache, and
+adding a token in the `L` overlay retries the ones that hit the limit.
 
 While a tool is being updated, this panel (`[3] Update`) shows the live command log;
 the log stays available after completion — until the next update.
@@ -189,7 +192,7 @@ atomic.
 | What | Where |
 |------|-------|
 | Tracker metadata | `~/.config/keeptui/meta.yaml` |
-| Version cache (24h TTL) | `~/.config/keeptui/cache.json` |
+| Version and README cache (24h TTL) | `~/.config/keeptui/cache.json` |
 | GitHub token (`0600`) | `~/.config/keeptui/token` |
 | Session error log | `~/.config/keeptui/logs/keeptui-<timestamp>.log` |
 

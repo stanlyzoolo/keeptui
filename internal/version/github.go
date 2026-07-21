@@ -154,6 +154,11 @@ var errNoReleases = errors.New("no releases found")
 // the negative for the session rather than refetching on every selection move.
 var ErrNoReadme = errors.New("no readme found")
 
+// readmeMaxBytes caps a fetched README. Well past any real tool's docs, but it
+// keeps a pathological repository from bloating cache.json and from stalling the
+// update loop in glamour (rendering is synchronous, and cost grows with size).
+const readmeMaxBytes = 512 << 10
+
 // classifyStatus maps a non-2xx GitHub response to an error. A 403 or 429 whose
 // own X-RateLimit-Remaining header reads 0 is rate-limit exhaustion and returns
 // ErrRateLimited; a 403 with remaining>0 is a genuine access denial and returns a
@@ -583,9 +588,16 @@ func fetchReadme(repo string) (string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return "", classifyStatus(resp)
 	}
-	data, err := io.ReadAll(resp.Body)
+	// Bounded read: the body is cached to disk and then glamour-parsed inside
+	// the Bubble Tea update loop, so an outsized README would both bloat
+	// cache.json and stall a keystroke. Truncation is marked so the panel does
+	// not silently look complete.
+	data, err := io.ReadAll(io.LimitReader(resp.Body, readmeMaxBytes+1))
 	if err != nil {
 		return "", err
+	}
+	if len(data) > readmeMaxBytes {
+		return string(data[:readmeMaxBytes]) + "\n\n*(README truncated)*\n", nil
 	}
 	return string(data), nil
 }

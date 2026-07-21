@@ -1,4 +1,4 @@
-# keeptui hero demo — overview: list, card, help nav, search, hotkeys overlay.
+# keeptui hero demo — overview: list, card, README + help nav, search, hotkeys overlay.
 # Render: vhs demo/hero.tape  (outputs demo/hero.gif)
 Output demo/hero.gif
 Require keeptui
@@ -30,8 +30,13 @@ Type "k" Sleep 1100ms
 # focus the brief card [2]
 Type "2" Sleep 2600ms
 
-# focus the help panel [3] and walk entries with j/k
-Type "3" Sleep 1500ms
+# focus the docs panel [3]: it opens on the rendered README, scroll it a bit
+Type "3" Sleep 2000ms
+Type "j" Sleep 700ms
+Type "j" Sleep 1400ms
+
+# switch to --help with [h] and walk entries with j/k (the entry spotlight)
+Type "h" Sleep 1500ms
 Type "j" Sleep 700ms
 Type "j" Sleep 700ms
 Type "j" Sleep 1400ms

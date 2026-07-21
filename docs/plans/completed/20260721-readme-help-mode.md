@@ -74,7 +74,8 @@ GitHub ref, including uninstalled ones — exactly the tools being evaluated
   also force-refreshes it. Rename clears `readmeData`.
 - **Mode**: `helpModeReadme` third constant, the **startup default** in `New()`;
   `helpMode` stays a sticky global field; live update log keeps priority.
-- **Render**: `glamour.Render` with `WithAutoStyle()` + `WithWordWrap(helpWrapWidth())`
+- **Render**: glamour with a fixed `WithStandardStyle("dark"|"light")` (never
+  `WithAutoStyle()` — see Technical Details) + `WithWordWrap(helpWrapWidth())`
   over `cleanTerminalOutput`-sanitized markdown; result cached in `helpBase` via
   `setHelpContent()`. No `parseHelpEntries`/`colorizeHelp` in readme mode — entries
   empty, `j`/`k` = plain scroll (same branch the update log uses). Help-search `/`
@@ -362,6 +363,6 @@ GitHub ref, including uninstalled ones — exactly the tools being evaluated
 - run the TUI: select an uninstalled tracked tool → README renders immediately;
   `[h]`/`[m]`/`[r]` cycle correctly; tool without GitHub ref shows the placeholder
 - check a badge-heavy README (e.g. a popular repo) for visual noise in glamour output
-- check dark and light terminal themes (`WithAutoStyle`)
+- check dark and light terminal themes (the style is resolved once from `m.darkBG`)
 - cold start with no token: confirm the rate gauge reflects the extra request only
   on selection, not for every tracked tool

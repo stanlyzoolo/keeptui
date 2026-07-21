@@ -59,17 +59,27 @@ The `model` package is split across files within a single package:
 2. `model.New(meta)` builds the model; `Init()` fires the async fetches — results
    arrive as messages and are merged into the state.
 
-Each tool has four data sources, split so local detection never waits on the network:
+Each tool has five data sources, split so local detection never waits on the network:
 
 - **installed** — `fetchInstalledCmd`: a local subprocess (`--version`/`-V`), always fired;
 - **remote** — `fetchRemoteCmd`: a single network pass via `version.GetRepoData`
   (release + repo card + languages), only when `github` is set;
 - **changelog** — `fetchChangelogCmd`;
 - **help** — `fetchHelpCmd`: `--help`/`-h`/`help` or `man <name>` depending on the panel mode.
+  The `--help` probe spawns a subprocess, so it only runs when panel `[3]` actually
+  shows help — `Init()` and `autoFetchCmdsForSelected` both skip it in README mode;
+- **readme** — `fetchReadmeCmd`: `version.GetReadme`, only when `github` is set. Unlike
+  the other four it is **lazy**: `Init()` seeds only the selected tool and
+  `autoFetchCmdsForSelected` fires it on a selection move only while
+  `helpMode == helpModeReadme`, so the request is spent per *visited* tool rather than
+  per tracked tool. The whole `readmeMsg` (content or error) lands in `m.readmeData`, so
+  a 404 or a rate limit is a session-cached negative; `[r]` in `[2]` clears the entry,
+  and a token added in the `[L]` overlay drops the rate-limited ones so they can retry.
 
 Message handlers merge without clobbering (installed never resets latest and vice
 versa). On selection change `autoFetchCmdsForSelected()` fills in what's missing —
-the pure predicates `needsInstalled`/`needsRemote` skip what is already cached.
+the pure predicates `needsInstalled`/`needsRemote`/`needsReadme` skip what is already
+cached.
 
 ### Probe sandbox
 
@@ -83,6 +93,12 @@ the `keeptui` screen. The protection has two layers:
    escape-sequence grammar via `x/ansi.Strip`) + `cleanTerminalOutput` (drops stray
    control characters). A capture carrying the alt-screen signature (`ESC[?1049`,
    `isTUITakeover`) is discarded entirely.
+
+A library that probes the terminal counts as the same hazard: `glamour.WithAutoStyle()`
+is never used, because its termenv OSC background query reads stdin and races Bubble
+Tea's input reader. Dark/light is resolved once at construction via lipgloss's cached
+`HasDarkBackground()` (`m.darkBG`) and passed to glamour as a fixed `WithStandardStyle`.
+The README body itself is bounded (`readmeMaxBytes`) and sanitized before rendering.
 
 ## TUI state machine
 
@@ -168,7 +184,7 @@ caller left it empty). Token: `GITHUB_TOKEN` from the environment always wins ov
 | Data | Path |
 |---|---|
 | Tracker metadata | `~/.config/keeptui/meta.yaml` |
-| Version cache (24h TTL) | `~/.config/keeptui/cache.json` |
+| Version + README cache (24h TTL each, separate timestamps) | `~/.config/keeptui/cache.json` |
 | GitHub token (`0600`) | `~/.config/keeptui/token` |
 | Session error log | `~/.config/keeptui/logs/keeptui-<timestamp>.log` |
 
@@ -189,7 +205,9 @@ silently.
 ## Testing
 
 Tests never touch the real config: `loader` has a `testConfigDir` seam, `version` has
-`testCacheDir`/`testTokenDir`/`testAPIBase`, `updater` has `testHomeDir`. The
+`testCacheDir`/`testTokenDir`/`testAPIBase`, `updater` has `testHomeDir`, `model` has
+`testReadmeStyle` (forces the glamour construction failure so the plain-text fallback
+is covered). The
 exception is `logx.SetDirForTesting(dir)`, which is exported: `version`/`loader`/`model`
 tests must redirect *its* output. The races are real (mutexes in `version`, `logx`),
 so tests always run with `-race`:

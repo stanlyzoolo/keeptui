@@ -34,8 +34,8 @@ func TestConcurrentFetch(t *testing.T) {
 			// Repo info endpoint
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]interface{}{
-				"archived":        false,
-				"description":     "test tool",
+				"archived":         false,
+				"description":      "test tool",
 				"stargazers_count": 42,
 			})
 		}

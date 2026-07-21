@@ -19,18 +19,18 @@ import (
 type inputMode int
 
 const (
-	modeNormal inputMode = iota
-	modeSearch         // "/" in focusTools: filter the tool list
-	modeHelpSearch     // "/" in focusBrief/focusHelp: search the help viewport
-	modeEditNote       // "e" in focusBrief
-	modeEditTags       // "t" in focusBrief
-	modeTrack          // "t" in focusTools
-	modeConfirmUntrack // "u" in focusTools
-	modeRename         // "r" in focusTools
-	modeConfirmUpdate  // "u" in focusBrief: confirm the detected update command
-	modeAPIStatus      // "L": rate-limit / token overlay
-	modeTokenInput     // "e" inside the overlay: masked token entry
-	modeHotkeys        // "?": static hotkeys-help overlay
+	modeNormal         inputMode = iota
+	modeSearch                   // "/" in focusTools: filter the tool list
+	modeHelpSearch               // "/" in focusBrief/focusHelp: search the help viewport
+	modeEditNote                 // "e" in focusBrief
+	modeEditTags                 // "t" in focusBrief
+	modeTrack                    // "t" in focusTools
+	modeConfirmUntrack           // "u" in focusTools
+	modeRename                   // "r" in focusTools
+	modeConfirmUpdate            // "u" in focusBrief: confirm the detected update command
+	modeAPIStatus                // "L": rate-limit / token overlay
+	modeTokenInput               // "e" inside the overlay: masked token entry
+	modeHotkeys                  // "?": static hotkeys-help overlay
 )
 
 // apiOverlayVisible reports whether the API-status overlay is on screen —

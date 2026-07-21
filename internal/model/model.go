@@ -200,9 +200,9 @@ type Model struct {
 	readmeData map[string]readmeMsg
 	// readmeRender memoizes the last glamour render (see readme.go).
 	readmeRender readmeRenderCache
-	helpSearch     textinput.Model
-	helpMatches    []int
-	helpMatchIdx   int
+	helpSearch   textinput.Model
+	helpMatches  []int
+	helpMatchIdx int
 
 	// helpEntries indexes the navigable entries (flag/subcommand line plus its
 	// description block) of the current help text, in wrapped display-line
@@ -293,7 +293,7 @@ func New(meta []loader.ToolMeta) Model {
 		// exists for a tracked-but-not-installed tool, which is exactly the
 		// state where docs matter most.
 		helpMode: helpModeReadme,
-		darkBG:        lipgloss.HasDarkBackground(),
+		darkBG:   lipgloss.HasDarkBackground(),
 	}
 
 	return m
@@ -313,8 +313,11 @@ func (m Model) Init() tea.Cmd {
 	if m.mode == modeSearch {
 		cmds = append(cmds, textinput.Blink)
 	}
-	// Auto-fetch --help and changelog for initial selected tool
-	if mt, ok := m.selectedMeta(); ok {
+	// Auto-fetch --help and changelog for initial selected tool. The --help probe
+	// spawns a subprocess, so it only runs when [3] actually shows it: in the
+	// default readme mode the capture would never be rendered (same reasoning as
+	// the readme case in autoFetchCmdsForSelected).
+	if mt, ok := m.selectedMeta(); ok && m.helpMode == helpModeHelp {
 		cached := m.helpCache[mt.Name]
 		if cached[helpModeHelp] == "" {
 			cmds = append(cmds, fetchHelpCmd(mt.Name, helpModeHelp))
@@ -469,6 +472,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.tokenError = ""
 		if msg.rate.Known {
 			m.rate = msg.rate
+		}
+		// A rate-limited README is a session-cached negative that needsReadme
+		// treats as answered — drop those entries so the backfill can actually
+		// retry them, which is what the "rate limited — press [L]" placeholder
+		// promises. Fetched content and 404s stay.
+		for name, data := range m.readmeData {
+			if data.content == "" && errors.Is(data.err, version.ErrRateLimited) {
+				delete(m.readmeData, name)
+			}
 		}
 		// Backfill cards now that the higher limit is available.
 		return m, m.autoFetchCmdsForSelected()
@@ -963,45 +975,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "h":
 			if m.focus == focusBrief || m.focus == focusHelp {
 				m.focus = focusHelp
-				m.helpMode = helpModeHelp
-				if mt, ok := m.selectedMeta(); ok {
-					// An explicit [h] is intent to leave a completed update log
-					// (otherwise sticky on re-selection); drop it so help is
-					// reachable again. Keep the live log during an in-flight
-					// update (updatingFor == name).
-					if m.updateLogFor == mt.Name && m.updatingFor != mt.Name {
-						m.updateLogFor = ""
-					}
-					cached := m.helpCache[mt.Name]
-					if cached[helpModeHelp] == "" {
-						m.helpLoadingFor = mt.Name
-						m.setHelpContent()
-						return m, fetchHelpCmd(mt.Name, helpModeHelp)
-					}
-					m.setHelpContent()
-					m.helpViewport.GotoTop()
-				}
+				return m, m.switchHelpMode(helpModeHelp)
 			}
 
 		case "m":
 			if m.focus == focusBrief || m.focus == focusHelp {
 				m.focus = focusHelp
-				m.helpMode = helpModeMan
-				if mt, ok := m.selectedMeta(); ok {
-					// See [h]: an explicit [m] also dismisses a completed update
-					// log so the man page is reachable again.
-					if m.updateLogFor == mt.Name && m.updatingFor != mt.Name {
-						m.updateLogFor = ""
-					}
-					cached := m.helpCache[mt.Name]
-					if cached[helpModeMan] == "" {
-						m.helpLoadingFor = mt.Name
-						m.setHelpContent()
-						return m, fetchHelpCmd(mt.Name, helpModeMan)
-					}
-					m.setHelpContent()
-					m.helpViewport.GotoTop()
-				}
+				return m, m.switchHelpMode(helpModeMan)
 			}
 
 		case "e":
@@ -1070,22 +1050,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.focus == focusHelp {
 				// Third source of [3]: back to the README. Only in focusHelp —
 				// r stays rename in [1] and refresh in [2].
-				m.helpMode = helpModeReadme
-				if mt, ok := m.selectedMeta(); ok {
-					// See [h]/[m]: an explicit [r] also dismisses a completed
-					// update log, but never a live one.
-					if m.updateLogFor == mt.Name && m.updatingFor != mt.Name {
-						m.updateLogFor = ""
-					}
-					m.setHelpContent()
-					m.helpViewport.GotoTop()
-					// A selection move made while [h]/[m] was showing never fetched
-					// this tool's README (autoFetchCmdsForSelected only fetches in
-					// readme mode), so the switch has to cover that gap.
-					if t, ok := m.selectedTool(); ok && m.needsReadme(t) {
-						return m, fetchReadmeCmd(t.GitHub, t.Name)
-					}
-				}
+				return m, m.switchHelpMode(helpModeReadme)
 			}
 
 		case "o":
@@ -1325,6 +1290,47 @@ func (m *Model) setHelpContent() {
 		}
 	}
 	m.helpViewport.SetContent(m.renderHelpContent())
+}
+
+// switchHelpMode points panel [3] at one of its three sources and returns the
+// fetch command for that source when it is not cached yet. Shared by [h], [m]
+// and [r] — the three keys differ only in which source they select, so the
+// log dismissal, repaint and scroll-to-top live here once. Focus stays with the
+// caller: [h]/[m] fire from [2] as well and move focus, [r] is focusHelp-only.
+func (m *Model) switchHelpMode(mode int) tea.Cmd {
+	m.helpMode = mode
+	mt, ok := m.selectedMeta()
+	if !ok {
+		return nil
+	}
+	// An explicit mode switch is intent to leave a completed update log
+	// (otherwise sticky on re-selection); a live update (updatingFor == name)
+	// keeps the panel.
+	if m.updateLogFor == mt.Name && m.updatingFor != mt.Name {
+		m.updateLogFor = ""
+	}
+	// README first: helpCache is a [2]string and mode 2 would index it out of
+	// range. Its source is readmeData, and a selection moved while [h]/[m] was
+	// showing never fetched it (autoFetchCmdsForSelected only fetches in readme
+	// mode), so the switch has to cover that gap.
+	if mode == helpModeReadme {
+		m.setHelpContent()
+		m.helpViewport.GotoTop()
+		// refreshingFor: a [r] refresh in [2] already has a forced fetch in
+		// flight for this tool (see autoFetchCmdsForSelected).
+		if t, ok := m.selectedTool(); ok && m.needsReadme(t) && m.refreshingFor != t.Name {
+			return fetchReadmeCmd(t.GitHub, t.Name)
+		}
+		return nil
+	}
+	if m.helpCache[mt.Name][mode] == "" {
+		m.helpLoadingFor = mt.Name
+		m.setHelpContent()
+		return fetchHelpCmd(mt.Name, mode)
+	}
+	m.setHelpContent()
+	m.helpViewport.GotoTop()
+	return nil
 }
 
 // clearHelpNav turns the spotlight cursor off and repaints the help viewport

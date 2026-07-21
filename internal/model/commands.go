@@ -181,7 +181,12 @@ func readmeCmd(githubField, toolName string, force bool) tea.Cmd {
 		} else {
 			content, err = version.GetReadme(githubField)
 		}
-		if err != nil {
+		// ErrNoReadme is a conclusive 404, not a malfunction: logging it would
+		// re-create the session log on every launch for a repo that simply has
+		// no README, defeating "a log file means something went wrong" (the
+		// same rule classifyStatus applies to 404s and InstalledVersion to a
+		// tool that is not on PATH). Rate limits are already logged by doGH.
+		if err != nil && !errors.Is(err, version.ErrNoReadme) && !errors.Is(err, version.ErrRateLimited) {
 			logx.Errorf("model.%s: %s: %v", ctx, toolName, err)
 		}
 		return readmeMsg{toolName: toolName, content: content, err: err}
@@ -290,7 +295,11 @@ func (m *Model) autoFetchCmdsForSelected() tea.Cmd {
 			// --help subprocess the panel would never show.
 			m.setHelpContent()
 			m.helpViewport.GotoTop()
-			if t, ok := m.selectedTool(); ok && m.needsReadme(t) {
+			// refreshingFor guards the [r] window: that path deletes the session
+			// entry (so a cached negative can recover) and fires its own forced
+			// fetch, so needsReadme is true again until it lands — leaving and
+			// re-entering the tool meanwhile would spend a second request.
+			if t, ok := m.selectedTool(); ok && m.needsReadme(t) && m.refreshingFor != t.Name {
 				cmds = append(cmds, fetchReadmeCmd(t.GitHub, t.Name))
 			}
 		case m.helpCache[mt.Name][m.helpMode] == "":

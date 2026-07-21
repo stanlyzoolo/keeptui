@@ -1,6 +1,7 @@
 package model
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -1049,11 +1050,39 @@ func (m Model) rawHelpText() string {
 	if !ok {
 		return ""
 	}
+	// README content is not a probe capture and lives in readmeData, not the
+	// [2]string helpCache — indexing it with helpModeReadme would panic.
+	if m.helpMode == helpModeReadme {
+		return ""
+	}
 	cached, has := m.helpCache[mt.Name]
 	if !has {
 		return ""
 	}
 	return cached[m.helpMode]
+}
+
+// readmeContent returns the rendered README for the selected tool plus a flag
+// telling whether it is real content (false = the string is a placeholder).
+func (m Model) readmeContent(name string) (string, bool) {
+	data, ok := m.readmeData[name]
+	if ok && data.content != "" {
+		return m.helpBase, true
+	}
+	t, found := m.toolByName(name)
+	if !found || t.GitHub == "" {
+		return "No repo for " + name + ".\nPress [h] for --help.", false
+	}
+	if !ok {
+		return "Loading...", false
+	}
+	switch {
+	case errors.Is(data.err, version.ErrNoReadme):
+		return "No README in " + t.GitHub + ".\nPress [h] for --help.", false
+	case errors.Is(data.err, version.ErrRateLimited):
+		return "rate limited — press [L]", false
+	}
+	return "No README for " + name + ".\nPress [h] for --help.", false
 }
 
 func (m Model) renderHelpContent() string {
@@ -1073,6 +1102,18 @@ func (m Model) renderHelpContent() string {
 			return ui.MetaNoteStyle.Render("starting update…")
 		}
 		return wrapText(strings.Join(m.updateLog, "\n"), m.helpWrapWidth())
+	}
+
+	// README mode: content comes from readmeData (glamour-rendered into helpBase
+	// by setHelpContent), never from the [2]string helpCache. Placed after the
+	// update-log branch, which keeps priority, and ahead of every helpCache
+	// index — mode 2 is out of range for that array.
+	if m.helpMode == helpModeReadme {
+		text, real := m.readmeContent(mt.Name)
+		if !real {
+			return ui.MetaNoteStyle.Render(text)
+		}
+		return text
 	}
 
 	// Gate per tool, not on "any fetch in flight": another tool's fetch may

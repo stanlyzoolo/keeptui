@@ -1857,6 +1857,7 @@ func TestUpdateRenameInputClearsStaleCaches(t *testing.T) {
 		repoStatus:    map[string]string{old: "ok"},
 		changelogData: map[string]changelogMsg{old: {}},
 		helpCache:     map[string][2]string{old: {helpModeHelp: "cached"}},
+		readmeData:    map[string]readmeMsg{old: {content: "# cli"}},
 	}
 	m.tools = loader.ToolsFromMeta(m.meta)
 	m.nameInput.SetValue(newName)
@@ -1878,6 +1879,9 @@ func TestUpdateRenameInputClearsStaleCaches(t *testing.T) {
 	}
 	if _, ok := nm.helpCache[old]; ok {
 		t.Errorf("helpCache still holds stale old-name key %q after rename", old)
+	}
+	if _, ok := nm.readmeData[old]; ok {
+		t.Errorf("readmeData still holds stale old-name key %q after rename", old)
 	}
 }
 

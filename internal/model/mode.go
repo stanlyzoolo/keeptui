@@ -256,6 +256,7 @@ func (m Model) updateRenameInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		delete(m.versions, old)
 		delete(m.repoStatus, old)
 		delete(m.changelogData, old)
+		delete(m.readmeData, old)
 		for i, e := range m.meta {
 			if e.Name == newName {
 				m.metaSelected = i

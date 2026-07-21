@@ -207,30 +207,37 @@ GitHub ref, including uninstalled ones — exactly the tools being evaluated
 - Modify: `internal/model/model.go`
 - Modify: `internal/model/commands_test.go`, `internal/model/model_test.go`
 
-- [ ] add `readmeMsg{toolName, content string, err error}` and
+- [x] add `readmeMsg{toolName, content string, err error}` and
       `fetchReadmeCmd`/`refreshReadmeCmd` (mirroring changelog cmds, `safeCmd`-wrapped,
       `logx.Errorf` on failure)
-- [ ] add `m.readmeData map[string]readmeMsg` (init in `New()`); handler stores the
+- [x] add `m.readmeData map[string]readmeMsg` (init in `New()`); handler stores the
       msg but keeps previously known content on error (known-wins merge); repaint via
       `setHelpContent()` when the msg is for the selected tool and mode is readme
-- [ ] add `needsReadme(t)` predicate (`t.GitHub != ""` and no `readmeData` entry)
-- [ ] restructure `autoFetchCmdsForSelected`'s help switch (commands.go:227-243):
+- [x] add `needsReadme(t)` predicate (`t.GitHub != ""` and no `readmeData` entry)
+- [x] restructure `autoFetchCmdsForSelected`'s help switch (commands.go:227-243):
       add a `case m.helpMode == helpModeReadme:` **before** the
       `m.helpCache[mt.Name][m.helpMode] == ""` case — repaint via `setHelpContent`,
       fire `fetchReadmeCmd` when `needsReadme`, and do **not** set `helpLoadingFor`
       or fire `fetchHelpCmd` (the existing case both indexes the `[2]string` out of
-      range with mode 2 and would spawn a bogus subprocess)
-- [ ] queue `fetchReadmeCmd` for the initially selected tool in `Init()`
+      range with mode 2 and would spawn a bogus subprocess) — ➕ placed *after* the
+      `updateLogFor` case so a live update log keeps panel [3]
+- [x] queue `fetchReadmeCmd` for the initially selected tool in `Init()`
       (model.go:283-292) — startup fires help/changelog directly, not via
       `autoFetchCmdsForSelected`, so without this the default readme panel shows a
       placeholder until the user moves the selection
-- [ ] add `refreshReadmeCmd` to `refreshSelectedCmd` (force path, clears the session
+- [x] add `refreshReadmeCmd` to `refreshSelectedCmd` (force path, clears the session
       entry so a 404-negative can recover)
-- [ ] clear `readmeData` old-name entry on rename alongside the existing map cleanups
-- [ ] write tests: msg merge (error keeps known content), `needsReadme` gating,
+- [x] clear `readmeData` old-name entry on rename alongside the existing map cleanups
+- [x] write tests: msg merge (error keeps known content), `needsReadme` gating,
       auto-fetch fires `fetchReadmeCmd` (and NOT `fetchHelpCmd`) in readme mode,
       `Init()` includes the readme fetch, rename invalidation
-- [ ] run `go test -race ./internal/model/...` — must pass before task 4
+- [x] run `go test -race ./internal/model/...` — must pass before task 4
+- ➕ pulled forward from task 4 (a compiling, non-panicking intermediate state
+      required it): the `helpModeReadme` const, the `readmeRender` field on
+      `Model`, the `rawHelpText`/`renderHelpContent` readme guards + placeholders
+      (`readmeContent`) and the `setHelpContent` readme branch that renders through
+      `readmeRender`. Task 4 still owns the default mode, the `[r]` key, the `/`
+      no-op and the resize/placeholder tests.
 
 ### Task 4: helpModeReadme — default mode, [r] key, render branch
 

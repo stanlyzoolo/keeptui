@@ -77,9 +77,24 @@ type helpOutputMsg struct {
 	err      error
 }
 
+// readmeMsg carries the repository README for a tool, fetched once per tool per
+// cache TTL. It mirrors changelogMsg: the whole message is stored in
+// m.readmeData, so a 404 (ErrNoReadme) or a rate-limit error is a session-cached
+// negative result and selection moves never re-fire the fetch.
+type readmeMsg struct {
+	toolName string
+	content  string
+	err      error
+}
+
 const (
 	helpModeHelp = 0
 	helpModeMan  = 1
+	// helpModeReadme is the third source of panel [3]: the repository README,
+	// fetched from the GitHub API rather than probed locally. Note helpCache is
+	// a [2]string indexed by mode — every index site must branch on this mode
+	// before reaching the array.
+	helpModeReadme = 2
 )
 
 // updateLogMaxLines caps the live update log buffer. Only the tail matters (the
@@ -178,6 +193,13 @@ type Model struct {
 	helpMode       int
 	helpLoadingFor string
 	helpCache      map[string][2]string
+	// readmeData is the session cache for helpModeReadme, keyed by tool name.
+	// The whole message is stored (content or error), so a negative result is
+	// remembered for the session instead of refetched on every selection move;
+	// a force refresh ([r] in the brief panel) clears the entry.
+	readmeData map[string]readmeMsg
+	// readmeRender memoizes the last glamour render (see readme.go).
+	readmeRender readmeRenderCache
 	helpSearch     textinput.Model
 	helpMatches    []int
 	helpMatchIdx   int
@@ -256,6 +278,7 @@ func New(meta []loader.ToolMeta) Model {
 		repoCards:     make(map[string]version.RepoCard),
 		changelogData: make(map[string]changelogMsg),
 		helpCache:     make(map[string][2]string),
+		readmeData:    make(map[string]readmeMsg),
 		search:        ti,
 		noteInput:     ni,
 		tagsInput:     tgi,
@@ -295,6 +318,10 @@ func (m Model) Init() tea.Cmd {
 	}
 	if t, ok := m.selectedTool(); ok && t.GitHub != "" {
 		cmds = append(cmds, fetchChangelogCmd(t.GitHub, t.Name))
+		// Startup fires the panel-[3] sources directly rather than through
+		// autoFetchCmdsForSelected, so the README needs its own seed — otherwise
+		// the default readme panel shows a placeholder until the selection moves.
+		cmds = append(cmds, fetchReadmeCmd(t.GitHub, t.Name))
 	}
 	return tea.Batch(cmds...)
 }
@@ -331,6 +358,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.changelogData[msg.toolName] = msg
 		m.briefViewport.SetContent(m.renderCard())
+		return m, nil
+
+	case readmeMsg:
+		// Known-content-wins merge, like the repo cards: a later failure (rate
+		// limit, network) must not blank a README that was already fetched.
+		if msg.err != nil && msg.content == "" {
+			if prev, ok := m.readmeData[msg.toolName]; ok && prev.content != "" {
+				prev.err = msg.err
+				m.readmeData[msg.toolName] = prev
+				return m, nil
+			}
+		}
+		m.readmeData[msg.toolName] = msg
+		// Repaint only when the arrival changes what is on screen: the selected
+		// tool AND the displayed mode.
+		if mt, ok := m.selectedMeta(); ok && mt.Name == msg.toolName && m.helpMode == helpModeReadme {
+			m.setHelpContent()
+		}
 		return m, nil
 
 	case remoteMsg:
@@ -1230,13 +1275,24 @@ func (m *Model) setHelpContent() {
 	// The update log and the loading state render instead of help text; both
 	// leave the entry index empty so j/k stay plain scroll. A cache miss or
 	// stored "No --help output…" fallback yields no entries via the parser.
-	if mt, ok := m.selectedMeta(); ok && m.updateLogFor != mt.Name && m.helpLoadingFor != mt.Name {
-		if raw := m.rawHelpText(); raw != "" {
-			m.helpEntries = parseHelpEntries(raw, m.helpWrapWidth())
-			// Built here, not via renderHelpContent: the render can be in the
-			// search-highlight branch mid-search, and the cache must always
-			// hold the plain full-color base the spotlight dims against.
-			m.helpBase = colorizeHelp(wrapText(raw, m.helpWrapWidth()))
+	if mt, ok := m.selectedMeta(); ok && m.updateLogFor != mt.Name {
+		switch {
+		case m.helpMode == helpModeReadme:
+			// README mode: helpBase holds the glamour render (memoized — this
+			// runs on every selection move and resize). Entries stay empty, so
+			// j/k are plain scroll and colorizeHelp/parseHelpEntries never touch
+			// the ANSI output glamour produces.
+			if data, has := m.readmeData[mt.Name]; has && data.content != "" {
+				m.helpBase = m.readmeRender.render(mt.Name, data.content, m.helpWrapWidth(), m.darkBG)
+			}
+		case m.helpLoadingFor != mt.Name:
+			if raw := m.rawHelpText(); raw != "" {
+				m.helpEntries = parseHelpEntries(raw, m.helpWrapWidth())
+				// Built here, not via renderHelpContent: the render can be in the
+				// search-highlight branch mid-search, and the cache must always
+				// hold the plain full-color base the spotlight dims against.
+				m.helpBase = colorizeHelp(wrapText(raw, m.helpWrapWidth()))
+			}
 		}
 	}
 	m.helpViewport.SetContent(m.renderHelpContent())

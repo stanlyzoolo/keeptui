@@ -146,27 +146,29 @@ GitHub ref, including uninstalled ones — exactly the tools being evaluated
 - Modify: `internal/version/github.go`
 - Modify: `internal/version/github_test.go`
 
-- [ ] make `doGH` set `Accept` only when the request has none (preserve pre-set header)
-- [ ] add `Readme string` (json `readme,omitempty`) **and `ReadmeCheckedAt
+- [x] make `doGH` set `Accept` only when the request has none (preserve pre-set header)
+- [x] add `Readme string` (json `readme,omitempty`) **and `ReadmeCheckedAt
       time.Time`** to `CacheEntry` — freshness independent from the repo-card
       `CheckedAt` (see Technical Details: shared timestamp would defeat
-      `getRepoData`'s poison guard)
-- [ ] fix `getChangelog`'s `CacheEntry{...}` write literal (github.go:477-489) to
+      `getRepoData`'s poison guard) — ➕ tagged `readme_checked_at,omitzero`
+      (`omitempty` is a no-op on a struct field and the linter flags it)
+- [x] fix `getChangelog`'s `CacheEntry{...}` write literal (github.go:477-489) to
       carry `Readme`/`ReadmeCheckedAt` over from `existing` so a changelog fetch
-      never wipes a cached README
-- [ ] add `fetchReadme(repo)` — `GET /repos/{repo}/readme`, `Accept:
+      never wipes a cached README — switched to the `e := existing` mutate style
+      `getRepoData` uses, so future fields are preserved automatically
+- [x] add `fetchReadme(repo)` — `GET /repos/{repo}/readme`, `Accept:
       application/vnd.github.raw+json`, body is raw markdown; 404 → typed `ErrNoReadme`
-- [ ] add `getReadme(field, force)` + public `GetReadme`/`RefreshReadme` following
+- [x] add `getReadme(field, force)` + public `GetReadme`/`RefreshReadme` following
       `getChangelog`: TTL short-circuit on `ReadmeCheckedAt` + `Readme != ""`, write
       via `updateCacheEntry`, failed fetch leaves `ReadmeCheckedAt` stale
-- [ ] write tests against `testAPIBase` httptest: success (raw md round-trip,
+- [x] write tests against `testAPIBase` httptest: success (raw md round-trip,
       read-after-write), 404 → `ErrNoReadme`, rate-limited 403 → `ErrRateLimited`,
       force bypasses TTL, failure doesn't poison a cached README, Accept header
-      asserted on the recorded request
-- [ ] write cross-writer tests: a changelog fetch preserves an existing `Readme`;
+      asserted on the recorded request (new `internal/version/readme_test.go`)
+- [x] write cross-writer tests: a changelog fetch preserves an existing `Readme`;
       a successful README fetch does **not** mark a failed/stale repo fetch fresh
       (repo-card `CheckedAt` untouched)
-- [ ] run `go test -race ./internal/version/...` — must pass before task 2
+- [x] run `go test -race ./internal/version/...` — must pass before task 2
 
 ### Task 2: glamour rendering helper
 

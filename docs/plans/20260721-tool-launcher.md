@@ -74,12 +74,12 @@
 - Create: `internal/launcher/launcher.go`
 - Create: `internal/launcher/launcher_test.go`
 
-- [ ] create `Plan{Argv []string, Fallback bool, Terminal string}` and pure `planFor(env func(string) string, command, toolName string) Plan` with the priority chain tmux → iTerm.app → Apple_Terminal → kitty → WezTerm → fallback
-- [ ] implement `appleScriptQuote` (escape `\` then `"`) and build the two osascript plans through it; tmux/kitty/wezterm plans pass command and tool name as argv elements
-- [ ] add thin `Detect(command, toolName) Plan` wrapper over `os.Getenv`
-- [ ] write table tests for `planFor`: each terminal env → expected argv; `$TMUX` wins over a simultaneously-set `$TERM_PROGRAM`; empty env → `Fallback: true`; tool names with spaces/unicode stay intact as argv elements
-- [ ] write table tests for `appleScriptQuote` (quotes, backslashes, combinations) and assert the osascript plan embeds the escaped command
-- [ ] run `go test -race ./internal/launcher/` - must pass before task 2
+- [x] create `Plan{Argv []string, Fallback bool, Terminal string}` and pure `planFor(env func(string) string, command, toolName string) Plan` with the priority chain tmux → iTerm.app → Apple_Terminal → kitty → WezTerm → fallback
+- [x] implement `appleScriptQuote` (escape `\` then `"`) and build the two osascript plans through it; tmux/kitty/wezterm plans pass command and tool name as argv elements
+- [x] add thin `Detect(command, toolName) Plan` wrapper over `os.Getenv`
+- [x] write table tests for `planFor`: each terminal env → expected argv; `$TMUX` wins over a simultaneously-set `$TERM_PROGRAM`; empty env → `Fallback: true`; tool names with spaces/unicode stay intact as argv elements
+- [x] write table tests for `appleScriptQuote` (quotes, backslashes, combinations) and assert the osascript plan embeds the escaped command
+- [x] run `go test -race ./internal/launcher/` - must pass before task 2
 
 ### Task 2: `modeRunInput` — key, input mode, lastRun
 

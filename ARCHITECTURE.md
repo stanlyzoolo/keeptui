@@ -48,6 +48,7 @@ The `model` package is split across files within a single package:
 | `mode.go` | The `inputMode` enum and a handler per input mode |
 | `commands.go` | All `tea.Cmd` constructors (fetch commands, update streaming) and re-fetch predicates |
 | `render.go` | `View`, panel/card/status-bar/gauge/overlay renderers, mouse handling |
+| `readme.go` | `renderReadme` — markdown → ANSI via glamour, with a single-entry render cache |
 | `textutil.go` | Pure text helpers (`wrapText`, `stripANSI`, `colorizeHelp`, `parseHelpEntries`, …) |
 | `browser.go` | Opening URLs per `GOOS` |
 
@@ -86,13 +87,14 @@ the `keeptui` screen. The protection has two layers:
 ## TUI state machine
 
 Three panels with cycling focus: `[1] Tools` (the list), `[2] Brief` (the card),
-`[3] Help` (the `--help`/`man`/update-log view). Focus moves with `→`/`←`, the digits
+`[3] Readme` (the README/`--help`/`man`/update-log view, switched by `r`/`h`/`m` —
+`m.helpMode` is global, not per tool, and defaults to the README). Focus moves with `→`/`←`, the digits
 `1`/`2`/`3`, or a mouse click; everything goes through `setFocus(f)`, which repaints
 the tools list — the only viewport whose content depends on focus.
 
-All modal state is a single field `m.mode inputMode` (11 values: `modeNormal`, `modeSearch`,
+All modal state is a single field `m.mode inputMode` (12 values: `modeNormal`, `modeSearch`,
 `modeHelpSearch`, `modeEditNote`, `modeEditTags`, `modeTrack`, `modeConfirmUntrack`, `modeRename`,
-`modeAPIStatus`, `modeTokenInput`, `modeConfirmUpdate`). Exactly one mode is active at
+`modeAPIStatus`, `modeTokenInput`, `modeConfirmUpdate`, `modeHotkeys`). Exactly one mode is active at
 a time; `Update()` dispatches via `switch m.mode`, so keys that open other modes
 structurally cannot fire inside another mode's input.
 
@@ -110,7 +112,11 @@ Key invariants:
 - **`setHelpContent()` is the single recompute point for the help panel.** Entry
   navigation (`j`/`k`, `parseHelpEntries`, the `applySpotlight` spotlight) is
   recomputed only where the visible text actually changed; style-only repaints never
-  reset the cursor.
+  reset the cursor. In README mode there are no entries — the glamour output is
+  already styled, so `j`/`k` scroll and `/` is a no-op.
+- **`m.helpCache` is a `[2]string` indexed by `m.helpMode`.** README content lives in
+  a separate map (`m.readmeData`), so every index site is guarded by a README branch
+  first — mode `2` would otherwise run off the end of the array.
 
 ## Updating a tool (`u`)
 
@@ -132,7 +138,10 @@ lives in `[3] Update` (a ~500-line buffer); the 10-minute deadline ends with
 ## GitHub API
 
 Without a token — 60 requests/hour per IP, with a token — 5000. A tool with `github`
-costs 3 requests. Token: `GITHUB_TOKEN` from the environment always wins over the
+costs 3 requests at startup, plus one lazy request for the README of the tool opened
+in panel `[3]` (`GET /repos/{owner}/{repo}/readme` with
+`Accept: application/vnd.github.raw+json` — `doGH` only defaults `Accept` when the
+caller left it empty). Token: `GITHUB_TOKEN` from the environment always wins over the
 `~/.config/keeptui/token` file (`0600`); a token entered in the TUI is validated with a
 `/rate_limit` request before being written to disk.
 
@@ -146,9 +155,13 @@ costs 3 requests. Token: `GITHUB_TOKEN` from the environment always wins over th
   already-loaded data is not erased.
 - **The cache** (`cache.json`, 24h TTL): every read-modify-write goes through
   `updateCacheEntry(repo, mutate)` — under a mutex, re-read from disk, merge, write
-  back; parallel startup goroutines never clobber each other's repositories. Force
-  refresh (`r`) skips only the freshness check, keeping the merge and the guard
-  against poisoning the cache with an empty response.
+  back; parallel startup goroutines never clobber each other's repositories. `mutate`
+  always mutates a copy of the existing entry instead of building a `CacheEntry{…}`
+  literal — a literal silently drops the fields that writer does not know about. The
+  README has its own freshness timestamp (`ReadmeCheckedAt`), separate from the
+  card's `CheckedAt`, so the two poison-guards stay independent. Force refresh (`r`)
+  skips only the freshness check, keeping the merge and the guard against poisoning
+  the cache with an empty response.
 
 ## Storage
 

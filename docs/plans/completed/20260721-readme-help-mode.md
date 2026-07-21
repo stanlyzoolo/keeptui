@@ -335,10 +335,26 @@ GitHub ref, including uninstalled ones — exactly the tools being evaluated
 
 ### Task 7: [Final] Update documentation
 
-- [ ] update `CLAUDE.md`: panel `[3]` modes (readme default), new fetch path,
-      `doGH` Accept rule, `readmeData` map, key table
-- [ ] update `README.md` hotkeys section if it lists panel keys
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update `CLAUDE.md`: panel `[3]` modes (readme default), new fetch path,
+      `doGH` Accept rule, `readmeData` map, key table — new **Panel `[3]` modes
+      (`helpMode`)** bullet (three modes, `[r]`/`[h]`/`[m]`, update-log priority, the
+      `[2]string` guard, glamour/`darkBG`/render cache, placeholders), the fetch
+      split is now five sources with the lazy `fetchReadmeCmd` bullet, `Init()` /
+      rename / refresh / `setHelpContent` lists extended, `readme.go` added to the
+      file table, panel titles + `focusHelp` status bar + hotkeys-overlay layout
+      note updated, and in the GitHub API section: the `doGH` Accept rule, the
+      quota note, `updateCacheEntry` mutate-style rule and the separate
+      `ReadmeCheckedAt` paragraph
+- [x] update `README.md` hotkeys section if it lists panel keys — intro + feature
+      list, the panel section is now `[3] Readme / Help / Man` with the `r` row, a
+      lazy-fetch/placeholder paragraph, the API-quota note and glamour in Stack
+- [x] ➕ update `ARCHITECTURE.md` (out of the original scope, but it is the doc
+      `README.md` links to for the architecture and it described `[3]` as
+      `--help`/`man` only): panel description, `readme.go` row, the `helpCache`
+      index invariant, the `[3]` no-entries note, API cost + Accept rule, cache
+      mutate-style and `ReadmeCheckedAt`; fixed the stale `inputMode` count (11 → 12,
+      `modeHotkeys` was missing)
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 

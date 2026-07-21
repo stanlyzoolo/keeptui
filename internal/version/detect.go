@@ -58,6 +58,14 @@ func InstalledVersion(t loader.Tool) string {
 		}
 		reasons = append(reasons, strings.Join(args, " ")+": no version string in output")
 	}
+	// Brew fallback: apps with no --version CLI (casks like GUI/terminal
+	// apps) still record their version in Homebrew's directory layout. A hit
+	// here also suppresses the reasons log — a cask failing --version every
+	// startup is this path's normal state, not a malfunction, and logx's
+	// signal is "a log file means something went wrong".
+	if v := brewDirVersion(t.Name); v != "" {
+		return v
+	}
 	// Only an installed-but-unresponsive binary reaches here with reasons; a
 	// tool simply absent from PATH leaves reasons empty and logs nothing.
 	if len(reasons) > 0 {

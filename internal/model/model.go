@@ -289,6 +289,10 @@ func New(meta []loader.ToolMeta) Model {
 		spinner:       sp,
 		meta:          meta,
 		helpNavIdx:    -1,
+		// The README is the default source of [3]: it is the only one that
+		// exists for a tracked-but-not-installed tool, which is exactly the
+		// state where docs matter most.
+		helpMode: helpModeReadme,
 		darkBG:        lipgloss.HasDarkBackground(),
 	}
 
@@ -934,6 +938,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "/":
 			if m.focus == focusBrief || m.focus == focusHelp {
+				// The README is glamour-rendered ANSI: highlightMatch would tear
+				// it apart, so search simply doesn't apply in readme mode (v1).
+				// Guarded on the shared entry path — [2] enters help search too.
+				if m.helpMode == helpModeReadme {
+					return m, nil
+				}
 				// The help search owns the panel's highlighting: drop an
 				// active spotlight cursor before entering the mode.
 				m.clearHelpNav()
@@ -1056,6 +1066,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if m.focus == focusBrief {
 				if t, ok := m.selectedTool(); ok {
 					return m, m.refreshSelectedCmd(t)
+				}
+			} else if m.focus == focusHelp {
+				// Third source of [3]: back to the README. Only in focusHelp —
+				// r stays rename in [1] and refresh in [2].
+				m.helpMode = helpModeReadme
+				if mt, ok := m.selectedMeta(); ok {
+					// See [h]/[m]: an explicit [r] also dismisses a completed
+					// update log, but never a live one.
+					if m.updateLogFor == mt.Name && m.updatingFor != mt.Name {
+						m.updateLogFor = ""
+					}
+					m.setHelpContent()
+					m.helpViewport.GotoTop()
+					// A selection move made while [h]/[m] was showing never fetched
+					// this tool's README (autoFetchCmdsForSelected only fetches in
+					// readme mode), so the switch has to cover that gap.
+					if t, ok := m.selectedTool(); ok && m.needsReadme(t) {
+						return m, fetchReadmeCmd(t.GitHub, t.Name)
+					}
 				}
 			}
 

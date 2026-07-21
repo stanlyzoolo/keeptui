@@ -246,32 +246,38 @@ GitHub ref, including uninstalled ones — exactly the tools being evaluated
 - Modify: `internal/model/render.go`
 - Modify: `internal/model/mode_test.go`, `internal/model/render_test.go`
 
-- [ ] add `helpModeReadme` const; set `m.helpMode = helpModeReadme` in `New()`
-- [ ] third branch in `case "r"`: `focus == focusHelp` → `helpMode = helpModeReadme`,
+- [x] add `helpModeReadme` const (task 3); set `m.helpMode = helpModeReadme` in `New()`
+- [x] third branch in `case "r"`: `focus == focusHelp` → `helpMode = helpModeReadme`,
       dismiss a *completed* update log (same guard as `h`/`m`), `setHelpContent()` +
-      `GotoTop()`; live update log stays on top
-- [ ] guard **every** `[m.helpMode]` index against `helpModeReadme` (the
+      `GotoTop()`; live update log stays on top — ➕ also fires `fetchReadmeCmd` when
+      `needsReadme` (a selection move made while `[h]`/`[m]` showed never fetched it,
+      since `autoFetchCmdsForSelected` only fetches in readme mode)
+- [x] guard **every** `[m.helpMode]` index against `helpModeReadme` (the
       `helpCache` value is `[2]string` — mode 2 panics): readme early-return in
-      `rawHelpText` (render.go:1056) and a readme branch ahead of the array reads
-      in `renderHelpContent` (render.go:1087/1102/1104); `autoFetchCmdsForSelected`
-      is covered in task 3; audit for any remaining `helpCache[...][m.helpMode]`
-      sites with grep before closing the task
-- [ ] readme branch in `renderHelpContent`/`setHelpContent`: serve
-      `renderReadme(content, helpWrapWidth(), m.darkBG)` as `helpBase`; entries stay
-      empty (`j`/`k` plain scroll); update-log priority branch unchanged
-- [ ] placeholders: no GitHub ref / loading (`helpLoadingFor`) / `ErrNoReadme` /
+      `rawHelpText` and a readme branch ahead of the array reads in
+      `renderHelpContent` (both landed in task 3); grep audit re-run — the only
+      remaining index sites (`commands.go:296`, `render.go:1062/1128/1143/1145`)
+      all sit behind a readme branch; `model.go:491-495` indexes `msg.mode`, which
+      only ever carries help/man
+- [x] readme branch in `renderHelpContent`/`setHelpContent`: serve
+      `renderReadme(content, helpWrapWidth(), m.darkBG)` as `helpBase` (task 3);
+      entries stay empty (`j`/`k` plain scroll); update-log priority branch unchanged
+- [x] placeholders: no GitHub ref / loading (`helpLoadingFor`) / `ErrNoReadme` /
       rate-limited — tool-named messages per Technical Details
-- [ ] make `/` (help search) a no-op while `helpMode == helpModeReadme` — guard the
-      shared entry path that fires from `focusBrief || focusHelp` (model.go:884-892),
-      not just a `focusHelp` branch
-- [ ] width-change resize re-renders readme (existing `helpWrapWidth()` gate);
+- [x] make `/` (help search) a no-op while `helpMode == helpModeReadme` — guard the
+      shared entry path that fires from `focusBrief || focusHelp`, not just a
+      `focusHelp` branch (tool-list search in `[1]` unaffected)
+- [x] width-change resize re-renders readme (existing `helpWrapWidth()` gate);
       height-only keeps scroll
-- [ ] write tests: default mode at startup is readme **without panics across a full
+- [x] write tests: default mode at startup is readme **without panics across a full
       select→render cycle** (the `[2]string` guard), `r` in `focusHelp` switches
       mode (and is inert in tools/brief — rename/refresh untouched), `r` no-op with
       a live update log, placeholder texts, `/` no-op in readme mode from both
-      brief and help focus, resize re-render
-- [ ] run `go test -race ./internal/model/...` — must pass before task 5
+      brief and help focus, resize re-render — ➕ the shared test builders
+      (`newTestModel`, `newSearchTestModel`, `newMouseTestModel`) now pin
+      `helpModeHelp`: they assert on the helpCache/spotlight plumbing, which only
+      exists in that mode
+- [x] run `go test -race ./internal/model/...` — must pass before task 5
 
 ### Task 5: UI surfaces — panel title, status bar, hotkeys overlay
 

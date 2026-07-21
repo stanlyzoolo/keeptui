@@ -3272,3 +3272,98 @@ func TestHotkeysHintInFocusBars(t *testing.T) {
 		}
 	}
 }
+
+// readmePanelModel returns a sized model in README mode with the given tools,
+// the first one selected and panel [3] focused.
+func readmePanelModel(t *testing.T, metas ...loader.ToolMeta) Model {
+	t.Helper()
+	t.Setenv("HOME", t.TempDir())
+	m := New(metas)
+	m = mustModel(m.Update(tea.WindowSizeMsg{Width: 100, Height: 30}))
+	m.helpMode = helpModeReadme
+	m.focus = focusHelp
+	return m
+}
+
+// TestReadmePlaceholders pins the tool-named placeholder for every state the
+// README panel can be in without content.
+func TestReadmePlaceholders(t *testing.T) {
+	repo := loader.ToolMeta{Name: "rg", GitHub: "BurntSushi/ripgrep"}
+
+	t.Run("no repo", func(t *testing.T) {
+		m := readmePanelModel(t, loader.ToolMeta{Name: "local"})
+		if got := stripANSI(m.renderHelpContent()); !strings.Contains(got, "No repo for local.") {
+			t.Errorf("panel = %q, want the no-repo placeholder", got)
+		}
+	})
+	t.Run("loading", func(t *testing.T) {
+		m := readmePanelModel(t, repo)
+		if got := stripANSI(m.renderHelpContent()); !strings.Contains(got, "Loading...") {
+			t.Errorf("panel = %q, want the loading placeholder while the fetch is in flight", got)
+		}
+	})
+	t.Run("no readme in repo", func(t *testing.T) {
+		m := readmePanelModel(t, repo)
+		m = mustModel(m.Update(readmeMsg{toolName: "rg", err: version.ErrNoReadme}))
+		got := stripANSI(m.renderHelpContent())
+		if !strings.Contains(got, "No README in BurntSushi/ripgrep.") || !strings.Contains(got, "[h]") {
+			t.Errorf("panel = %q, want the 404 placeholder naming the repo", got)
+		}
+	})
+	t.Run("rate limited", func(t *testing.T) {
+		m := readmePanelModel(t, repo)
+		m = mustModel(m.Update(readmeMsg{toolName: "rg", err: version.ErrRateLimited}))
+		if got := stripANSI(m.renderHelpContent()); !strings.Contains(got, "rate limited — press [L]") {
+			t.Errorf("panel = %q, want the rate-limit placeholder", got)
+		}
+	})
+	t.Run("cached content wins over a later failure", func(t *testing.T) {
+		m := readmePanelModel(t, repo)
+		m = mustModel(m.Update(readmeMsg{toolName: "rg", content: "# ripgrep\n\nfast search"}))
+		m = mustModel(m.Update(readmeMsg{toolName: "rg", err: version.ErrRateLimited}))
+		got := stripANSI(m.renderHelpContent())
+		if !strings.Contains(got, "fast search") {
+			t.Errorf("panel = %q, want the known README to survive the failure", got)
+		}
+	})
+}
+
+// TestReadmeResizeRerenders: a width change re-wraps the README through
+// glamour (the render cache is keyed by width); a height-only resize keeps the
+// scroll position.
+func TestReadmeResizeRerenders(t *testing.T) {
+	// Many paragraphs: the rendered README must stay taller than the viewport,
+	// or the height-only resize would clamp the scroll offset legitimately.
+	body := "# ripgrep\n\n" + strings.Repeat(
+		"ripgrep recursively searches directories for a regex pattern. It respects gitignore rules by default.\n\n", 60)
+	m := readmePanelModel(t, loader.ToolMeta{Name: "rg", GitHub: "BurntSushi/ripgrep"})
+	m = mustModel(m.Update(readmeMsg{toolName: "rg", content: body}))
+	narrow := maxLineWidth(stripANSI(m.helpBase))
+	if narrow == 0 {
+		t.Fatal("helpBase empty, want the rendered README")
+	}
+
+	m = mustModel(m.Update(tea.WindowSizeMsg{Width: 160, Height: 30}))
+	wide := maxLineWidth(stripANSI(m.helpBase))
+	if wide <= narrow {
+		t.Errorf("widest line = %d at width 160, want more than %d at width 100", wide, narrow)
+	}
+
+	m.helpViewport.SetYOffset(2)
+	m = mustModel(m.Update(tea.WindowSizeMsg{Width: 160, Height: 40}))
+	if m.helpViewport.YOffset != 2 {
+		t.Errorf("YOffset = %d, want 2 (a height-only resize keeps the scroll position)", m.helpViewport.YOffset)
+	}
+	if maxLineWidth(stripANSI(m.helpBase)) != wide {
+		t.Error("a height-only resize must not re-wrap the README")
+	}
+}
+
+// maxLineWidth returns the width of the widest line of s.
+func maxLineWidth(s string) int {
+	w := 0
+	for _, line := range strings.Split(s, "\n") {
+		w = max(w, lipgloss.Width(strings.TrimRight(line, " ")))
+	}
+	return w
+}

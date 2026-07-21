@@ -22,7 +22,11 @@ func newMouseTestModel(t *testing.T, width, height int, names ...string) Model {
 	}
 	m := New(metas)
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: width, Height: height})
-	return updated.(Model)
+	nm := updated.(Model)
+	// Click-selection parity is asserted against the --help panel plumbing,
+	// so these models opt out of the readme mode New() starts in.
+	nm.helpMode = helpModeHelp
+	return nm
 }
 
 func leftClick(x, y int) tea.MouseMsg {

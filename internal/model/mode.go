@@ -27,6 +27,7 @@ const (
 	modeTrack                    // "t" in focusTools
 	modeConfirmUntrack           // "u" in focusTools
 	modeRename                   // "r" in focusTools
+	modeRunInput                 // enter in focusTools: run the tool in a new terminal tab
 	modeConfirmUpdate            // "u" in focusBrief: confirm the detected update command
 	modeAPIStatus                // "L": rate-limit / token overlay
 	modeTokenInput               // "e" inside the overlay: masked token entry
@@ -258,6 +259,7 @@ func (m Model) updateRenameInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		delete(m.changelogData, old)
 		delete(m.readmeData, old)
 		delete(m.readmeLoading, old)
+		delete(m.lastRun, old)
 		for i, e := range m.meta {
 			if e.Name == newName {
 				m.metaSelected = i
@@ -275,6 +277,38 @@ func (m Model) updateRenameInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	default:
 		var cmd tea.Cmd
 		m.nameInput, cmd = m.nameInput.Update(msg)
+		return m, cmd
+	}
+}
+
+// updateRunInput handles the one-line run prompt opened by enter in focusTools
+// (modeRunInput): esc cancels back to modeNormal; enter with empty/whitespace
+// input cancels too; enter with text records the command in m.lastRun and
+// dispatches the launch. The actual launch command (launcher.Detect + tab/exec
+// path) is wired in the launch-commands step — until then dispatch is a
+// recorded no-op.
+func (m Model) updateRunInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		m.mode = modeNormal
+		m.runInput.Blur()
+		command := strings.TrimSpace(m.runInput.Value())
+		if command == "" {
+			return m, nil
+		}
+		mt, ok := m.selectedMeta()
+		if !ok {
+			return m, nil
+		}
+		m.lastRun[mt.Name] = command
+		return m, nil
+	case "esc":
+		m.mode = modeNormal
+		m.runInput.Blur()
+		return m, nil
+	default:
+		var cmd tea.Cmd
+		m.runInput, cmd = m.runInput.Update(msg)
 		return m, cmd
 	}
 }

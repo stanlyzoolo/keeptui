@@ -88,12 +88,12 @@
 - Modify: `internal/model/model.go`
 - Create or modify: `internal/model/mode_test.go`
 
-- [ ] add `modeRunInput` to the `inputMode` enum (comment: `enter in focusTools`) and `updateRunInput` handler in mode.go: esc → cancel to `modeNormal`; enter with empty/whitespace input → cancel; enter with text → dispatch launch (Task 3 wires the actual cmd; this task can return a placeholder `nil` cmd)
-- [ ] add `case modeRunInput: return m.updateRunInput(msg)` to the `switch m.mode` dispatch in model.go (~line 669-686) — without it keystrokes fall through to the normal-mode key map (`t` would open track, `u` untrack)
-- [ ] add `m.runInput textinput.Model` (init alongside the other inputs in `New`) and `m.lastRun map[string]string`; `enter` in `modeNormal`+`focusTools` (no-op on empty list) opens `modeRunInput` prefilled with `m.lastRun[name]` else the tool name, cursor at end
-- [ ] on successful dispatch store `m.lastRun[name] = command`; extend rename's stale-state cleanup to delete the old-name `lastRun` entry
-- [ ] write tests: enter opens prefilled mode (fresh name and lastRun variants) only in focusTools; empty list no-op; esc cancels clean; empty-input enter cancels; rename clears `lastRun`
-- [ ] run `go test -race ./internal/model/` - must pass before task 3
+- [x] add `modeRunInput` to the `inputMode` enum (comment: `enter in focusTools`) and `updateRunInput` handler in mode.go: esc → cancel to `modeNormal`; enter with empty/whitespace input → cancel; enter with text → dispatch launch (Task 3 wires the actual cmd; this task can return a placeholder `nil` cmd)
+- [x] add `case modeRunInput: return m.updateRunInput(msg)` to the `switch m.mode` dispatch in model.go (~line 669-686) — without it keystrokes fall through to the normal-mode key map (`t` would open track, `u` untrack)
+- [x] add `m.runInput textinput.Model` (init alongside the other inputs in `New`) and `m.lastRun map[string]string`; `enter` in `modeNormal`+`focusTools` (no-op on empty list) opens `modeRunInput` prefilled with `m.lastRun[name]` else the tool name, cursor at end
+- [x] on successful dispatch store `m.lastRun[name] = command`; extend rename's stale-state cleanup to delete the old-name `lastRun` entry
+- [x] write tests: enter opens prefilled mode (fresh name and lastRun variants) only in focusTools; empty list no-op; esc cancels clean; empty-input enter cancels; rename clears `lastRun`
+- [x] run `go test -race ./internal/model/` - must pass before task 3
 
 ### Task 3: launch commands — tab path, ExecProcess fallback, auto-fallback on error
 

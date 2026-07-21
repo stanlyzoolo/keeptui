@@ -169,6 +169,14 @@ type Model struct {
 
 	nameInput textinput.Model
 
+	// runInput is the modeRunInput command prompt (enter in focusTools) and
+	// lastRun remembers, per tool name, the last command dispatched this
+	// session so the next prompt prefills it instead of the bare tool name.
+	// Session-only: rename deletes the old-name entry alongside helpCache et
+	// al.; untrack leaves it (harmless, session-scoped).
+	runInput textinput.Model
+	lastRun  map[string]string
+
 	// spinner animates while a force refresh ([r]) is in flight; refreshingFor
 	// holds the name of the tool being refreshed (empty = idle). refreshingFor
 	// doubles as the double-press guard and as the tick-loop / render gate.
@@ -267,6 +275,10 @@ func New(meta []loader.ToolMeta) Model {
 	nmi.Placeholder = "new name..."
 	nmi.CharLimit = 256
 
+	rni := textinput.New()
+	rni.Placeholder = "command..."
+	rni.CharLimit = 512
+
 	tki := textinput.New()
 	tki.Placeholder = "ghp_..."
 	tki.CharLimit = 256
@@ -292,6 +304,8 @@ func New(meta []loader.ToolMeta) Model {
 		helpSearch:    hsi,
 		trackInput:    tri,
 		nameInput:     nmi,
+		runInput:      rni,
+		lastRun:       make(map[string]string),
 		tokenInput:    tki,
 		spinner:       sp,
 		meta:          meta,
@@ -677,6 +691,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateUntrackConfirm(msg)
 		case modeRename:
 			return m.updateRenameInput(msg)
+		case modeRunInput:
+			return m.updateRunInput(msg)
 		case modeConfirmUpdate:
 			return m.updateConfirmUpdate(msg)
 		case modeAPIStatus, modeTokenInput:
@@ -964,6 +980,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.briefViewport.GotoBottom()
 			} else if m.focus == focusHelp {
 				m.helpViewport.GotoBottom()
+			}
+
+		case "enter":
+			// Run the selected tool: open the one-line command prompt,
+			// prefilled with the last command dispatched for it this session
+			// (else the tool name), cursor at the end. focusTools only; an
+			// empty list is a no-op.
+			if m.focus == focusTools {
+				if mt, ok := m.selectedMeta(); ok {
+					m.mode = modeRunInput
+					prefill := m.lastRun[mt.Name]
+					if prefill == "" {
+						prefill = mt.Name
+					}
+					m.runInput.SetValue(prefill)
+					m.runInput.CursorEnd()
+					m.runInput.Focus()
+					return m, textinput.Blink
+				}
 			}
 
 		case "/":

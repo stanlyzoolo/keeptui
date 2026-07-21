@@ -177,21 +177,28 @@ GitHub ref, including uninstalled ones — exactly the tools being evaluated
 - Create: `internal/model/readme.go`
 - Create: `internal/model/readme_test.go`
 
-- [ ] `go get github.com/charmbracelet/glamour` (then `go mod tidy`)
-- [ ] add `renderReadme(raw string, width int, dark bool) string`:
+- [x] `go get github.com/charmbracelet/glamour` (then `go mod tidy`) — v1.0.0; it
+      pulls lipgloss up to `v1.1.1-0.20250404203927` (pseudo-version), suite still green
+- [x] add `renderReadme(raw string, width int, dark bool) string`:
       `cleanTerminalOutput(raw)` → `glamour.Render` with
       `WithStandardStyle("dark"|"light")` + `WithWordWrap(width)`; on glamour error
       fall back to the sanitized plain text (never an empty panel). **No
       `WithAutoStyle()`** — it probes the terminal via OSC/stdin and races Bubble
       Tea's input reader; resolve dark/light once at model construction via
       lipgloss's cached `HasDarkBackground()` and store it on the model
-- [ ] add a single-entry rendered cache keyed by `(name, width)` so selection moves
-      and repaints don't re-parse the same README through glamour
-- [ ] write tests: headings/lists/code render to non-empty output containing the
+      (`m.darkBG`) — ➕ also passes `WithColorProfile(lipgloss.ColorProfile())`
+      (glamour hardcodes TrueColor, which would ignore `NO_COLOR`/dumb terms) and
+      clamps the wrap to a `readmeMinWrap` floor; `testReadmeStyle` seam forces the
+      renderer-construction failure in tests
+- [x] add a single-entry rendered cache keyed by `(name, width)` so selection moves
+      and repaints don't re-parse the same README through glamour — ➕ the key also
+      carries `dark` and the raw text, so a refetch/force-refresh can't be served
+      stale; the field on `Model` lands in task 4 (an unused field trips `unused`)
+- [x] write tests: headings/lists/code render to non-empty output containing the
       expected text (do NOT assert ANSI escapes — under `NO_COLOR`/dumb term glamour
       emits plain text), wrap respects width, control characters in input are
       stripped, glamour failure falls back to plain text, render cache hit/invalidation
-- [ ] run `go test -race ./internal/model/...` — must pass before task 3
+- [x] run `go test -race ./internal/model/...` — must pass before task 3
 
 ### Task 3: model plumbing — fetch command, message, session cache
 

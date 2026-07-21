@@ -194,6 +194,11 @@ type Model struct {
 	helpNavIdx  int
 	helpBase    string
 
+	// darkBG is the terminal background resolved once at construction
+	// (lipgloss caches the probe) and handed to renderReadme, so glamour never
+	// runs its own OSC background query against Bubble Tea's input reader.
+	darkBG bool
+
 	toolsW int
 	briefW int
 	helpW  int
@@ -261,6 +266,7 @@ func New(meta []loader.ToolMeta) Model {
 		spinner:       sp,
 		meta:          meta,
 		helpNavIdx:    -1,
+		darkBG:        lipgloss.HasDarkBackground(),
 	}
 
 	return m

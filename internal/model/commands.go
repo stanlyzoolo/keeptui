@@ -219,11 +219,17 @@ func (m *Model) needsRemote(t loader.Tool) bool {
 }
 
 // needsReadme reports whether the README fetch for t must still run. Requires a
-// GitHub ref and no session entry at all — an entry holding an error counts as
-// answered, so a 404 or a rate limit is not retried on every cursor movement (a
-// force refresh clears the entry explicitly).
+// GitHub ref, no request already in flight, and no session entry at all — an
+// entry holding an error counts as answered, so a 404 or a rate limit is not
+// retried on every cursor movement (a force refresh clears the entry
+// explicitly). The in-flight check is what keeps the "one request per visited
+// tool" budget honest: the entry appears only when the response lands, so
+// without it a j/k bounce back onto the same tool would fire a second request.
 func (m *Model) needsReadme(t loader.Tool) bool {
 	if t.GitHub == "" {
+		return false
+	}
+	if m.readmeLoading[t.Name] {
 		return false
 	}
 	_, ok := m.readmeData[t.Name]
@@ -248,8 +254,13 @@ func (m *Model) refreshSelectedCmd(t loader.Tool) tea.Cmd {
 	m.refreshingFor = t.Name
 	m.briefViewport.SetContent(m.renderCard())
 	// Drop the session entry so a cached negative (404, rate limit) can recover:
-	// the forced fetch is the only thing that ever revisits it.
+	// the forced fetch is the only thing that ever revisits it. The deletion
+	// makes needsReadme true again, so the forced request must be marked in
+	// flight or a selection move during the window would fire a second one
+	// (refreshingFor does not cover it — remoteMsg clears that flag as soon as
+	// the repo pass lands, which can be well before the README does).
 	delete(m.readmeData, t.Name)
+	m.markReadmeLoading(t.Name)
 	return tea.Batch(
 		m.spinner.Tick,
 		fetchInstalledCmd(t),
@@ -295,11 +306,12 @@ func (m *Model) autoFetchCmdsForSelected() tea.Cmd {
 			// --help subprocess the panel would never show.
 			m.setHelpContent()
 			m.helpViewport.GotoTop()
-			// refreshingFor guards the [r] window: that path deletes the session
-			// entry (so a cached negative can recover) and fires its own forced
-			// fetch, so needsReadme is true again until it lands — leaving and
-			// re-entering the tool meanwhile would spend a second request.
-			if t, ok := m.selectedTool(); ok && m.needsReadme(t) && m.refreshingFor != t.Name {
+			// needsReadme covers the [r] refresh window too: that path deletes
+			// the session entry (so a cached negative can recover) and marks its
+			// own forced fetch in flight, so leaving and re-entering the tool
+			// meanwhile does not spend a second request.
+			if t, ok := m.selectedTool(); ok && m.needsReadme(t) {
+				m.markReadmeLoading(t.Name)
 				cmds = append(cmds, fetchReadmeCmd(t.GitHub, t.Name))
 			}
 		case m.helpCache[mt.Name][m.helpMode] == "":

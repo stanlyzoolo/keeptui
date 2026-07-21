@@ -127,52 +127,80 @@ func (m Model) renderStatusBar() string {
 		return style.Render(ui.SearchPromptStyle.Render(m.statusMsg))
 	}
 	if m.focus == focusBrief {
-		hints := keyHint("o") + " open repo  " + keyHint("c") + " changelog  " + keyHint("r") + " refresh  " + keyHint("s") + " status  " + keyHint("e") + " note  " + keyHint("t") + " tags  " + keyHint("q") + " quit  " + keyHint("?") + " keys"
+		hints := []string{
+			keyHint("o") + " open repo",
+			keyHint("c") + " changelog",
+			keyHint("r") + " refresh",
+			keyHint("s") + " status",
+			keyHint("e") + " note",
+			keyHint("t") + " tags",
+			keyHint("q") + " quit",
+			keyHint("?") + " keys",
+		}
 		if mt, ok := m.selectedMeta(); ok && m.hasUpdate(mt.Name) {
-			hints = keyHint("u") + " update  " + hints
+			hints = append([]string{keyHint("u") + " update"}, hints...)
 		}
 		return m.renderHintsBar(style, hints)
 	}
 	if m.focus == focusHelp {
+		var hints []string
 		// With a navigable entry index j/k drive the spotlight cursor while
 		// the arrows keep their line scroll — advertise both; without
 		// entries (update log, placeholders, prose) j/k scroll too.
-		scrollOrNav := keyHint("↑↓") + " scroll  "
-		if len(m.helpEntries) > 0 {
-			scrollOrNav = keyHint("j/k") + " navigate  " + scrollOrNav
+		if m.helpNavIdx >= 0 {
+			hints = append(hints, keyHint("esc")+" exit nav")
 		}
+		if len(m.helpEntries) > 0 {
+			hints = append(hints, keyHint("j/k")+" navigate")
+		}
+		hints = append(hints,
+			keyHint("↑↓")+" scroll",
+			keyHint("h")+" --help",
+			keyHint("m")+" man",
+			keyHint("r")+" readme",
+		)
 		// The help search tears glamour's ANSI apart, so [/] is a no-op in
 		// readme mode — don't advertise a key that does nothing there.
-		search := keyHint("/") + " search  "
-		if m.helpMode == helpModeReadme {
-			search = ""
+		if m.helpMode != helpModeReadme {
+			hints = append(hints, keyHint("/")+" search")
 		}
-		hints := scrollOrNav + keyHint("h") + " --help  " + keyHint("m") + " man  " + keyHint("r") + " readme  " + search + keyHint("←") + " back  " + keyHint("q") + " quit  " + keyHint("?") + " keys"
-		if m.helpNavIdx >= 0 {
-			hints = keyHint("esc") + " exit nav  " + hints
-		}
+		hints = append(hints, keyHint("←")+" back", keyHint("q")+" quit", keyHint("?")+" keys")
 		return m.renderHintsBar(style, hints)
 	}
-	return m.renderHintsBar(style,
-		keyHint("/")+" search  "+
-			keyHint("t")+" track  "+
-			keyHint("u")+" untrack  "+
-			keyHint("r")+" rename  "+
-			keyHint("q")+" quit  "+
-			keyHint("?")+" keys",
-	)
+	return m.renderHintsBar(style, []string{
+		keyHint("/") + " search",
+		keyHint("t") + " track",
+		keyHint("u") + " untrack",
+		keyHint("r") + " rename",
+		keyHint("q") + " quit",
+		keyHint("?") + " keys",
+	})
 }
 
 // rateGaugeMinGap is the minimum blank columns between the hint bar and the
 // right-aligned API-usage gauge; below it the gauge is downgraded or dropped.
 const rateGaugeMinGap = 2
 
-// renderHintsBar lays out the left-aligned hints with the API-usage gauge pinned
-// to the right corner. It downgrades full → compact → hidden as terminal width
-// shrinks so the hints are never truncated. inner is HelpStyle's content width
-// (m.width-2, the border sits outside it).
-func (m Model) renderHintsBar(style lipgloss.Style, hints string) string {
+// hintSep separates two hint cells in the status bar.
+const hintSep = "  "
+
+// renderHintsBar lays out the left-aligned hint cells with the API-usage gauge
+// pinned to the right corner. inner is HelpStyle's content width (m.width-2, the
+// border sits outside it).
+//
+// The bar must stay exactly one line: HelpStyle is width-constrained, so a hint
+// list wider than inner wraps to a second row and View() returns m.height+1
+// lines — one row past the terminal, which scrolls the top border off the alt
+// screen. Cells are therefore dropped from the right (they are ordered
+// most-important first) until the joined hints fit; the least useful reminders
+// ([?] keys, [q] quit) are the first to go on a narrow terminal. Only then is
+// the gauge placed, downgrading full → compact → hidden.
+func (m Model) renderHintsBar(style lipgloss.Style, cells []string) string {
 	inner := m.width - 2
+	for len(cells) > 1 && lipgloss.Width(strings.Join(cells, hintSep)) > inner {
+		cells = cells[:len(cells)-1]
+	}
+	hints := strings.Join(cells, hintSep)
 	place := func(gauge string) (string, bool) {
 		if gauge == "" {
 			return "", false

@@ -75,6 +75,9 @@ Each tool has five data sources, split so local detection never waits on the net
   per tracked tool. The whole `readmeMsg` (content or error) lands in `m.readmeData`, so
   a 404 or a rate limit is a session-cached negative; `[r]` in `[2]` clears the entry,
   and a token added in the `[L]` overlay drops the rate-limited ones so they can retry.
+  The entry appears only when the response lands, so an in-flight request is tracked
+  separately in `m.readmeLoading` — without it a `j`/`k` bounce back onto the same tool
+  would spend a second request inside that window.
 
 Message handlers merge without clobbering (installed never resets latest and vice
 versa). On selection change `autoFetchCmdsForSelected()` fills in what's missing —

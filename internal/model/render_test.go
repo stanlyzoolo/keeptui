@@ -421,7 +421,9 @@ func TestRenderStatusBarFocusTools(t *testing.T) {
 }
 
 func TestRenderStatusBarFocusBrief(t *testing.T) {
-	m := Model{width: 80, focus: focusBrief}
+	// Wide enough for the whole hint list: at 80 columns the bar degrades by
+	// dropping trailing cells (see TestStatusBarNeverWraps).
+	m := Model{width: 120, focus: focusBrief}
 	got := m.renderStatusBar()
 
 	for _, want := range []string{"[o]", "[c]", "[s]", "[e]", "[t]", "[q]"} {
@@ -1040,7 +1042,7 @@ func TestRenderStatusBarGauge(t *testing.T) {
 func TestRenderHintsBarAlignment(t *testing.T) {
 	known := version.RateLimit{Known: true, Remaining: 15, Limit: 60} // used 45/60
 	m := Model{width: 120, rate: known}
-	hints := "abc"
+	hints := []string{"abc"}
 
 	// A plain (border-less) style isolates the laid-out content; the gap logic
 	// inside renderHintsBar uses m.width-2 regardless of the style passed.
@@ -3490,4 +3492,124 @@ func maxLineWidth(s string) int {
 		w = max(w, lipgloss.Width(strings.TrimRight(line, " ")))
 	}
 	return w
+}
+
+// TestStatusBarNeverWraps pins the layout budget: the hints bar is one line at
+// the 80×24 baseline in every normal focus and panel-[3] mode, so View() never
+// returns more rows than the terminal has (an over-tall View scrolls the top
+// border off the alt screen). renderHintsBar drops trailing hint cells to get
+// there; only the presence of a wrap is a bug.
+func TestStatusBarNeverWraps(t *testing.T) {
+	cases := []struct {
+		name     string
+		focus    int
+		helpMode int
+		nav      bool
+	}{
+		{"tools", focusTools, helpModeHelp, false},
+		{"brief", focusBrief, helpModeHelp, false},
+		{"help mode", focusHelp, helpModeHelp, false},
+		{"man mode", focusHelp, helpModeMan, false},
+		{"readme mode", focusHelp, helpModeReadme, false},
+		{"help mode with entry nav", focusHelp, helpModeHelp, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			m := New([]loader.ToolMeta{{Name: "rg", GitHub: "BurntSushi/ripgrep"}})
+			m = mustModel(m.Update(tea.WindowSizeMsg{Width: 80, Height: 24}))
+			m.focus = tc.focus
+			m.helpMode = tc.helpMode
+			if tc.nav {
+				m.helpEntries = []entryRange{{start: 0, end: 1}}
+				m.helpNavIdx = 0
+			}
+
+			if got := lipgloss.Height(m.renderStatusBar()); got != 3 {
+				t.Errorf("status bar height = %d, want 3 (border + one hint line)", got)
+			}
+			if got := lipgloss.Height(m.View()); got > m.height {
+				t.Errorf("View() height = %d, want at most the terminal height %d", got, m.height)
+			}
+		})
+	}
+}
+
+// TestSearchTypingRepaintsReadmeForSelection: typing in the tool-list search
+// moves the selection without going through selectMeta, so the repaint has to
+// run setHelpContent — renderHelpContent's readme branch serves helpBase, which
+// nothing else re-renders. Otherwise [3] keeps showing the previously selected
+// tool's README under the newly selected tool's name.
+func TestSearchTypingRepaintsReadmeForSelection(t *testing.T) {
+	m := readmePanelModel(t,
+		loader.ToolMeta{Name: "rg", GitHub: "BurntSushi/ripgrep"},
+		loader.ToolMeta{Name: "fd", GitHub: "sharkdp/fd"},
+	)
+	m = mustModel(m.Update(readmeMsg{toolName: "rg", content: "# rg\n\nrecursive grep"}))
+	m = mustModel(m.Update(readmeMsg{toolName: "fd", content: "# fd\n\nfind entries"}))
+	m.focus = focusTools
+	m.setHelpContent()
+	if !strings.Contains(stripANSI(m.helpBase), "recursive grep") {
+		t.Fatalf("helpBase = %q, want rg's README before the search", stripANSI(m.helpBase))
+	}
+
+	m = mustModel(m.Update(keyRunes("/")))
+	m = mustModel(m.Update(keyRunes("f")))
+
+	if mt, ok := m.selectedMeta(); !ok || mt.Name != "fd" {
+		t.Fatalf("selected = %v, want fd", mt)
+	}
+	panel := stripANSI(m.renderHelpContent())
+	if !strings.Contains(panel, "find entries") {
+		t.Errorf("panel [3] = %q, want fd's README", panel)
+	}
+	if strings.Contains(panel, "recursive grep") {
+		t.Error("panel [3] still shows the previously selected tool's README")
+	}
+}
+
+// TestReadmeFetchGuardedWhileInFlight: the session entry only lands when the
+// response arrives, so needsReadme must also honour the in-flight marker —
+// otherwise a j/k bounce back onto the same tool spends a second GitHub request
+// against a 60/hour unauthenticated budget.
+func TestReadmeFetchGuardedWhileInFlight(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := New([]loader.ToolMeta{
+		{Name: "rg", GitHub: "BurntSushi/ripgrep"},
+		{Name: "fd", GitHub: "sharkdp/fd"},
+	})
+	m = mustModel(m.Update(tea.WindowSizeMsg{Width: 100, Height: 30}))
+	// Pre-fill the other sources so only the README decision varies.
+	for _, name := range []string{"rg", "fd"} {
+		m.changelogData[name] = changelogMsg{toolName: name}
+		m.versions[name] = VersionInfo{Installed: "1.0.0", InstalledKnown: true, Latest: "1.0.0"}
+		m.repoCards[name] = version.RepoCard{About: "tool"}
+	}
+
+	if n := countBatchedCmds(m.autoFetchCmdsForSelected()); n != 1 {
+		t.Fatalf("first visit batched %d cmds, want 1 (the README)", n)
+	}
+	if n := countBatchedCmds(m.autoFetchCmdsForSelected()); n != 0 {
+		t.Errorf("re-visit while the fetch is in flight batched %d cmds, want 0", n)
+	}
+
+	// The response retires the marker; the stored entry then answers for the
+	// rest of the session.
+	m = mustModel(m.Update(readmeMsg{toolName: "rg", content: "# rg"}))
+	if m.readmeLoading["rg"] {
+		t.Error("readmeLoading[rg] survived the response")
+	}
+	if n := countBatchedCmds(m.autoFetchCmdsForSelected()); n != 0 {
+		t.Errorf("after the response the auto-fetch batched %d cmds, want 0", n)
+	}
+
+	// A force refresh drops the entry and marks its own request, so a selection
+	// bounce during that window does not fire a second one either.
+	_ = m.refreshSelectedCmd(loader.Tool{Name: "rg", GitHub: "BurntSushi/ripgrep"})
+	if !m.readmeLoading["rg"] {
+		t.Fatal("the forced README refresh is not marked in flight")
+	}
+	if n := countBatchedCmds(m.autoFetchCmdsForSelected()); n != 0 {
+		t.Errorf("re-visit during a forced refresh batched %d cmds, want 0", n)
+	}
 }

@@ -198,6 +198,12 @@ type Model struct {
 	// remembered for the session instead of refetched on every selection move;
 	// a force refresh ([r] in the brief panel) clears the entry.
 	readmeData map[string]readmeMsg
+	// readmeLoading holds the tools whose README request is in flight — the
+	// readme twin of helpLoadingFor, but a set rather than a single name: the
+	// entry lands in readmeData only when the response arrives, so without it
+	// two selection moves onto the same tool inside that window (j then k, a
+	// click back) would each spend a GitHub request. Cleared by readmeMsg.
+	readmeLoading map[string]bool
 	// readmeRender memoizes the last glamour render (see readme.go).
 	readmeRender readmeRenderCache
 	helpSearch   textinput.Model
@@ -279,6 +285,7 @@ func New(meta []loader.ToolMeta) Model {
 		changelogData: make(map[string]changelogMsg),
 		helpCache:     make(map[string][2]string),
 		readmeData:    make(map[string]readmeMsg),
+		readmeLoading: make(map[string]bool),
 		search:        ti,
 		noteInput:     ni,
 		tagsInput:     tgi,
@@ -328,6 +335,9 @@ func (m Model) Init() tea.Cmd {
 		// Startup fires the panel-[3] sources directly rather than through
 		// autoFetchCmdsForSelected, so the README needs its own seed — otherwise
 		// the default readme panel shows a placeholder until the selection moves.
+		// The mark reaches the model Bubble Tea keeps even though Init's receiver
+		// is a copy: a map header points at the same table.
+		m.markReadmeLoading(t.Name)
 		cmds = append(cmds, fetchReadmeCmd(t.GitHub, t.Name))
 	}
 	return tea.Batch(cmds...)
@@ -368,6 +378,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case readmeMsg:
+		delete(m.readmeLoading, msg.toolName)
 		// Known-content-wins merge, like the repo cards: a later failure (rate
 		// limit, network) must not blank a README that was already fetched.
 		if msg.err != nil && msg.content == "" {
@@ -763,8 +774,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					// Re-sync the help panel like selectMeta does: a prior
 					// arrow move may have left it on "Loading..." for a tool
 					// this reset just unselected, and the stale fetch landing
-					// later won't repaint an unselected tool's panel.
-					m.helpViewport.SetContent(m.renderHelpContent())
+					// later won't repaint an unselected tool's panel. It must go
+					// through setHelpContent, not a bare SetContent: the readme
+					// branch of renderHelpContent serves helpBase, which only
+					// setHelpContent re-renders for the new selection —
+					// otherwise [3] shows the previous tool's README under the
+					// new tool's name. No fetch is fired here (one per keystroke
+					// would spend the quota on rows merely typed past); the
+					// commit/rollback exits go through selectMeta and pick it up.
+					m.setHelpContent()
 					m.helpViewport.GotoTop()
 				}
 				return m, cmd
@@ -1247,6 +1265,19 @@ func (m *Model) selectMeta(idx int) tea.Cmd {
 	return m.autoFetchCmdsForSelected()
 }
 
+// markReadmeLoading records that a README request for name is in flight, so
+// needsReadme stops returning true until the readmeMsg lands. Every site that
+// fires fetchReadmeCmd/refreshReadmeCmd must call it. The lazy map creation
+// keeps hand-built Models (tests, which skip New) from panicking on a nil map;
+// there the mark is simply a no-op, which is what a model with no session
+// caches wants anyway.
+func (m *Model) markReadmeLoading(name string) {
+	if m.readmeLoading == nil {
+		m.readmeLoading = make(map[string]bool)
+	}
+	m.readmeLoading[name] = true
+}
+
 // helpWrapWidth is the single source of the help panel's inner wrap width.
 // renderHelpContent and setHelpContent must wrap identically — entry ranges
 // are wrapped-line indices, so a width divergence would desync the spotlight
@@ -1316,9 +1347,10 @@ func (m *Model) switchHelpMode(mode int) tea.Cmd {
 	if mode == helpModeReadme {
 		m.setHelpContent()
 		m.helpViewport.GotoTop()
-		// refreshingFor: a [r] refresh in [2] already has a forced fetch in
-		// flight for this tool (see autoFetchCmdsForSelected).
-		if t, ok := m.selectedTool(); ok && m.needsReadme(t) && m.refreshingFor != t.Name {
+		// needsReadme is false while a request is in flight, including the one
+		// a [r] refresh in [2] just fired (see autoFetchCmdsForSelected).
+		if t, ok := m.selectedTool(); ok && m.needsReadme(t) {
+			m.markReadmeLoading(t.Name)
 			return fetchReadmeCmd(t.GitHub, t.Name)
 		}
 		return nil

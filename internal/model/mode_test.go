@@ -1534,6 +1534,11 @@ func TestRunInputOpensPrefilled(t *testing.T) {
 		if got := nm.runInput.Position(); got != len("git") {
 			t.Errorf("cursor = %d, want end of prefill (%d)", got, len("git"))
 		}
+		// A blurred textinput silently swallows keystrokes — the enter handler
+		// must focus the prompt or typing into it would be dead.
+		if !nm.runInput.Focused() {
+			t.Error("runInput is not focused — typing into the prompt would be ignored")
+		}
 	})
 	t.Run("lastRun wins over the name", func(t *testing.T) {
 		m := newTestModel(focusTools)
@@ -1582,9 +1587,13 @@ func TestRunInputEscCancels(t *testing.T) {
 	m := newTestModel(focusTools)
 	m = mustModel(m.Update(tea.KeyMsg{Type: tea.KeyEnter}))
 	m = typeRunes(t, m, " status")
-	nm := mustModel(m.Update(tea.KeyMsg{Type: tea.KeyEsc}))
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	nm := updated.(Model)
 	if nm.mode != modeNormal {
 		t.Errorf("mode = %d, want modeNormal", nm.mode)
+	}
+	if cmd != nil {
+		t.Error("cmd != nil, want nothing dispatched on esc")
 	}
 	if len(nm.lastRun) != 0 {
 		t.Errorf("lastRun = %v, want empty (esc dispatches nothing)", nm.lastRun)
@@ -1597,12 +1606,30 @@ func TestRunInputEmptyEnterCancels(t *testing.T) {
 	m := newTestModel(focusTools)
 	m.mode = modeRunInput
 	m.runInput.SetValue("   ")
-	nm := mustModel(m.Update(tea.KeyMsg{Type: tea.KeyEnter}))
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	nm := updated.(Model)
 	if nm.mode != modeNormal {
 		t.Errorf("mode = %d, want modeNormal", nm.mode)
 	}
+	if cmd != nil {
+		t.Error("cmd != nil, want nothing dispatched on blank input")
+	}
 	if len(nm.lastRun) != 0 {
 		t.Errorf("lastRun = %v, want empty (blank input dispatches nothing)", nm.lastRun)
+	}
+}
+
+// TestRunInputOpensDuringUpdate pins a deliberate decision: a running update
+// stream (updatingFor set) does NOT block the launch prompt — independent
+// concerns; ExecProcess pauses rendering of the live update log and the buffer
+// catches up on resume. A future "safety" guard here would silently change
+// documented behavior.
+func TestRunInputOpensDuringUpdate(t *testing.T) {
+	m := newTestModel(focusTools)
+	m.updatingFor = "git"
+	nm := mustModel(m.Update(tea.KeyMsg{Type: tea.KeyEnter}))
+	if nm.mode != modeRunInput {
+		t.Errorf("mode = %d, want modeRunInput (launch during update is deliberately not blocked)", nm.mode)
 	}
 }
 
@@ -1625,10 +1652,11 @@ func TestRunInputEnterStoresLastRun(t *testing.T) {
 // double as normal-mode keys (t = track, u = untrack) land in the prompt as
 // text instead of switching modes.
 func TestRunInputKeyGuard(t *testing.T) {
+	// Arrive via the real enter-opens-prompt flow (not a hand-built mode), so
+	// the test also covers that the enter handler focuses the input — a
+	// blurred textinput would silently swallow the keystroke below.
 	m := newTestModel(focusTools)
-	m.mode = modeRunInput
-	m.runInput.Focus()
-	m.runInput.SetValue("git")
+	m = mustModel(m.Update(tea.KeyMsg{Type: tea.KeyEnter}))
 	nm := mustModel(m.Update(keyRunes("t")))
 	if nm.mode != modeRunInput {
 		t.Fatalf("mode = %d, want modeRunInput (t must not open track)", nm.mode)

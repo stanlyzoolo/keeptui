@@ -53,8 +53,10 @@ func validateTokenCmd(token string) tea.Cmd {
 // near-instantly; the ceiling exists for the paths that can block on a human —
 // most notably osascript waiting on the macOS Automation permission dialog.
 // When it fires, the launchDoneMsg error handler auto-falls back to running the
-// tool in the current window, so the launch still happens.
-const launchTimeout = 10 * time.Second
+// tool in the current window, so the launch still happens. A var, not a const:
+// the timeout/KillGroup wiring is load-bearing and tests shrink it instead of
+// waiting 10 real seconds (the same seam idiom as updater's testHomeDir).
+var launchTimeout = 10 * time.Second
 
 // launchDoneMsg carries the result of a tab-open adapter run (startLaunchCmd).
 // command is the user's shell command, carried so the error handler can build
@@ -81,6 +83,12 @@ type execDoneMsg struct {
 // child a session leader, so a plain kill would orphan grandchildren. The
 // error is not logged here: the launchDoneMsg handler auto-falls back, so an
 // adapter failure is a degraded path, not a dead end.
+//
+// Accepted race: if the timeout kills an adapter that had already executed its
+// tab command (osascript stuck after `write text`, a stalled tmux server), the
+// error still triggers the fallback and the command runs twice. The window is
+// narrow and undetectable from here; the alternative — not falling back — would
+// strand every genuine failure.
 func startLaunchCmd(plan launcher.Plan, toolName, command string) tea.Cmd {
 	return safeCmd("startLaunchCmd", func() tea.Msg {
 		if len(plan.Argv) == 0 {
@@ -99,7 +107,10 @@ func startLaunchCmd(plan launcher.Plan, toolName, command string) tea.Cmd {
 // shellCommand resolves the shell invocation that runs the user's command in
 // the current window. Pure and goos-parameterized so both branches are
 // table-testable without spawning anything — the exact mirror of
-// browserCommand's seam.
+// browserCommand's seam. The cmd /c branch rides Go's generic argv quoting,
+// which is not cmd.exe-aware — a command embedding double quotes can misparse
+// there; accepted on the degraded Windows path (the fix, SysProcAttr.CmdLine,
+// needs a per-GOOS file and a real Windows report to justify it).
 func shellCommand(goos, cmd string) (string, []string) {
 	if goos == "windows" {
 		return "cmd", []string{"/c", cmd}
@@ -114,9 +125,16 @@ func shellCommand(goos, cmd string) (string, []string) {
 // tea.ExecProcess only builds the exec message — nothing here can panic.
 func execToolCmd(toolName, command string) tea.Cmd {
 	name, args := shellCommand(runtime.GOOS, command)
-	return tea.ExecProcess(exec.Command(name, args...), func(err error) tea.Msg {
+	return tea.ExecProcess(exec.Command(name, args...), execDoneCallback(toolName))
+}
+
+// execDoneCallback maps the tea.ExecProcess completion error into execDoneMsg
+// for toolName. Extracted from execToolCmd so the mapping is testable — the
+// exec message Bubble Tea builds keeps its callback field unexported.
+func execDoneCallback(toolName string) func(error) tea.Msg {
+	return func(err error) tea.Msg {
 		return execDoneMsg{toolName: toolName, err: err}
-	})
+	}
 }
 
 // fetchInstalledCmd returns a Cmd that detects the installed version of t

@@ -32,9 +32,11 @@ type Plan struct {
 func planFor(env func(string) string, command, toolName string) Plan {
 	switch {
 	case env("TMUX") != "":
+		// "--" terminates option parsing: a user command edited to start with
+		// "-" must reach tmux as the shell command, not be eaten as a flag.
 		return Plan{
 			Terminal: "tmux",
-			Argv:     []string{"tmux", "new-window", "-n", toolName, command},
+			Argv:     []string{"tmux", "new-window", "-n", toolName, "--", command},
 		}
 	case env("TERM_PROGRAM") == "iTerm.app":
 		script := fmt.Sprintf(`tell application "iTerm2"
@@ -59,6 +61,12 @@ end tell`, appleScriptQuote(toolName), appleScriptQuote(command))
 			Argv:     []string{"osascript", "-e", script},
 		}
 	case env("KITTY_WINDOW_ID") != "":
+		// kitten @ needs a remote-control socket (`listen_on` in kitty.conf →
+		// exported KITTY_LISTEN_ON, which the subprocess inherits): the adapter
+		// runs detached with no controlling terminal, so the tty transport of
+		// plain `allow_remote_control yes` cannot work. Without the socket the
+		// run fails and the caller's auto-fallback launches in the current
+		// window instead.
 		return Plan{
 			Terminal: "kitty",
 			Argv:     []string{"kitten", "@", "launch", "--type=tab", "--tab-title", toolName, "sh", "-c", command},
@@ -76,10 +84,16 @@ end tell`, appleScriptQuote(toolName), appleScriptQuote(command))
 }
 
 // appleScriptQuote escapes a string for interpolation inside a double-quoted
-// AppleScript string literal: backslashes first, then double quotes.
+// AppleScript string literal: backslashes first, then double quotes, then the
+// control characters AppleScript literals cannot carry raw (a pasted newline
+// would otherwise split the literal and make osascript fail on user data —
+// AppleScript understands \n/\r/\t escapes).
 func appleScriptQuote(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
-	return strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, "\n", `\n`)
+	s = strings.ReplaceAll(s, "\r", `\r`)
+	return strings.ReplaceAll(s, "\t", `\t`)
 }
 
 // Detect resolves the launch Plan for the current environment. Env-only — no

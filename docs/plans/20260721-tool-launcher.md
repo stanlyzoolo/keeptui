@@ -48,7 +48,7 @@
 ## Technical Details
 
 - `Plan` per terminal (`<cmd>` = raw user command, `<tool>` = tool name):
-  - tmux: `["tmux", "new-window", "-n", <tool>, <cmd>]` (tmux runs the string via the user's shell)
+  - tmux: `["tmux", "new-window", "-n", <tool>, "--", <cmd>]` (tmux runs the string via the user's shell; `--` so a `-`-leading command isn't parsed as a flag — added in review)
   - iTerm2: `["osascript", "-e", <script>]` — script creates a tab in the current window with the default profile, `write text "<escaped cmd>"`, sets the session name to `<escaped tool>`
   - Terminal.app: `["osascript", "-e", "tell application \"Terminal\" to do script \"<escaped cmd>\""]` — opens a **window**, not a tab (tabs are not scriptable without System Events; honest degradation, documented)
   - kitty: `["kitten", "@", "launch", "--type=tab", "--tab-title", <tool>, "sh", "-c", <cmd>]`
@@ -109,6 +109,8 @@
 - [x] handle `launchDoneMsg` with err: `statusMsg` explaining the tab failure + **auto-fallback** by returning `execToolCmd(msg.toolName, msg.command)`; handle `execDoneMsg`: non-zero exit → `statusMsg "<name> exited: <err>"`, no logx
 - [x] write tests: fallback-plan vs tab-plan dispatch driven through `t.Setenv` on the real `launcher.Detect` (clear `TMUX`/`TERM_PROGRAM`/`KITTY_WINDOW_ID` → exec path; set `TMUX` → adapter path — `planFor` is unexported and cross-package, so env is the seam); table-test both `shellCommand` branches (`linux`/`darwin` → `sh -c`, `windows` → `cmd /c`); `launchDoneMsg{err}` handler fires fallback and sets statusMsg; `execDoneMsg{err}` sets statusMsg without logging (reuse `logx.SetDirForTesting` no-log assertion idiom)
 - [x] run `go test -race ./internal/model/` - must pass before task 4
+- ➕ [x] review fixes: auto-fallback gated on `modeNormal` (a delayed `tea.ExecProcess` must not seize the terminal under an open editor/overlay — other modes get a retry hint); `m.launchingFor` one-launch-at-a-time guard + `launching <name> in <terminal>…` dispatch feedback (gives `Plan.Terminal` its production consumer); `launchTimeout` const → var (test seam) with a timeout/KillGroup test; `execDoneCallback` extracted from `execToolCmd` and tested; tmux plan gained `--`; `appleScriptQuote` escapes `\n`/`\r`/`\t`; GOOS skips on unix-binary tests
+- ➕ [x] re-check fixes (iteration 2): the gated "retry hint" was dead UI (shadowed by every mode's status-bar branch and wiped by the blanket `statusMsg` reset on the mode-closing keystroke) — replaced with a **deferred fallback**: the gate stores `pendingLaunchName`/`Cmd` and `flushPendingLaunch` (mode.go) dispatches `execToolCmd` directly (no `launcher.Detect` re-run) with a rendered statusMsg on the keystroke that returns the mode to `modeNormal`; every modal return funnels through the flush (mode-dispatch switch + inline `modeSearch`/`modeHelpSearch` exits; `modeTokenInput` waits for the overlay to close); a fresh `modeRunInput` dispatch drops a pending fallback; tests assert *rendered* status-bar visibility, not just the field
 
 ### Task 4: status bar, hints, hotkeys overlay
 
@@ -133,6 +135,8 @@
 
 - [x] update CLAUDE.md: `internal/launcher` row in the package table; `modeRunInput` in the input-modes list; launch flow bullet in the TUI state-machine section; `enter` in the hotkeys/status-bar descriptions (also: `updateRunInput` in the mode.go file-table row, `startLaunchCmd`/`execToolCmd`/`shellCommand` in the commands.go row)
 - [x] update README.md hotkeys section if it lists keys (added the `enter` row to the Panel `[1] Tools` table)
+- ➕ [x] update ARCHITECTURE.md — missed from this task's original file list, caught in review: mermaid edge `model --> launcher`, `internal/launcher` package-table row, bottom-of-import-graph list, mode enum "13 values" incl. `modeRunInput`, new "Running a tool (`enter`)" section, `execToolCmd` safeCmd-exception note in the logx section
+- ➕ [x] README.md Features bullet ("Run tools") + intro capability mention (review)
 - [x] move this plan to `docs/plans/completed/` (harness moves it)
 
 ## Post-Completion

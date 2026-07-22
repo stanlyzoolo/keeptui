@@ -3,14 +3,28 @@ package model
 import (
 	"errors"
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/stanlyzoolo/keeptui/internal/launcher"
 	"github.com/stanlyzoolo/keeptui/internal/logx"
 )
+
+// assertExecMsg pins the ExecProcess path: the cmd's message must be Bubble
+// Tea's internal exec message. The matching rule (type-name substring, not
+// the exact "tea.execMsg" — the type is unexported and a bubbletea rename
+// would otherwise break these tests confusingly; launchDoneMsg excluded)
+// lives in execMsgIn, the single definition for both helpers.
+func assertExecMsg(t *testing.T, msg tea.Msg) {
+	t.Helper()
+	if !execMsgIn(msg) {
+		t.Errorf("msg = %+v (%T), want Bubble Tea's exec message", msg, msg)
+	}
+}
 
 // clearTerminalEnv blanks every variable launcher.Detect inspects, so the
 // detection chain lands on the fallback plan regardless of the terminal the
@@ -69,6 +83,9 @@ func TestShellCommand(t *testing.T) {
 // instead of panicking on Argv[0].
 func TestStartLaunchCmd(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("needs the unix true binary")
+		}
 		msg, ok := startLaunchCmd(launcher.Plan{Argv: []string{"true"}}, "git", "git status")().(launchDoneMsg)
 		if !ok {
 			t.Fatalf("unexpected msg type %T", msg)
@@ -100,6 +117,35 @@ func TestStartLaunchCmd(t *testing.T) {
 	})
 }
 
+// TestStartLaunchCmdTimeout pins the load-bearing timeout wiring: when the
+// launchTimeout deadline fires, cmd.Cancel (proc.KillGroup on the process
+// group) kills the adapter and the launchDoneMsg carries the failure — this is
+// what routes a stuck osascript into the auto-fallback. launchTimeout is a var
+// precisely so this test does not wait 10 real seconds.
+func TestStartLaunchCmdTimeout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs the unix sleep binary")
+	}
+	orig := launchTimeout
+	launchTimeout = 50 * time.Millisecond
+	defer func() { launchTimeout = orig }()
+
+	start := time.Now()
+	msg, ok := startLaunchCmd(launcher.Plan{Argv: []string{"sleep", "30"}}, "git", "git status")().(launchDoneMsg)
+	if !ok {
+		t.Fatalf("unexpected msg type %T", msg)
+	}
+	if msg.err == nil {
+		t.Fatal("err = nil, want the deadline kill")
+	}
+	if msg.toolName != "git" || msg.command != "git status" {
+		t.Errorf("msg = %+v, want toolName and command carried for the fallback", msg)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("adapter outlived the deadline by %v — Cancel/KillGroup wiring is broken", elapsed)
+	}
+}
+
 // TestRunInputDispatchFallback: with no detectable terminal (env cleared) the
 // enter dispatch takes the ExecProcess path — the returned cmd yields Bubble
 // Tea's internal exec message, not a launchDoneMsg — and records lastRun.
@@ -113,19 +159,15 @@ func TestRunInputDispatchFallback(t *testing.T) {
 	if got := nm.lastRun["git"]; got != "git status" {
 		t.Errorf("lastRun[git] = %q, want %q", got, "git status")
 	}
+	if nm.launchingFor != "" {
+		t.Errorf("launchingFor = %q, want empty — the ExecProcess path needs no guard", nm.launchingFor)
+	}
 	if cmd == nil {
 		t.Fatal("cmd = nil, want the ExecProcess dispatch")
 	}
-	msg := cmd()
-	if _, isLaunch := msg.(launchDoneMsg); isLaunch {
-		t.Fatalf("fallback path dispatched the adapter cmd: %+v", msg)
-	}
-	// Pin the exec path via Bubble Tea's internal message type name; invoking
-	// the cmd only builds the message — the process runs later, when the
-	// runtime handles it — so nothing is spawned here.
-	if got := fmt.Sprintf("%T", msg); got != "tea.execMsg" {
-		t.Errorf("msg type = %s, want tea.execMsg", got)
-	}
+	// Invoking the cmd only builds the message — the process runs later, when
+	// the runtime handles it — so nothing is spawned here.
+	assertExecMsg(t, cmd())
 }
 
 // TestRunInputDispatchAdapter: with $TMUX set (pointing at a bogus socket, so
@@ -133,12 +175,24 @@ func TestRunInputDispatchFallback(t *testing.T) {
 // the adapter path — the returned cmd emits launchDoneMsg carrying the tool
 // name and command for the auto-fallback.
 func TestRunInputDispatchAdapter(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("invoking the adapter cmd needs a unix tmux/exec environment")
+	}
 	clearTerminalEnv(t)
 	t.Setenv("TMUX", "/nonexistent/keeptui-test-socket,99999,0")
 	m := newTestModel(focusTools)
 	nm, cmd := enterRun(m, "git status")
 	if got := nm.lastRun["git"]; got != "git status" {
 		t.Errorf("lastRun[git] = %q, want %q", got, "git status")
+	}
+	// Dispatch feedback + one-launch-at-a-time guard: the adapter can block
+	// for seconds, so the user must see progress and a second enter must not
+	// dispatch concurrently.
+	if nm.launchingFor != "git" {
+		t.Errorf("launchingFor = %q, want %q", nm.launchingFor, "git")
+	}
+	if !strings.Contains(nm.statusMsg, "launching git") || !strings.Contains(nm.statusMsg, "tmux") {
+		t.Errorf("statusMsg = %q, want launching feedback naming tool and terminal", nm.statusMsg)
 	}
 	if cmd == nil {
 		t.Fatal("cmd = nil, want the adapter dispatch")
@@ -163,23 +217,200 @@ func TestLaunchDoneMsgFallback(t *testing.T) {
 	defer restore()
 
 	m := newTestModel(focusTools)
+	m.launchingFor = "git"
 	updated, cmd := m.Update(launchDoneMsg{toolName: "git", command: "git status", err: errors.New("osascript: not authorized")})
 	nm := updated.(Model)
+	if nm.launchingFor != "" {
+		t.Errorf("launchingFor = %q, want the guard cleared", nm.launchingFor)
+	}
 	if nm.statusMsg == "" || !strings.Contains(nm.statusMsg, "git") {
 		t.Errorf("statusMsg = %q, want a tab-failure explanation naming the tool", nm.statusMsg)
 	}
 	if cmd == nil {
 		t.Fatal("cmd = nil, want the ExecProcess auto-fallback")
 	}
-	msg := cmd()
-	if _, isLaunch := msg.(launchDoneMsg); isLaunch {
-		t.Fatalf("fallback re-dispatched the adapter: %+v", msg)
-	}
-	if got := fmt.Sprintf("%T", msg); got != "tea.execMsg" {
-		t.Errorf("msg type = %s, want tea.execMsg", got)
-	}
+	assertExecMsg(t, cmd())
 	if out := logx.ReadAllForTesting(logDir); out != "" {
 		t.Errorf("adapter failure must not log (auto-fallback handles it), got:\n%s", out)
+	}
+}
+
+// execMsgIn walks a cmd's produced message, flattening tea batches, and
+// reports whether some leaf is Bubble Tea's exec message (matched like
+// assertExecMsg — type-name substring, launchDoneMsg excluded).
+func execMsgIn(msg tea.Msg) bool {
+	if batch, ok := msg.(tea.BatchMsg); ok {
+		for _, c := range batch {
+			if c != nil && execMsgIn(c()) {
+				return true
+			}
+		}
+		return false
+	}
+	if _, isLaunch := msg.(launchDoneMsg); isLaunch {
+		return false
+	}
+	return strings.Contains(fmt.Sprintf("%T", msg), "exec")
+}
+
+// TestLaunchDoneMsgModeGateDefersFallback: a delayed adapter failure
+// (osascript can block on the Automation dialog until launchTimeout) must NOT
+// auto-fall back while another mode owns the screen — tea.ExecProcess would
+// seize the terminal under an open editor/overlay and route keystrokes to the
+// spawned shell. The failure must not be silent either: the fallback is
+// deferred, and the keystroke that closes the mode flushes it — dispatching
+// the exec fallback directly (no adapter re-run) with a status message the
+// normal-mode status bar actually renders. The visibility assertion is the
+// point: a statusMsg set at gate time is shadowed by the mode's own
+// status-bar branch and wiped by the blanket KeyMsg reset.
+func TestLaunchDoneMsgModeGateDefersFallback(t *testing.T) {
+	for _, mode := range []inputMode{modeEditNote, modeSearch, modeHelpSearch, modeAPIStatus, modeTrack, modeRunInput, modeHotkeys} {
+		m := newTestModel(focusTools)
+		m.mode = mode
+		m.launchingFor = "git"
+		updated, cmd := m.Update(launchDoneMsg{toolName: "git", command: "git status", err: errors.New("osascript: not authorized")})
+		nm := updated.(Model)
+		if cmd != nil {
+			t.Errorf("mode %d: cmd != nil — the auto-fallback fired under an open mode", mode)
+		}
+		if nm.mode != mode {
+			t.Errorf("mode %d: mode changed to %d, want untouched", mode, nm.mode)
+		}
+		if nm.launchingFor != "" {
+			t.Errorf("mode %d: launchingFor = %q, want the guard cleared", mode, nm.launchingFor)
+		}
+		if nm.pendingLaunchName != "git" || nm.pendingLaunchCommand != "git status" {
+			t.Errorf("mode %d: pending = %q/%q, want the deferred fallback stored", mode, nm.pendingLaunchName, nm.pendingLaunchCommand)
+		}
+
+		// The mode-closing keystroke (esc exits every one of these modes)
+		// flushes the deferred fallback.
+		closed, flushCmd := nm.Update(tea.KeyMsg{Type: tea.KeyEsc})
+		fm := closed.(Model)
+		if fm.mode != modeNormal {
+			t.Fatalf("mode %d: esc left mode %d, want modeNormal", mode, fm.mode)
+		}
+		if fm.pendingLaunchName != "" || fm.pendingLaunchCommand != "" {
+			t.Errorf("mode %d: pending = %q/%q after flush, want cleared", mode, fm.pendingLaunchName, fm.pendingLaunchCommand)
+		}
+		if flushCmd == nil {
+			t.Fatalf("mode %d: flush cmd = nil, want the exec fallback dispatched", mode)
+		}
+		if !execMsgIn(flushCmd()) {
+			t.Errorf("mode %d: flush cmd produced no exec message — the fallback did not fire", mode)
+		}
+		// VISIBILITY: the message must survive the mode-closing keystroke and
+		// render on the normal-mode status bar.
+		if bar := stripANSI(fm.renderStatusBar()); !strings.Contains(bar, "tab open failed — running git here") {
+			t.Errorf("mode %d: status bar = %q, want the fallback message rendered", mode, bar)
+		}
+	}
+}
+
+// TestLaunchDoneMsgModeGateTokenInputTwoStage: modeTokenInput's esc falls back
+// to modeAPIStatus, not modeNormal — the deferred fallback must stay pending
+// through that intermediate stop and flush only on the esc that actually
+// closes the overlay.
+func TestLaunchDoneMsgModeGateTokenInputTwoStage(t *testing.T) {
+	m := newTestModel(focusTools)
+	m.mode = modeTokenInput
+	updated, _ := m.Update(launchDoneMsg{toolName: "git", command: "git status", err: errors.New("osascript: not authorized")})
+	nm := updated.(Model)
+
+	stage1, cmd1 := nm.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	sm := stage1.(Model)
+	if sm.mode != modeAPIStatus {
+		t.Fatalf("mode = %d after first esc, want modeAPIStatus", sm.mode)
+	}
+	if cmd1 != nil && execMsgIn(cmd1()) {
+		t.Error("exec fallback fired while the API overlay is still open")
+	}
+	if sm.pendingLaunchName != "git" {
+		t.Errorf("pendingLaunchName = %q, want kept through the modeAPIStatus stop", sm.pendingLaunchName)
+	}
+
+	stage2, cmd2 := sm.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	fm := stage2.(Model)
+	if fm.mode != modeNormal {
+		t.Fatalf("mode = %d after second esc, want modeNormal", fm.mode)
+	}
+	if fm.pendingLaunchName != "" {
+		t.Errorf("pendingLaunchName = %q, want cleared by the flush", fm.pendingLaunchName)
+	}
+	if cmd2 == nil || !execMsgIn(cmd2()) {
+		t.Error("second esc produced no exec message — the deferred fallback never ran")
+	}
+	if bar := stripANSI(fm.renderStatusBar()); !strings.Contains(bar, "tab open failed — running git here") {
+		t.Errorf("status bar = %q, want the fallback message rendered", bar)
+	}
+}
+
+// TestRunInputRedispatchSupersedesPendingLaunch: a gated adapter failure can
+// land while the run prompt is open. An explicit new dispatch from that
+// prompt supersedes the deferred fallback — flushing both on the same enter
+// would run two commands.
+func TestRunInputRedispatchSupersedesPendingLaunch(t *testing.T) {
+	clearTerminalEnv(t)
+	m := newTestModel(focusTools)
+	m.pendingLaunchName = "git"
+	m.pendingLaunchCommand = "git status"
+	nm, cmd := enterRun(m, "git log")
+	if nm.pendingLaunchName != "" || nm.pendingLaunchCommand != "" {
+		t.Errorf("pending = %q/%q, want dropped by the new dispatch", nm.pendingLaunchName, nm.pendingLaunchCommand)
+	}
+	if cmd == nil {
+		t.Fatal("cmd = nil, want the new command dispatched")
+	}
+	msg := cmd()
+	if _, isBatch := msg.(tea.BatchMsg); isBatch {
+		t.Fatalf("msg = %T, want a single exec dispatch — a batch means the stale fallback ran too", msg)
+	}
+	assertExecMsg(t, msg)
+	if strings.Contains(nm.statusMsg, "tab open failed") {
+		t.Errorf("statusMsg = %q, want no stale-fallback message on a fresh dispatch", nm.statusMsg)
+	}
+}
+
+// TestUntrackConfirmDropsPendingLaunchForSameTool: a deferred fallback for
+// the tool being untracked dies with the untrack — the dialog-closing enter
+// funnels through flushPendingLaunch and would otherwise exec the
+// now-untracked tool's command.
+func TestUntrackConfirmDropsPendingLaunchForSameTool(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := newTestModel(focusTools)
+	m.mode = modeConfirmUntrack
+	m.untrackTarget = "git"
+	m.pendingLaunchName = "git"
+	m.pendingLaunchCommand = "git status"
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	nm := updated.(Model)
+	if nm.pendingLaunchName != "" || nm.pendingLaunchCommand != "" {
+		t.Errorf("pending = %q/%q, want dropped by the untrack", nm.pendingLaunchName, nm.pendingLaunchCommand)
+	}
+	if strings.Contains(nm.statusMsg, "tab open failed") {
+		t.Errorf("statusMsg = %q, want no fallback message for the untracked tool", nm.statusMsg)
+	}
+	if cmd != nil && execMsgIn(cmd()) {
+		t.Error("exec fallback fired for the tool that was just untracked")
+	}
+}
+
+// TestRunInputInFlightGuard: while an adapter run is pending (launchingFor
+// set), a second enter dispatches nothing and does not record lastRun — one
+// launch at a time, mirroring updatingFor.
+func TestRunInputInFlightGuard(t *testing.T) {
+	clearTerminalEnv(t)
+	m := newTestModel(focusTools)
+	m.launchingFor = "yazi"
+	nm, cmd := enterRun(m, "git status")
+	if cmd != nil {
+		t.Error("cmd != nil, want the dispatch blocked while a launch is in flight")
+	}
+	if len(nm.lastRun) != 0 {
+		t.Errorf("lastRun = %v, want empty — the blocked command never ran", nm.lastRun)
+	}
+	if !strings.Contains(nm.statusMsg, "yazi") {
+		t.Errorf("statusMsg = %q, want it naming the in-flight launch", nm.statusMsg)
 	}
 }
 
@@ -188,10 +419,14 @@ func TestLaunchDoneMsgFallback(t *testing.T) {
 // dispatches nothing further.
 func TestLaunchDoneMsgSuccess(t *testing.T) {
 	m := newTestModel(focusTools)
+	m.launchingFor = "git"
 	updated, cmd := m.Update(launchDoneMsg{toolName: "git", command: "git status"})
 	nm := updated.(Model)
 	if nm.statusMsg != "launched git" {
 		t.Errorf("statusMsg = %q, want %q", nm.statusMsg, "launched git")
+	}
+	if nm.launchingFor != "" {
+		t.Errorf("launchingFor = %q, want the guard cleared", nm.launchingFor)
 	}
 	if cmd != nil {
 		t.Error("cmd != nil, want no follow-up on success")
@@ -231,4 +466,23 @@ func TestExecDoneMsg(t *testing.T) {
 			t.Error("cmd != nil, want none")
 		}
 	})
+}
+
+// TestExecDoneCallback pins the ExecProcess completion mapping that
+// execToolCmd hands to Bubble Tea: the callback must carry the tool name and
+// the error into execDoneMsg (the exec message's callback field is unexported,
+// so this is the only way to exercise it).
+func TestExecDoneCallback(t *testing.T) {
+	fail := errors.New("exit status 2")
+	msg, ok := execDoneCallback("git")(fail).(execDoneMsg)
+	if !ok {
+		t.Fatalf("unexpected msg type %T", msg)
+	}
+	if msg.toolName != "git" || !errors.Is(msg.err, fail) {
+		t.Errorf("msg = %+v, want toolName git and the error carried", msg)
+	}
+	clean, ok := execDoneCallback("git")(nil).(execDoneMsg)
+	if !ok || clean.err != nil {
+		t.Errorf("clean exit mapping = %+v, want nil err", clean)
+	}
 }

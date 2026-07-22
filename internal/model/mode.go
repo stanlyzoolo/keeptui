@@ -185,6 +185,16 @@ func (m Model) updateUntrackConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
 		m.mode = modeNormal
+		// A deferred launch fallback for this same tool dies with the
+		// untrack: this dialog-closing enter funnels through
+		// flushPendingLaunch, which would otherwise exec the now-untracked
+		// tool's command. A pending fallback for a *different* tool
+		// deliberately survives and flushes on this keystroke — that launch
+		// was requested before the dialog opened and its tool is still
+		// tracked.
+		if m.pendingLaunchName == m.untrackTarget {
+			m.pendingLaunchName, m.pendingLaunchCommand = "", ""
+		}
 		m.meta = loader.RemoveMeta(m.meta, m.untrackTarget)
 		loader.SaveMeta(m.meta) //nolint:errcheck
 		m.tools = loader.ToolsFromMeta(m.meta)
@@ -289,6 +299,9 @@ func (m Model) updateRenameInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // is safe to call here on the Update thread: a fallback plan runs the tool in
 // the current window via tea.ExecProcess, any other plan opens a terminal tab
 // via startLaunchCmd (whose error handler auto-falls back to ExecProcess).
+// Adapter dispatch sets m.launchingFor (one launch at a time) and a
+// "launching <name> in <terminal>…" statusMsg — the in-flight feedback for the
+// seconds an adapter can block.
 func (m Model) updateRunInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
@@ -302,11 +315,27 @@ func (m Model) updateRunInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if !ok {
 			return m, nil
 		}
+		// One launch at a time: an adapter run can stay pending up to
+		// launchTimeout (osascript on the Automation dialog), and nothing else
+		// stops a second enter+enter from dispatching concurrently. The
+		// command is deliberately not recorded in lastRun — it never ran.
+		if m.launchingFor != "" {
+			m.statusMsg = "still launching " + m.launchingFor
+			return m, nil
+		}
 		m.lastRun[mt.Name] = command
+		// An explicit new dispatch supersedes a fallback deferred while this
+		// prompt was open (a gated adapter failure landing mid-typing) —
+		// flushing both would run two commands on this same keystroke.
+		m.pendingLaunchName, m.pendingLaunchCommand = "", ""
 		plan := launcher.Detect(command, mt.Name)
 		if plan.Fallback {
 			return m, execToolCmd(mt.Name, command)
 		}
+		// In-flight feedback: the adapter can block for seconds, and without a
+		// statusMsg the prompt just closes and nothing visibly happens.
+		m.launchingFor = mt.Name
+		m.statusMsg = "launching " + mt.Name + " in " + plan.Terminal + "…"
 		return m, startLaunchCmd(plan, mt.Name, command)
 	case "esc":
 		m.mode = modeNormal
@@ -317,6 +346,41 @@ func (m Model) updateRunInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.runInput, cmd = m.runInput.Update(msg)
 		return m, cmd
 	}
+}
+
+// launchFallbackStatus is the single definition of the tab-failure fallback
+// message — shown by both the ungated launchDoneMsg auto-fallback (model.go)
+// and the deferred flush below, which must stay byte-identical (tests pin the
+// exact text).
+func launchFallbackStatus(name string) string {
+	return "tab open failed — running " + name + " here"
+}
+
+// flushPendingLaunch dispatches the exec fallback deferred by the
+// launchDoneMsg mode gate (see the pendingLaunchName field doc). Every modal
+// keystroke return in Update funnels through it: when the handler has just
+// brought the model back to modeNormal and a gated tab-open failure is
+// pending, the terminal is safe to seize again — the fallback fires now, with
+// the same statusMsg the ungated auto-fallback shows. Set here, AFTER the
+// blanket statusMsg reset and the mode handler, the message survives the
+// mode-closing keystroke, and modeNormal's renderStatusBar actually paints it
+// (every open mode's status-bar branch outranks statusMsg — a hint set at gate
+// time was dead UI). Going straight to execToolCmd — never back through
+// launcher.Detect — means the retry cannot re-run the known-failing adapter
+// plan. While the mode stays open (or modeTokenInput fell back to
+// modeAPIStatus) this is a no-op passthrough.
+func flushPendingLaunch(mdl tea.Model, cmd tea.Cmd) (tea.Model, tea.Cmd) {
+	// Plain assertion: every per-mode handler returns a Model value, and a
+	// future handler returning a different concrete type should fail loudly
+	// here, not silently skip the flush.
+	m := mdl.(Model)
+	if m.mode != modeNormal || m.pendingLaunchName == "" {
+		return mdl, cmd
+	}
+	name, command := m.pendingLaunchName, m.pendingLaunchCommand
+	m.pendingLaunchName, m.pendingLaunchCommand = "", ""
+	m.statusMsg = launchFallbackStatus(name)
+	return m, tea.Batch(cmd, execToolCmd(name, command))
 }
 
 // updateConfirmUpdate handles the modeConfirmUpdate dialog (modeled on

@@ -27,7 +27,7 @@ func TestPlanFor(t *testing.T) {
 			command:      "yazi",
 			toolName:     "yazi",
 			wantTerminal: "tmux",
-			wantArgv:     []string{"tmux", "new-window", "-n", "yazi", "yazi"},
+			wantArgv:     []string{"tmux", "new-window", "-n", "yazi", "--", "yazi"},
 		},
 		{
 			name: "tmux wins over TERM_PROGRAM",
@@ -38,7 +38,7 @@ func TestPlanFor(t *testing.T) {
 			command:      "fzf",
 			toolName:     "fzf",
 			wantTerminal: "tmux",
-			wantArgv:     []string{"tmux", "new-window", "-n", "fzf", "fzf"},
+			wantArgv:     []string{"tmux", "new-window", "-n", "fzf", "--", "fzf"},
 		},
 		{
 			name:         "kitty",
@@ -76,7 +76,15 @@ func TestPlanFor(t *testing.T) {
 			command:      "docker run -it alpine",
 			toolName:     "my tool",
 			wantTerminal: "tmux",
-			wantArgv:     []string{"tmux", "new-window", "-n", "my tool", "docker run -it alpine"},
+			wantArgv:     []string{"tmux", "new-window", "-n", "my tool", "--", "docker run -it alpine"},
+		},
+		{
+			name:         "dash-leading command survives tmux option parsing",
+			env:          map[string]string{"TMUX": "x"},
+			command:      "-la",
+			toolName:     "ls",
+			wantTerminal: "tmux",
+			wantArgv:     []string{"tmux", "new-window", "-n", "ls", "--", "-la"},
 		},
 		{
 			name:         "unicode tool name stays intact (kitty)",
@@ -151,6 +159,11 @@ func TestAppleScriptQuote(t *testing.T) {
 		{`back\slash`, `back\\slash`},
 		{`\"`, `\\\"`},
 		{`a\\b"c`, `a\\\\b\"c`},
+		// Control characters an AppleScript literal cannot carry raw: a pasted
+		// newline must become the \n escape, not split the script source.
+		{"a\nb", `a\nb`},
+		{"a\rb", `a\rb`},
+		{"a\tb", `a\tb`},
 	}
 	for _, tc := range tests {
 		if got := appleScriptQuote(tc.in); got != tc.want {

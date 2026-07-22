@@ -3640,7 +3640,19 @@ func TestRenderStatusBarRunInput(t *testing.T) {
 func TestRenderStatusBarFocusToolsRunHint(t *testing.T) {
 	m := Model{width: 80, focus: focusTools}
 	got := m.renderStatusBar()
-	if !strings.Contains(got, "[enter]") || !strings.Contains(got, "run") {
-		t.Errorf("focusTools status bar missing [enter] run hint: %q", got)
+	if !strings.Contains(got, "[enter] run") {
+		t.Errorf("focusTools status bar missing the [enter] run cell: %q", got)
+	}
+
+	// Narrow terminal: renderHintsBar drops cells from the right, so the
+	// first-placed [enter] run must outlive the right-side reminders. Width 24
+	// (inner 22) fits exactly one cell.
+	m.width = 24
+	got = m.renderStatusBar()
+	if !strings.Contains(got, "[enter] run") {
+		t.Errorf("narrow focusTools bar dropped the [enter] run cell: %q", got)
+	}
+	if strings.Contains(got, "[q] quit") || strings.Contains(got, "[?] keys") {
+		t.Errorf("narrow focusTools bar kept right-side cells that should drop first: %q", got)
 	}
 }

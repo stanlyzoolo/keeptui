@@ -177,6 +177,28 @@ type Model struct {
 	runInput textinput.Model
 	lastRun  map[string]string
 
+	// launchingFor is the one-adapter-launch-at-a-time guard (the launch twin
+	// of updatingFor): the name of the tool whose tab-open adapter run is in
+	// flight, empty when idle. Set on startLaunchCmd dispatch, cleared by
+	// launchDoneMsg. Without it a second enter+enter while osascript sits on
+	// the macOS Automation dialog (up to launchTimeout) would dispatch a
+	// concurrent adapter run. The ExecProcess fallback needs no guard — it
+	// suspends the TUI synchronously.
+	launchingFor string
+
+	// pendingLaunchName/Command hold the exec fallback deferred by the
+	// launchDoneMsg mode gate: the adapter failed while another mode owned the
+	// screen (tea.ExecProcess would seize the terminal under an open
+	// editor/overlay and route keystrokes to the spawned shell), so the
+	// fallback waits here until the keystroke that returns the model to
+	// modeNormal — flushPendingLaunch (mode.go) then dispatches it with a
+	// visible status message. A statusMsg set at gate time would be dead UI:
+	// every non-normal mode's renderStatusBar branch outranks the statusMsg
+	// branch, and the blanket statusMsg reset on tea.KeyMsg wipes it on the
+	// very keystroke that closes the mode.
+	pendingLaunchName    string
+	pendingLaunchCommand string
+
 	// spinner animates while a force refresh ([r]) is in flight; refreshingFor
 	// holds the name of the tool being refreshed (empty = idle). refreshingFor
 	// doubles as the double-press guard and as the tick-loop / render gate.
@@ -517,12 +539,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case launchDoneMsg:
-		// Tab-open adapter finished. On failure, auto-fall back to running the
-		// tool in the current window — the tool always launches, the status bar
-		// explains the degradation. Not logged: the fallback makes this a
-		// degraded path, not a keeptui malfunction.
+		// Tab-open adapter finished. Clear the one-launch-at-a-time guard
+		// first, so the fallback (or the user's retry) can dispatch again.
+		if m.launchingFor == msg.toolName {
+			m.launchingFor = ""
+		}
+		// On failure, auto-fall back to running the tool in the current
+		// window — the tool always launches, the status bar explains the
+		// degradation. Not logged: the fallback makes this a degraded path,
+		// not a keeptui malfunction.
 		if msg.err != nil {
-			m.statusMsg = "tab open failed — running " + msg.toolName + " here"
+			// The result can arrive up to launchTimeout after enter (osascript
+			// blocked on the macOS Automation dialog). tea.ExecProcess seizes
+			// the terminal, so the auto-fallback fires only from the base
+			// state: under an open editor/overlay/search it would hijack the
+			// screen and send the user's keystrokes to the spawned shell —
+			// there the fallback is deferred instead: flushPendingLaunch
+			// dispatches it (same statusMsg, no adapter re-run) on the
+			// keystroke that returns the mode to modeNormal.
+			if m.mode != modeNormal {
+				m.pendingLaunchName = msg.toolName
+				m.pendingLaunchCommand = msg.command
+				return m, nil
+			}
+			m.statusMsg = launchFallbackStatus(msg.toolName)
 			return m, execToolCmd(msg.toolName, msg.command)
 		}
 		// Mode-neutral wording: Terminal.app and tmux open a window, not a tab.
@@ -701,25 +741,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		m.statusMsg = ""
 
+		// Every modal return funnels through flushPendingLaunch: the keystroke
+		// that brings the mode back to modeNormal is the single point where a
+		// deferred exec fallback (launchDoneMsg mode gate) can safely fire —
+		// see the pendingLaunchName field doc. While the mode stays open the
+		// wrapper is a no-op.
 		switch m.mode {
 		case modeEditNote:
-			return m.updateNoteEdit(msg)
+			return flushPendingLaunch(m.updateNoteEdit(msg))
 		case modeEditTags:
-			return m.updateTagsEdit(msg)
+			return flushPendingLaunch(m.updateTagsEdit(msg))
 		case modeTrack:
-			return m.updateTrackInput(msg)
+			return flushPendingLaunch(m.updateTrackInput(msg))
 		case modeConfirmUntrack:
-			return m.updateUntrackConfirm(msg)
+			return flushPendingLaunch(m.updateUntrackConfirm(msg))
 		case modeRename:
-			return m.updateRenameInput(msg)
+			return flushPendingLaunch(m.updateRenameInput(msg))
 		case modeRunInput:
-			return m.updateRunInput(msg)
+			return flushPendingLaunch(m.updateRunInput(msg))
 		case modeConfirmUpdate:
-			return m.updateConfirmUpdate(msg)
+			return flushPendingLaunch(m.updateConfirmUpdate(msg))
 		case modeAPIStatus, modeTokenInput:
-			return m.updateAPIStatus(msg)
+			return flushPendingLaunch(m.updateAPIStatus(msg))
 		case modeHotkeys:
-			return m.updateHotkeys(msg)
+			return flushPendingLaunch(m.updateHotkeys(msg))
 		}
 
 		if m.mode == modeHelpSearch {
@@ -731,7 +776,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.helpMatches = nil
 				m.helpMatchIdx = 0
 				m.helpViewport.SetContent(m.renderHelpContent())
-				return m, nil
+				// Mode exit — a deferred exec fallback fires here, same as
+				// the modal-handler returns above.
+				return flushPendingLaunch(m, nil)
 			case "n":
 				if len(m.helpMatches) > 0 {
 					m.helpMatchIdx = (m.helpMatchIdx + 1) % len(m.helpMatches)
@@ -769,7 +816,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.search.Blur()
 				prev := m.searchPrevName
 				m.searchPrevName = ""
-				return m, m.selectMeta(m.indexOfMeta(prev))
+				// selectMeta before the flush: it mutates m, and Go copies m
+				// into the call before evaluating a second argument.
+				cmd = m.selectMeta(m.indexOfMeta(prev))
+				return flushPendingLaunch(m, cmd)
 			case "enter":
 				// Commit: accept the highlighted match. With no matches the key
 				// is a no-op and search stays open.
@@ -783,8 +833,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.searchPrevName = ""
 				m.focus = focusBrief
 				// The filter is gone once the mode is normal, so remap the
-				// cursor onto the full list by name.
-				return m, m.selectMeta(m.indexOfMeta(mt.Name))
+				// cursor onto the full list by name. selectMeta before the
+				// flush: it mutates m, and Go copies m into the call before
+				// evaluating a second argument.
+				cmd = m.selectMeta(m.indexOfMeta(mt.Name))
+				return flushPendingLaunch(m, cmd)
 			case "up", "down":
 				// Move the highlight through the filtered list (wrap-around,
 				// j/k parity). Never forwarded to the textinput, so the query

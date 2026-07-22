@@ -17,6 +17,7 @@ graph TD
     model[internal/model] --> loader[internal/loader]
     model --> version[internal/version]
     model --> updater[internal/updater]
+    model --> launcher[internal/launcher]
     model --> ui[internal/ui]
     model --> proc[internal/proc]
     version --> loader
@@ -28,6 +29,7 @@ graph TD
 
 | Package | Responsibility |
 |---|---|
+| `internal/launcher` | Decide how to run a tracked tool in a new terminal tab: pure `planFor(env, command, toolName)` → `Plan{Argv, Fallback, Terminal}`, detection chain tmux → iTerm2 → Terminal.app → kitty → WezTerm → fallback; env-only, no subprocesses |
 | `internal/loader` | Tracker persistence (`meta.yaml`), status lifecycle (`active → trying → inactive`, legacy values migrated on read), GitHub ref parsing (`NormalizeRepo`, `ParseToolRef`) |
 | `internal/logx` | Session error journal: dependency-free, errors only, one lazily created file per session. Package-level state — any package can log without threading a logger through |
 | `internal/model` | The entire Bubble Tea model: TUI state, key handling, rendering |
@@ -36,7 +38,7 @@ graph TD
 | `internal/updater` | Detect the package manager that owns an installed binary and produce an update `Plan{Manager, Argv, Display}` |
 | `internal/version` | Detect the installed version locally; GitHub API with a 24-hour cache; semver comparison (`IsNewer`) |
 
-`logx`, `proc`, `ui`, `updater` and `version` sit at the bottom of the import graph:
+`launcher`, `logx`, `proc`, `ui`, `updater` and `version` sit at the bottom of the import graph:
 they know nothing about the TUI. GitHub ref parsing is owned by `loader` (otherwise a
 `version ↔ loader` cycle would appear).
 
@@ -111,9 +113,9 @@ Three panels with cycling focus: `[1] Tools` (the list), `[2] Brief` (the card),
 `1`/`2`/`3`, or a mouse click; everything goes through `setFocus(f)`, which repaints
 the tools list — the only viewport whose content depends on focus.
 
-All modal state is a single field `m.mode inputMode` (12 values: `modeNormal`, `modeSearch`,
+All modal state is a single field `m.mode inputMode` (13 values: `modeNormal`, `modeSearch`,
 `modeHelpSearch`, `modeEditNote`, `modeEditTags`, `modeTrack`, `modeConfirmUntrack`, `modeRename`,
-`modeAPIStatus`, `modeTokenInput`, `modeConfirmUpdate`, `modeHotkeys`). Exactly one mode is active at
+`modeRunInput`, `modeAPIStatus`, `modeTokenInput`, `modeConfirmUpdate`, `modeHotkeys`). Exactly one mode is active at
 a time; `Update()` dispatches via `switch m.mode`, so keys that open other modes
 structurally cannot fire inside another mode's input.
 
@@ -153,6 +155,30 @@ is mandatory, `Wait` before the pipe is drained is forbidden by `os/exec`.
 `waitForChunkCmd` does one receive from the channel and re-creates itself. The log
 lives in `[3] Update` (a ~500-line buffer); the 10-minute deadline ends with
 `proc.KillGroup` on the process group.
+
+## Running a tool (`enter`)
+
+`enter` in `[1] Tools` opens a one-line prompt (prefilled with the last command
+dispatched for the tool this session, else the tool name) and launches the
+command. `launcher.Detect` picks the path from the environment alone — no
+subprocesses, so unlike every probe it is safe inside `Update()`. A tab plan
+runs its argv as a `tea.Cmd` through `proc.DetachTTY` with a 10-second ceiling
+(`proc.KillGroup` on the process group when it fires — mostly for osascript
+blocked on the macOS Automation dialog); a `Fallback` plan — terminals with no
+scripting API, and native Windows — runs the command in the current window via
+`tea.ExecProcess` (`sh -c` / `cmd /c`): keeptui suspends and resumes when the
+tool exits.
+
+An adapter failure **auto-falls back** to `tea.ExecProcess`, so the tool still
+launches — but only from `modeNormal`: the result can arrive seconds after
+enter, and seizing the terminal under an open editor or overlay would send the
+user's keystrokes to the spawned shell. Under any other mode the fallback is
+deferred, not dropped: it fires — with a visible status message — on the
+keystroke that closes the mode, going straight to the exec fallback (the
+failing adapter plan is never re-run). One adapter launch runs at a time (`m.launchingFor`, the
+launch twin of `updatingFor`). Working directories differ by path: a tab opens
+in the new shell's default cwd, the fallback inherits keeptui's. A non-zero
+exit of the tool itself is a status message only — never logged.
 
 ## GitHub API
 
@@ -201,7 +227,9 @@ leaves no file, so the presence of a file is itself the signal. The filename car
 colon-free zero-padded timestamp: lexicographic order equals chronological order,
 which is what `Cleanup()` relies on (the 20 most recent are kept). `logx.Recover` is
 hooked deeper than Bubble Tea's own recover (inside `Update`, `View` and every
-command via `safeCmd`): it records the panic with a stack trace and **re-panics** so
+command via `safeCmd`; `execToolCmd` is the one unwrapped cmd — `tea.ExecProcess`
+only constructs the exec message, nothing there can panic): it records the panic
+with a stack trace and **re-panics** so
 Bubble Tea restores the terminal correctly. The logger's own failures are swallowed
 silently.
 

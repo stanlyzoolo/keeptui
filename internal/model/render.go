@@ -102,6 +102,19 @@ func (m Model) renderStatusBar() string {
 			keyHint("esc"),
 		))
 	}
+	if m.mode == modeRunInput {
+		name := ""
+		if mt, ok := m.selectedMeta(); ok {
+			name = mt.Name
+		}
+		return style.Render(fmt.Sprintf(
+			"%s %s  %s run  %s cancel",
+			ui.SearchPromptStyle.Render("run "+name+":"),
+			m.runInput.View(),
+			keyHint("enter"),
+			keyHint("esc"),
+		))
+	}
 	if m.mode == modeConfirmUpdate {
 		name := ""
 		if mt, ok := m.selectedMeta(); ok {
@@ -168,6 +181,7 @@ func (m Model) renderStatusBar() string {
 		return m.renderHintsBar(style, hints)
 	}
 	return m.renderHintsBar(style, []string{
+		keyHint("enter") + " run",
 		keyHint("/") + " search",
 		keyHint("t") + " track",
 		keyHint("u") + " untrack",
@@ -487,6 +501,7 @@ func (m Model) renderHotkeys() string {
 		{"[1] Tools", []hotkeyRow{
 			{"j/k ↑/↓", "select tool"},
 			{"g/G", "first / last"},
+			{"enter", "run in tab"},
 			{"t", "track tool"},
 			{"u", "untrack tool"},
 			{"r", "rename tool"},

@@ -103,12 +103,12 @@
 - Modify: `internal/model/mode.go`
 - Create: `internal/model/launch_test.go`
 
-- [ ] add `launchDoneMsg{toolName, command string, err error}` and `execDoneMsg{toolName string, err error}`; `startLaunchCmd(plan, toolName, command)` in commands.go runs `plan.Argv` via `exec.Command` + `proc.DetachTTY` (short timeout, e.g. 10s), emits `launchDoneMsg`, and is wrapped in `safeCmd("startLaunchCmd", …)` like every other cmd constructor in the file
-- [ ] add pure `shellCommand(goos, cmd string) (string, []string)` helper (`sh -c` / `cmd /c`; truly mirroring `browserCommand`'s goos-parameterized, spawn-free signature so both branches are table-testable) and `execToolCmd(toolName, command)` returning `tea.ExecProcess(exec.Command(shellCommand(runtime.GOOS, command)), …execDoneMsg)`
-- [ ] wire `updateRunInput`'s enter: `launcher.Detect(command, name)` → fallback plan ⇒ `execToolCmd`; else `startLaunchCmd`; set `statusMsg` (`launched <name>` on `launchDoneMsg` success — mode-neutral wording, since Terminal.app and tmux open a *window*, not a tab)
-- [ ] handle `launchDoneMsg` with err: `statusMsg` explaining the tab failure + **auto-fallback** by returning `execToolCmd(msg.toolName, msg.command)`; handle `execDoneMsg`: non-zero exit → `statusMsg "<name> exited: <err>"`, no logx
-- [ ] write tests: fallback-plan vs tab-plan dispatch driven through `t.Setenv` on the real `launcher.Detect` (clear `TMUX`/`TERM_PROGRAM`/`KITTY_WINDOW_ID` → exec path; set `TMUX` → adapter path — `planFor` is unexported and cross-package, so env is the seam); table-test both `shellCommand` branches (`linux`/`darwin` → `sh -c`, `windows` → `cmd /c`); `launchDoneMsg{err}` handler fires fallback and sets statusMsg; `execDoneMsg{err}` sets statusMsg without logging (reuse `logx.SetDirForTesting` no-log assertion idiom)
-- [ ] run `go test -race ./internal/model/` - must pass before task 4
+- [x] add `launchDoneMsg{toolName, command string, err error}` and `execDoneMsg{toolName string, err error}`; `startLaunchCmd(plan, toolName, command)` in commands.go runs `plan.Argv` via `exec.Command` + `proc.DetachTTY` (short timeout, e.g. 10s), emits `launchDoneMsg`, and is wrapped in `safeCmd("startLaunchCmd", …)` like every other cmd constructor in the file
+- [x] add pure `shellCommand(goos, cmd string) (string, []string)` helper (`sh -c` / `cmd /c`; truly mirroring `browserCommand`'s goos-parameterized, spawn-free signature so both branches are table-testable) and `execToolCmd(toolName, command)` returning `tea.ExecProcess(exec.Command(shellCommand(runtime.GOOS, command)), …execDoneMsg)`
+- [x] wire `updateRunInput`'s enter: `launcher.Detect(command, name)` → fallback plan ⇒ `execToolCmd`; else `startLaunchCmd`; set `statusMsg` (`launched <name>` on `launchDoneMsg` success — mode-neutral wording, since Terminal.app and tmux open a *window*, not a tab)
+- [x] handle `launchDoneMsg` with err: `statusMsg` explaining the tab failure + **auto-fallback** by returning `execToolCmd(msg.toolName, msg.command)`; handle `execDoneMsg`: non-zero exit → `statusMsg "<name> exited: <err>"`, no logx
+- [x] write tests: fallback-plan vs tab-plan dispatch driven through `t.Setenv` on the real `launcher.Detect` (clear `TMUX`/`TERM_PROGRAM`/`KITTY_WINDOW_ID` → exec path; set `TMUX` → adapter path — `planFor` is unexported and cross-package, so env is the seam); table-test both `shellCommand` branches (`linux`/`darwin` → `sh -c`, `windows` → `cmd /c`); `launchDoneMsg{err}` handler fires fallback and sets statusMsg; `execDoneMsg{err}` sets statusMsg without logging (reuse `logx.SetDirForTesting` no-log assertion idiom)
+- [x] run `go test -race ./internal/model/` - must pass before task 4
 
 ### Task 4: status bar, hints, hotkeys overlay
 

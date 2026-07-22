@@ -516,6 +516,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case launchDoneMsg:
+		// Tab-open adapter finished. On failure, auto-fall back to running the
+		// tool in the current window — the tool always launches, the status bar
+		// explains the degradation. Not logged: the fallback makes this a
+		// degraded path, not a keeptui malfunction.
+		if msg.err != nil {
+			m.statusMsg = "tab open failed — running " + msg.toolName + " here"
+			return m, execToolCmd(msg.toolName, msg.command)
+		}
+		// Mode-neutral wording: Terminal.app and tmux open a window, not a tab.
+		m.statusMsg = "launched " + msg.toolName
+		return m, nil
+
+	case execDoneMsg:
+		// The tool ran in the current window and keeptui resumed. A non-zero
+		// exit belongs to the tool, not keeptui — statusMsg only, no logx.
+		if msg.err != nil {
+			m.statusMsg = msg.toolName + " exited: " + msg.err.Error()
+		}
+		return m, nil
+
 	case helpOutputMsg:
 		// Only the named tool's result retires the loading marker: a stale
 		// fetch for a previously highlighted tool must not clear the flag

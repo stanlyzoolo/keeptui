@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/stanlyzoolo/keeptui/internal/launcher"
 	"github.com/stanlyzoolo/keeptui/internal/loader"
 	"github.com/stanlyzoolo/keeptui/internal/version"
 )
@@ -284,9 +285,10 @@ func (m Model) updateRenameInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // updateRunInput handles the one-line run prompt opened by enter in focusTools
 // (modeRunInput): esc cancels back to modeNormal; enter with empty/whitespace
 // input cancels too; enter with text records the command in m.lastRun and
-// dispatches the launch. The actual launch command (launcher.Detect + tab/exec
-// path) is wired in the launch-commands step — until then dispatch is a
-// recorded no-op.
+// dispatches the launch. launcher.Detect is env-only (no subprocesses), so it
+// is safe to call here on the Update thread: a fallback plan runs the tool in
+// the current window via tea.ExecProcess, any other plan opens a terminal tab
+// via startLaunchCmd (whose error handler auto-falls back to ExecProcess).
 func (m Model) updateRunInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
@@ -301,7 +303,11 @@ func (m Model) updateRunInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.lastRun[mt.Name] = command
-		return m, nil
+		plan := launcher.Detect(command, mt.Name)
+		if plan.Fallback {
+			return m, execToolCmd(mt.Name, command)
+		}
+		return m, startLaunchCmd(plan, mt.Name, command)
 	case "esc":
 		m.mode = modeNormal
 		m.runInput.Blur()

@@ -7,10 +7,12 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/stanlyzoolo/keeptui/internal/launcher"
 	"github.com/stanlyzoolo/keeptui/internal/loader"
 	"github.com/stanlyzoolo/keeptui/internal/logx"
 	"github.com/stanlyzoolo/keeptui/internal/proc"
@@ -44,6 +46,76 @@ func validateTokenCmd(token string) tea.Cmd {
 	return safeCmd("validateTokenCmd", func() tea.Msg {
 		rate, err := version.FetchRateWithToken(token)
 		return tokenValidatedMsg{token: token, rate: rate, err: err}
+	})
+}
+
+// launchTimeout bounds a tab-open adapter subprocess. Adapters normally return
+// near-instantly; the ceiling exists for the paths that can block on a human —
+// most notably osascript waiting on the macOS Automation permission dialog.
+// When it fires, the launchDoneMsg error handler auto-falls back to running the
+// tool in the current window, so the launch still happens.
+const launchTimeout = 10 * time.Second
+
+// launchDoneMsg carries the result of a tab-open adapter run (startLaunchCmd).
+// command is the user's shell command, carried so the error handler can build
+// the ExecProcess fallback without re-reading input state.
+type launchDoneMsg struct {
+	toolName string
+	command  string
+	err      error
+}
+
+// execDoneMsg is the tea.ExecProcess callback result for the fallback path:
+// the tool ran in the current window and keeptui resumed. err is the tool's
+// own exit status — a tool exiting non-zero is not a keeptui anomaly, so the
+// handler surfaces it as a statusMsg and never logs it.
+type execDoneMsg struct {
+	toolName string
+	err      error
+}
+
+// startLaunchCmd runs a tab-open adapter plan (tmux new-window, osascript,
+// kitten @ launch, …) and emits launchDoneMsg. The adapter is detached from
+// the controlling terminal like every other probe (proc.DetachTTY), and on the
+// timeout the whole process group is killed — DetachTTY's Setsid makes the
+// child a session leader, so a plain kill would orphan grandchildren. The
+// error is not logged here: the launchDoneMsg handler auto-falls back, so an
+// adapter failure is a degraded path, not a dead end.
+func startLaunchCmd(plan launcher.Plan, toolName, command string) tea.Cmd {
+	return safeCmd("startLaunchCmd", func() tea.Msg {
+		if len(plan.Argv) == 0 {
+			return launchDoneMsg{toolName: toolName, command: command, err: errors.New("empty launch command")}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), launchTimeout)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, plan.Argv[0], plan.Argv[1:]...)
+		proc.DetachTTY(cmd)
+		cmd.Cancel = func() error { return proc.KillGroup(cmd) }
+		err := cmd.Run()
+		return launchDoneMsg{toolName: toolName, command: command, err: err}
+	})
+}
+
+// shellCommand resolves the shell invocation that runs the user's command in
+// the current window. Pure and goos-parameterized so both branches are
+// table-testable without spawning anything — the exact mirror of
+// browserCommand's seam.
+func shellCommand(goos, cmd string) (string, []string) {
+	if goos == "windows" {
+		return "cmd", []string{"/c", cmd}
+	}
+	return "sh", []string{"-c", cmd}
+}
+
+// execToolCmd runs command in the current window via tea.ExecProcess: Bubble
+// Tea releases the terminal, the tool takes it over, and keeptui resumes when
+// it exits. This is the fallback for terminals with no tab-scripting API and
+// the safety net when an adapter fails. Deliberately not wrapped in safeCmd:
+// tea.ExecProcess only builds the exec message — nothing here can panic.
+func execToolCmd(toolName, command string) tea.Cmd {
+	name, args := shellCommand(runtime.GOOS, command)
+	return tea.ExecProcess(exec.Command(name, args...), func(err error) tea.Msg {
+		return execDoneMsg{toolName: toolName, err: err}
 	})
 }
 

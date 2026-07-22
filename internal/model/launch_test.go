@@ -3,6 +3,7 @@ package model
 import (
 	"errors"
 	"fmt"
+	"os/exec"
 	"runtime"
 	"strings"
 	"testing"
@@ -466,6 +467,59 @@ func TestExecDoneMsg(t *testing.T) {
 			t.Error("cmd != nil, want none")
 		}
 	})
+	t.Run("command not found exit", func(t *testing.T) {
+		if runtime.GOOS == "windows" {
+			t.Skip("needs the unix sh binary")
+		}
+		logDir := t.TempDir()
+		restore := logx.SetDirForTesting(logDir)
+		defer restore()
+
+		// A real 127 from the same shell the fallback uses — the tool never
+		// ran, so the message must say "not installed", not the exit status.
+		err := exec.Command("sh", "-c", "exit 127").Run()
+		m := newTestModel(focusTools)
+		updated, cmd := m.Update(execDoneMsg{toolName: "git", err: err})
+		nm := updated.(Model)
+		if want := "git not found — is it installed?"; nm.statusMsg != want {
+			t.Errorf("statusMsg = %q, want %q", nm.statusMsg, want)
+		}
+		if cmd != nil {
+			t.Error("cmd != nil, want none")
+		}
+		if out := logx.ReadAllForTesting(logDir); out != "" {
+			t.Errorf("a not-found exit must not log, got:\n%s", out)
+		}
+	})
+}
+
+// TestNotFoundExit pins the "command not found" classifier: only the shell's
+// own not-found exit codes (127 sh, 9009 cmd.exe) qualify — an ordinary
+// non-zero exit, a non-ExitError and nil all stay on the generic path.
+func TestNotFoundExit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("needs the unix sh binary")
+	}
+	exit127 := exec.Command("sh", "-c", "exit 127").Run()
+	exit1 := exec.Command("sh", "-c", "exit 1").Run()
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"shell not-found 127", exit127, true},
+		{"ordinary failure 1", exit1, false},
+		{"non-ExitError", errors.New("exit status 127"), false},
+		{"nil", nil, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := notFoundExit(tt.err); got != tt.want {
+				t.Errorf("notFoundExit(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
 }
 
 // TestExecDoneCallback pins the ExecProcess completion mapping that

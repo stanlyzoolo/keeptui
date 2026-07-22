@@ -572,8 +572,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case execDoneMsg:
 		// The tool ran in the current window and keeptui resumed. A non-zero
 		// exit belongs to the tool, not keeptui — statusMsg only, no logx.
+		// Exception in wording only: the shell's own "command not found"
+		// exit (notFoundExit) means the tool never ran, so the message says
+		// "not installed" instead of surfacing a cryptic exit status.
 		if msg.err != nil {
-			m.statusMsg = msg.toolName + " exited: " + msg.err.Error()
+			if notFoundExit(msg.err) {
+				m.statusMsg = msg.toolName + " not found — is it installed?"
+			} else {
+				m.statusMsg = msg.toolName + " exited: " + msg.err.Error()
+			}
 		}
 		return m, nil
 

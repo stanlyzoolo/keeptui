@@ -137,6 +137,20 @@ func execDoneCallback(toolName string) func(error) tea.Msg {
 	}
 }
 
+// notFoundExit reports whether err is the shell's "command not found" exit
+// status: 127 from sh (POSIX), 9009 from cmd.exe. Exit 127 means the tool
+// never ran at all, so the execDoneMsg handler can say "not installed"
+// instead of a cryptic exit status. Only the ExecProcess fallback can see
+// this — a tab adapter's shell reports the miss inside its own tab.
+func notFoundExit(err error) bool {
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) {
+		return false
+	}
+	code := ee.ExitCode()
+	return code == 127 || code == 9009
+}
+
 // fetchInstalledCmd returns a Cmd that detects the installed version of t
 // locally (subprocess) and emits an installedMsg. It never touches the network,
 // so the installed version can render before any GitHub fetch completes.

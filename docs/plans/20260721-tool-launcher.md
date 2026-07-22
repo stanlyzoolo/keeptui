@@ -116,11 +116,11 @@
 - Modify: `internal/model/render.go`
 - Modify: `internal/model/render_test.go`
 
-- [ ] add `renderStatusBar` branch for `modeRunInput`: `run <name>: <input>  [enter] run  [esc] cancel` (echo the live input like the other input modes)
-- [ ] add `[enter] run` to the `focusTools` normal-mode hints bar
-- [ ] add the `enter — run tool in a new tab` row to the `[?]` hotkeys overlay's tools group
-- [ ] write tests: status bar branch renders name+input+hints; focusTools bar carries `[enter] run`; hotkeys overlay still fits the ≤20-row × ≤76-col budget (existing budget test must stay green)
-- [ ] run `go test -race ./internal/model/` - must pass before task 5
+- [x] add `renderStatusBar` branch for `modeRunInput`: `run <name>: <input>  [enter] run  [esc] cancel` (echo the live input like the other input modes)
+- [x] add `[enter] run` to the `focusTools` normal-mode hints bar
+- [x] add the `enter — run in tab` row to the `[?]` hotkeys overlay's tools group (desc shortened from "run tool in a new tab": the overlay sat at 75/76 cols and the longer text would break the hard width budget)
+- [x] write tests: status bar branch renders name+input+hints; focusTools bar carries `[enter] run`; hotkeys overlay still fits the ≤20-row × ≤76-col budget (existing budget test must stay green; gauge-tier test widths shifted by the 13 cols the new hint cell added)
+- [x] run `go test -race ./internal/model/` - must pass before task 5
 
 ### Task 5: Verify acceptance criteria
 

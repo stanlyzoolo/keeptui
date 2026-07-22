@@ -973,7 +973,9 @@ func TestRenderStatusBarGauge(t *testing.T) {
 	})
 
 	t.Run("wide width shows full gauge (pinned to focusTools)", func(t *testing.T) {
-		m := Model{width: 120, focus: focusTools, rate: known}
+		// The [enter] run cell widened the focusTools hints to 79 cols; the full
+		// gauge (50 cols) needs width >= hints+gauge+gap+border = 133.
+		m := Model{width: 135, focus: focusTools, rate: known}
 		got := m.renderStatusBar()
 		for _, want := range []string{"GitHub API Usage", "45/60", "[L]", "search"} {
 			if !strings.Contains(got, want) {
@@ -983,7 +985,7 @@ func TestRenderStatusBarGauge(t *testing.T) {
 	})
 
 	t.Run("medium width collapses to compact", func(t *testing.T) {
-		m := Model{width: 90, focus: focusTools, rate: known}
+		m := Model{width: 103, focus: focusTools, rate: known}
 		got := m.renderStatusBar()
 		if strings.Contains(got, "GitHub API Usage") {
 			t.Errorf("medium status bar unexpectedly full: %q", got)
@@ -996,7 +998,7 @@ func TestRenderStatusBarGauge(t *testing.T) {
 	})
 
 	t.Run("narrow width hides gauge but keeps hints", func(t *testing.T) {
-		m := Model{width: 62, focus: focusTools, rate: known}
+		m := Model{width: 75, focus: focusTools, rate: known}
 		got := m.renderStatusBar()
 		for _, absent := range []string{"GitHub API Usage", "GH ", "45/60"} {
 			if strings.Contains(got, absent) {
@@ -3224,6 +3226,7 @@ func TestRenderHotkeysOverlayContent(t *testing.T) {
 		"entry nav",   // [3] Help / Man / Readme
 		"readme",      // [3] the third panel source
 		"3 lines",     // Scrolling
+		"run in tab",  // [1] Tools enter row
 		"close",       // title close hint
 	} {
 		if !strings.Contains(view, want) {
@@ -3611,5 +3614,33 @@ func TestReadmeFetchGuardedWhileInFlight(t *testing.T) {
 	}
 	if n := countBatchedCmds(m.autoFetchCmdsForSelected()); n != 0 {
 		t.Errorf("re-visit during a forced refresh batched %d cmds, want 0", n)
+	}
+}
+
+// TestRenderStatusBarRunInput: the modeRunInput bar echoes the selected tool's
+// name, the live command input, and the run/cancel hints — mirroring the other
+// input-mode branches.
+func TestRenderStatusBarRunInput(t *testing.T) {
+	m := New([]loader.ToolMeta{{Name: "yazi"}})
+	m.width = 80
+	m.mode = modeRunInput
+	m.runInput.SetValue("yazi /tmp")
+
+	got := m.renderStatusBar()
+	for _, want := range []string{"run yazi:", "yazi /tmp", "[enter]", "run", "[esc]", "cancel"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("run input status bar = %q, missing %q", got, want)
+		}
+	}
+}
+
+// TestRenderStatusBarFocusToolsRunHint: the focusTools normal-mode bar carries
+// the [enter] run hint (first cell — it must survive narrow-terminal cell
+// dropping, which trims from the right).
+func TestRenderStatusBarFocusToolsRunHint(t *testing.T) {
+	m := Model{width: 80, focus: focusTools}
+	got := m.renderStatusBar()
+	if !strings.Contains(got, "[enter]") || !strings.Contains(got, "run") {
+		t.Errorf("focusTools status bar missing [enter] run hint: %q", got)
 	}
 }

@@ -64,6 +64,7 @@ time for the hotkeys overlay — every keybinding, grouped by panel.
 | `t` | track — add a tool by GitHub URL or short name |
 | `u` | untrack — remove (with confirmation) |
 | `r` | rename — fix the binary name when it differs from the repo name (e.g. `claude-code` → `claude`) |
+| `enter` | run the tool: a one-line prompt opens, prefilled with the tool name (or the last command run for it this session — handy for appending arguments); the command opens in a new tab named after the tool where the terminal is scriptable (tmux, iTerm2, kitty; Terminal.app opens a window, WezTerm an unnamed tab), anywhere else it runs in the current window — `keeptui` suspends and resumes when the tool exits. If opening the tab fails, the command automatically runs in the current window instead |
 | `/` | search by name and tags: the matched substring is highlighted, tag-only matches show the tag dimmed, the status bar shows an `N/M` counter; `↑` / `↓` move through matches, `enter` opens the card, `esc` cancels and restores the previous selection |
 | `L` | GitHub API status — limits and token (see below) |
 | `?` | hotkeys overlay — every keybinding, grouped by panel |

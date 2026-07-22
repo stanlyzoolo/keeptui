@@ -124,16 +124,16 @@
 
 ### Task 5: Verify acceptance criteria
 
-- [ ] verify all requirements from Overview are implemented (prompt prefill + lastRun, tab plans per terminal, named tabs where the API allows, auto-fallback, ExecProcess resume)
-- [ ] verify edge cases: empty list, empty input, launch during update streaming, Windows build (`GOOS=windows go build ./...`)
-- [ ] run full test suite: `go test -race ./...`
-- [ ] run `go vet ./...` and `golangci-lint run`
+- [x] verify all requirements from Overview are implemented (prompt prefill + lastRun, tab plans per terminal, named tabs where the API allows, auto-fallback, ExecProcess resume)
+- [x] verify edge cases: empty list, empty input, launch during update streaming, Windows build (`GOOS=windows go build ./...`)
+- [x] run full test suite: `go test -race ./...`
+- [x] run `go vet ./...` and `golangci-lint run`
 
 ### Task 6: [Final] Update documentation
 
-- [ ] update CLAUDE.md: `internal/launcher` row in the package table; `modeRunInput` in the input-modes list; launch flow bullet in the TUI state-machine section; `enter` in the hotkeys/status-bar descriptions
-- [ ] update README.md hotkeys section if it lists keys
-- [ ] move this plan to `docs/plans/completed/`
+- [x] update CLAUDE.md: `internal/launcher` row in the package table; `modeRunInput` in the input-modes list; launch flow bullet in the TUI state-machine section; `enter` in the hotkeys/status-bar descriptions (also: `updateRunInput` in the mode.go file-table row, `startLaunchCmd`/`execToolCmd`/`shellCommand` in the commands.go row)
+- [x] update README.md hotkeys section if it lists keys (added the `enter` row to the Panel `[1] Tools` table)
+- [x] move this plan to `docs/plans/completed/` (harness moves it)
 
 ## Post-Completion
 

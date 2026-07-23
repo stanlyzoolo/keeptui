@@ -14,16 +14,20 @@ graph TD
     main[main.go] --> model
     main --> loader
     main --> logx
+    main --> version
     model[internal/model] --> loader[internal/loader]
     model --> version[internal/version]
     model --> updater[internal/updater]
     model --> launcher[internal/launcher]
     model --> ui[internal/ui]
     model --> proc[internal/proc]
+    model --> logx
     version --> loader
     version --> logx[internal/logx]
     version --> proc
     updater --> loader
+    updater --> proc
+    ui --> loader
     loader --> logx
 ```
 
@@ -39,7 +43,8 @@ graph TD
 | `internal/version` | Detect the installed version locally; GitHub API with a 24-hour cache; semver comparison (`IsNewer`) |
 
 `launcher`, `logx`, `proc`, `ui`, `updater` and `version` sit at the bottom of the import graph:
-they know nothing about the TUI. GitHub ref parsing is owned by `loader` (otherwise a
+they know nothing about the TUI (`ui`, `updater` and `version` reach only into
+`loader`/`proc`/`logx`). GitHub ref parsing is owned by `loader` (otherwise a
 `version ↔ loader` cycle would appear).
 
 The `model` package is split across files within a single package:
@@ -115,7 +120,7 @@ the tools list — the only viewport whose content depends on focus.
 
 All modal state is a single field `m.mode inputMode` (13 values: `modeNormal`, `modeSearch`,
 `modeHelpSearch`, `modeEditNote`, `modeEditTags`, `modeTrack`, `modeConfirmUntrack`, `modeRename`,
-`modeRunInput`, `modeAPIStatus`, `modeTokenInput`, `modeConfirmUpdate`, `modeHotkeys`). Exactly one mode is active at
+`modeRunInput`, `modeConfirmUpdate`, `modeAPIStatus`, `modeTokenInput`, `modeHotkeys`). Exactly one mode is active at
 a time; `Update()` dispatches via `switch m.mode`, so keys that open other modes
 structurally cannot fire inside another mode's input.
 
@@ -135,7 +140,7 @@ Key invariants:
   recomputed only where the visible text actually changed; style-only repaints never
   reset the cursor. In README mode there are no entries — the glamour output is
   already styled, so `j`/`k` scroll and `/` is a no-op.
-- **`m.helpCache` is a `[2]string` indexed by `m.helpMode`.** README content lives in
+- **`m.helpCache` is a `map[string][2]string` whose values are indexed by `m.helpMode`.** README content lives in
   a separate map (`m.readmeData`), so every index site is guarded by a README branch
   first — mode `2` would otherwise run off the end of the array.
 
@@ -236,7 +241,7 @@ silently.
 ## Testing
 
 Tests never touch the real config: `loader` has a `testConfigDir` seam, `version` has
-`testCacheDir`/`testTokenDir`/`testAPIBase`, `updater` has `testHomeDir`, `model` has
+`testCacheDir`/`testTokenDir`/`testAPIBase`/`testBrewPrefix`, `updater` has `testHomeDir`, `model` has
 `testReadmeStyle` (forces the glamour construction failure so the plain-text fallback
 is covered). The
 exception is `logx.SetDirForTesting(dir)`, which is exported: `version`/`loader`/`model`

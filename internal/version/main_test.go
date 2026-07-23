@@ -29,9 +29,28 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	testBrewPrefix = brewDir
+	// Same blanket protection for the two files this package writes: cache.json
+	// and the token. Per-test overrides nest inside it and restore back to it.
+	cfgDir, err := os.MkdirTemp("", "keeptui-version-config")
+	if err != nil {
+		panic(err)
+	}
+	restoreCfg := SetConfigDirForTesting(cfgDir)
 	code := m.Run()
+	restoreCfg()
 	restore()
 	_ = os.RemoveAll(dir)
 	_ = os.RemoveAll(brewDir)
+	_ = os.RemoveAll(cfgDir)
 	os.Exit(code)
+}
+
+// TestConfigDirIsolated fails if the package-wide isolation above is ever
+// removed: without it a test that writes the cache or saves a token rewrites the
+// real user config.
+func TestConfigDirIsolated(t *testing.T) {
+	cacheDir, tokenDir := ConfigDirOverrides()
+	if cacheDir == "" || tokenDir == "" {
+		t.Fatalf("cache/token dir overrides = %q/%q, want a temp dir — tests can reach the real config", cacheDir, tokenDir)
+	}
 }

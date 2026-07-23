@@ -90,23 +90,39 @@ func (m Model) updateNoteEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
+// parseTag turns the tags editor's raw input into the tool's single tag,
+// holding the len<=1 invariant loader.LoadMeta migrates legacy entries to. A
+// tool has one tag: everything after the first comma is dropped rather than
+// stored as a second tag or as one comma-carrying tag, so typing "cli, foo"
+// and loading a legacy ["cli","foo"] land on the same value ("cli") — the two
+// paths must not produce different tag shapes for the same intent. Spaces
+// inside a tag are fine ("dev tools"); empty input clears the tag (nil, so
+// meta.yaml's omitempty drops the key).
+func parseTag(raw string) []string {
+	first, _, _ := strings.Cut(raw, ",")
+	if first = strings.TrimSpace(first); first == "" {
+		return nil
+	}
+	return []string{first}
+}
+
 func (m Model) updateTagsEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
 		m.mode = modeNormal
 		m.tagsInput.Blur()
 		if mt, ok := m.selectedMeta(); ok {
-			raw := strings.TrimSpace(m.tagsInput.Value())
-			var tags []string
-			for _, t := range strings.Split(raw, ",") {
-				t = strings.TrimSpace(t)
-				if t != "" {
-					tags = append(tags, t)
-				}
-			}
-			mt.Tags = tags
+			mt.Tags = parseTag(m.tagsInput.Value())
 			m.meta = loader.UpsertMeta(m.meta, mt)
 			loader.SaveMeta(m.meta) //nolint:errcheck
+			// The tag is the tag view's grouping key, so committing one can
+			// move this tool to another section — under the cursor, which
+			// indexes the reordered projection. Remap by name and repaint, the
+			// same cursor-follows-the-tool rule the async merges use; the
+			// repaint also rebuilds the line maps, which would otherwise still
+			// describe the pre-edit list for the next click.
+			m.metaSelected = m.indexOfMeta(mt.Name)
+			m.setToolsContent()
 		}
 		m.briefViewport.SetContent(m.renderCard())
 		return m, nil

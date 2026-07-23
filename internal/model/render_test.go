@@ -2531,7 +2531,7 @@ func TestRenderCardInstalledLatest(t *testing.T) {
 		m.versions["gh"] = VersionInfo{Installed: "v2.0.0", Latest: "v2.0.0", InstalledKnown: true}
 		m.repoCards["gh"] = version.RepoCard{Latest: "v2.0.0"}
 		card := stripANSI(m.renderCard())
-		if !strings.Contains(card, "installed: v2.0.0") {
+		if !strings.Contains(card, "installed: \uf412 v2.0.0") {
 			t.Errorf("card missing installed line; got:\n%s", card)
 		}
 		if !strings.Contains(card, "latest:  v2.0.0") {
@@ -2550,7 +2550,7 @@ func TestRenderCardInstalledLatest(t *testing.T) {
 		if !strings.Contains(card, "latest:  v2.0.0 ↑ (2026-01-02)") {
 			t.Errorf("card missing highlighted latest with arrow; got:\n%s", card)
 		}
-		if !strings.Contains(card, "installed: v1.0.0") {
+		if !strings.Contains(card, "installed: \uf412 v1.0.0") {
 			t.Errorf("card missing installed line; got:\n%s", card)
 		}
 	})
@@ -2590,21 +2590,22 @@ func TestRenderCardInstalledLatest(t *testing.T) {
 	})
 
 	// A repo card can exist with no release at all (repo info + stars fetched,
-	// no tagged release): the latest: line and its tag icon are gated on
-	// card.Latest != "", so neither may appear.
-	t.Run("card without a release: no latest line, no tag icon", func(t *testing.T) {
+	// no tagged release): the latest: line is gated on card.Latest != "", so it
+	// may not appear — and with it gone the U+F412 glyph may show up exactly
+	// once, on the installed: line it now also marks.
+	t.Run("card without a release: no latest line, one version glyph", func(t *testing.T) {
 		m := newCardModel("cli/cli")
 		m.versions["gh"] = VersionInfo{Installed: "v1.0.0", InstalledKnown: true}
 		m.repoCards["gh"] = version.RepoCard{Stars: 42}
 		card := stripANSI(m.renderCard())
-		if !strings.Contains(card, "installed: v1.0.0") {
+		if !strings.Contains(card, "installed: \uf412 v1.0.0") {
 			t.Errorf("card missing installed line; got:\n%s", card)
 		}
 		if strings.Contains(card, "latest:") {
 			t.Errorf("card shows latest line with no release; got:\n%s", card)
 		}
-		if strings.Contains(card, "") {
-			t.Errorf("card shows the tag icon with no release; got:\n%s", card)
+		if n := strings.Count(card, "\uf412"); n != 1 {
+			t.Errorf("card shows the version glyph %d times, want 1 (installed only); got:\n%s", n, card)
 		}
 	})
 
@@ -2612,7 +2613,7 @@ func TestRenderCardInstalledLatest(t *testing.T) {
 		m := newCardModel("")
 		m.versions["gh"] = VersionInfo{Installed: "v1.0.0", InstalledKnown: true}
 		card := stripANSI(m.renderCard())
-		if !strings.Contains(card, "[info]") || !strings.Contains(card, "installed: v1.0.0") {
+		if !strings.Contains(card, "[info]") || !strings.Contains(card, "installed: \uf412 v1.0.0") {
 			t.Errorf("card missing [info]/installed for GitHub-less tool; got:\n%s", card)
 		}
 	})

@@ -34,7 +34,7 @@ graph TD
 | Package | Responsibility |
 |---|---|
 | `internal/launcher` | Decide how to run a tracked tool in a new terminal tab: pure `planFor(env, command, toolName)` → `Plan{Argv, Fallback, Terminal}`, detection chain tmux → iTerm2 → Terminal.app → kitty → WezTerm → fallback; env-only, no subprocesses |
-| `internal/loader` | Tracker persistence (`meta.yaml`), status lifecycle (`active → trying → inactive`, legacy values migrated on read), GitHub ref parsing (`NormalizeRepo`, `ParseToolRef`) |
+| `internal/loader` | Tracker persistence (`meta.yaml`), status lifecycle (`active → trying → inactive`, legacy values migrated on read), the one-tag-per-tool invariant (a legacy multi-tag list is truncated to its first entry on read), GitHub ref parsing (`NormalizeRepo`, `ParseToolRef`) |
 | `internal/logx` | Session error journal: dependency-free, errors only, one lazily created file per session. Package-level state — any package can log without threading a logger through |
 | `internal/model` | The entire Bubble Tea model: TUI state, key handling, rendering |
 | `internal/proc` | `DetachTTY` — run probes without a controlling terminal; `KillGroup` — process-group SIGKILL (plain `Kill` on Windows) |
@@ -54,7 +54,7 @@ The `model` package is split across files within a single package:
 | `model.go` | The `Model` struct, message types, `New`/`Init`/`Update`, selection and filtering helpers (`selectMeta`, `setFocus`, `searchMatches`, `filteredMeta`, `indexOfMeta`, `setHelpContent`) |
 | `mode.go` | The `inputMode` enum and a handler per input mode |
 | `commands.go` | All `tea.Cmd` constructors (fetch commands, update streaming) and re-fetch predicates |
-| `render.go` | `View`, panel/card/status-bar/gauge/overlay renderers, mouse handling |
+| `render.go` | `View`, panel/card/status-bar/gauge/overlay renderers, mouse handling. The two list/card builders return their line index alongside the text: `buildCard` → clickable lines, `buildToolRows` → the tool-index ↔ screen-line maps |
 | `readme.go` | `renderReadme` — markdown → ANSI via glamour, with a single-entry render cache |
 | `textutil.go` | Pure text helpers (`wrapText`, `stripANSI`, `colorizeHelp`, `parseHelpEntries`, …) |
 | `browser.go` | Opening URLs per `GOOS` |
@@ -127,14 +127,32 @@ structurally cannot fire inside another mode's input.
 Key invariants:
 
 - **A single list projection.** Row order (the "has update" group on top, then
-  `meta.yaml` order; during search — the name/tag filter) lives only in
-  `searchMatches()`. The renderer, the selection index and the mouse row mapping all
-  look through it — desync is impossible. `meta.yaml` on disk is never reordered.
-- **The cursor follows the tool, not the row.** An async version merge can regroup
-  the list; handlers capture the selected tool's name before the merge and remap the
-  index afterwards (`indexOfMeta`).
+  `meta.yaml` order; during search — the name/tag filter; with `space` pressed —
+  grouped by tag instead, untagged last, which replaces the update partition rather
+  than nesting inside it) lives only in `searchMatches()`. The renderer, the
+  selection index and the mouse row mapping all look through it — desync is
+  impossible. `meta.yaml` on disk is never reordered. Tag groups are keyed
+  case-insensitively, matching the search predicate.
+- **The selection is a tool index, never a screen row.** The tag view inserts
+  non-selectable `#tag` header rows, so the two units diverge — but only inside the
+  maps `buildToolRows()` returns beside the content (`toolLine`, `lineTool`; the
+  identity when grouping is off) and their consumers: `syncToolsViewport`, the mouse
+  row mapping, and the page/half-page keys, whose step is a count of viewport rows.
+  Navigation and every index-writing site keep working in tool indices. The maps are written by `setToolsContent()`, which is therefore the only
+  place allowed to repaint the list content.
+- **The cursor follows the tool, not the row.** An async version merge — or the
+  `space` view toggle — can regroup the list; those paths capture the selected tool's
+  name before the change and remap the index afterwards (`indexOfMeta`).
 - **Search is a transaction.** `/` remembers `searchPrevName`; `enter` commits the
   selection (focus moves to the card), `esc` rolls the cursor back to the previous tool.
+- **Card links are indexed, not parsed.** `buildCard()` returns the card text plus a
+  `line → URL` map recorded while writing (line heights vary with wrapping), so a
+  click on the `repo:` line or the changelog release URL opens the browser. `handleMouse`
+  rebuilds the map per click, which is why it can never describe stale content.
+- **A click's X picks the panel, `panelRow` decides whether it is on one at all.**
+  The outer margin, the borders and the status bars share the panels' columns; with a
+  scrolled viewport an unbounded row would map that chrome onto a list row or a card
+  link. Both panels translate through the same helper.
 - **`setHelpContent()` is the single recompute point for the help panel.** Entry
   navigation (`j`/`k`, `parseHelpEntries`, the `applySpotlight` spotlight) is
   recomputed only where the visible text actually changed; style-only repaints never
@@ -221,6 +239,7 @@ caller left it empty). Token: `GITHUB_TOKEN` from the environment always wins ov
 | Version + README cache (24h TTL each, separate timestamps) | `~/.config/keeptui/cache.json` |
 | GitHub token (`0600`) | `~/.config/keeptui/token` |
 | Session error log | `~/.config/keeptui/logs/keeptui-<timestamp>.log` |
+| Pre-migration tracker copy (written once, when a load dropped tags) | `~/.config/keeptui/meta.yaml.bak` |
 
 `SaveMeta` writes atomically (temp file + `os.Rename` in the same directory) — a
 crash mid-write can never truncate `meta.yaml`.
@@ -240,12 +259,22 @@ silently.
 
 ## Testing
 
-Tests never touch the real config: `loader` has a `testConfigDir` seam, `version` has
-`testCacheDir`/`testTokenDir`/`testAPIBase`/`testBrewPrefix`, `updater` has `testHomeDir`, `model` has
-`testReadmeStyle` (forces the glamour construction failure so the plain-text fallback
-is covered). The
-exception is `logx.SetDirForTesting(dir)`, which is exported: `version`/`loader`/`model`
-tests must redirect *its* output. The races are real (mutexes in `version`, `logx`),
+Tests never touch the real config, and the guarantee is per *test binary*: every
+package whose tests can reach a writable path installs the redirect in its `TestMain`,
+not in individual tests. Three exported seams share one shape —
+`Set…ForTesting(dir) (restore func())`, where `restore` reverts to the previous
+override, so a per-test override nests inside the package-wide one:
+`logx.SetDirForTesting` (session logs), `loader.SetConfigDirForTesting` (`meta.yaml`)
+and `version.SetConfigDirForTesting` (`cache.json`, `token`). They are exported
+because the package that can reach a file is usually not the one that owns it: a
+`model` test driving the tags or track handlers ends up in `loader.SaveMeta`, which
+rewrites the tracker wholesale. A `TestConfigDirIsolated` test in each of those
+packages fails if the isolation is ever dropped.
+
+Per-test setup still uses the internal seams: `testConfigDir`, `testCacheDir`,
+`testTokenDir`, `testAPIBase`, `testBrewPrefix`, `updater`'s `testHomeDir`, and
+`model`'s `testReadmeStyle` (forces the glamour construction failure so the
+plain-text fallback is covered). The races are real (mutexes in `version`, `logx`),
 so tests always run with `-race`:
 
 ```bash

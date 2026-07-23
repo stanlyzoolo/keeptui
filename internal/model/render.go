@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/charmbracelet/bubbles/viewport"
@@ -76,7 +77,7 @@ func (m Model) renderStatusBar() string {
 		return style.Render(keyHint("enter") + " save  " + keyHint("esc") + " cancel")
 	}
 	if m.mode == modeEditTags {
-		return style.Render(keyHint("enter") + " save  " + keyHint("esc") + " cancel  " + ui.MetaNoteStyle.Render("comma-separated"))
+		return style.Render(keyHint("enter") + " save  " + keyHint("esc") + " cancel  " + ui.MetaNoteStyle.Render("single tag"))
 	}
 	if m.mode == modeTrack {
 		return style.Render(fmt.Sprintf(
@@ -189,6 +190,11 @@ func (m Model) renderStatusBar() string {
 		keyHint("q") + " quit",
 		keyHint("?") + " keys",
 	})
+	// No [space] group cell here on purpose: this list already overflows 80
+	// columns (the trailing cells drop), so the hint would be invisible on the
+	// baseline terminal anyway, while on wider ones its 15 columns push the
+	// API-usage gauge from its full form down to the compact one. The [?]
+	// overlay documents the binding instead.
 }
 
 // rateGaugeMinGap is the minimum blank columns between the hint bar and the
@@ -501,6 +507,7 @@ func (m Model) renderHotkeys() string {
 		{"[1] Tools", []hotkeyRow{
 			{"j/k ↑/↓", "select tool"},
 			{"g/G", "first / last"},
+			{"space", "group by tag"},
 			{"enter", "run in tab"},
 			{"t", "track tool"},
 			{"u", "untrack tool"},
@@ -593,14 +600,95 @@ func (m Model) calcPanelWidths() (toolsW, briefW, helpW int) {
 	return
 }
 
+// renderLeftContent is the list text alone, for callers that only paint or
+// inspect it; setToolsContent goes through buildToolRows to store the line maps
+// that come with it.
 func (m Model) renderLeftContent() string {
+	content, _, _ := m.buildToolRows()
+	return content
+}
+
+// tagHeaderLine renders a tag-group header row ("#<tag>", "#untagged" for the
+// trailing group). One header must occupy exactly one screen line — every
+// consumer of the line maps assumes it — so the label is flattened (a tag from
+// a hand-edited meta.yaml can carry a newline, which would silently emit a
+// second row) and cut to the list width.
+func (m Model) tagHeaderLine(tag string) string {
+	label := "#untagged"
+	if tag != "" {
+		label = "#" + flattenLine(tag)
+	}
+	return ui.SectionLabelStyle.Render(truncateToWidth(label, max(m.toolsW-1, 1)))
+}
+
+// flattenLine collapses the line breaks (and the stray control characters that
+// travel with them) of a single-line label into spaces.
+func flattenLine(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r == '\t' || unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, s)
+}
+
+// truncateToWidth cuts s to at most w display cells. It measures with
+// lipgloss.Width — the same go-runewidth condition the renderer uses, where a
+// CJK glyph is two cells — because a rune count would let a wide-character tag
+// render past the panel edge and be hard-cut mid-glyph by the viewport. Cuts on
+// rune boundaries; a multi-rune grapheme cluster (a flag emoji) can still split,
+// which is cosmetic and needs a segmenter to do better.
+func truncateToWidth(s string, w int) string {
+	if lipgloss.Width(s) <= w {
+		return s
+	}
+	var b strings.Builder
+	used := 0
+	for _, r := range s {
+		rw := lipgloss.Width(string(r))
+		if used+rw > w {
+			break
+		}
+		b.WriteRune(r)
+		used += rw
+	}
+	return b.String()
+}
+
+// buildToolRows renders the tool list and the tool-index ↔ screen-line maps
+// that go with it: toolLine[i] is tool i's screen line, lineTool[l] the tool on
+// screen line l (-1 on a group header). Flat view has no headers, so both are
+// the identity there; the tag view is the only thing that makes them differ,
+// which is what keeps metaSelected a tool index everywhere else.
+func (m Model) buildToolRows() (string, []int, []int) {
 	var sb strings.Builder
 	matches := m.searchMatches()
 	query := m.searchQuery()
 	maxName := m.toolsW - 5
+	grouped := m.grouped()
+
+	toolLine := make([]int, len(matches))
+	lineTool := make([]int, 0, len(matches))
+	line := 0
+	prevTag := ""
 
 	for i, sm := range matches {
 		mt := sm.meta
+
+		// Tag view: open a section whenever the tag changes. searchMatches has
+		// already made each tag's rows contiguous, so one pass emits every
+		// header exactly once. The comparison uses the same case-folded key the
+		// grouping does, so `CLI` and `cli` stay one section — the header then
+		// shows the spelling of the group's first tool.
+		if grouped {
+			key := tagKey(mt)
+			if i == 0 || key != prevTag {
+				sb.WriteString(m.tagHeaderLine(tagOf(mt)) + "\n")
+				lineTool = append(lineTool, -1)
+				line++
+			}
+			prevTag = key
+		}
 		name := wrapText(mt.Name, maxName)
 		name = strings.TrimRight(name, "\n")
 		plainNameW := lipgloss.Width(name)
@@ -646,6 +734,9 @@ func (m Model) renderLeftContent() string {
 		default:
 			mark = " "
 		}
+		toolLine[i] = line
+		lineTool = append(lineTool, i)
+		line++
 		sb.WriteString(mark + " " + name + updateMark + "\n")
 	}
 
@@ -657,7 +748,7 @@ func (m Model) renderLeftContent() string {
 		}
 	}
 
-	return sb.String()
+	return sb.String(), toolLine, lineTool
 }
 
 // highlightNameMatch renders the first occurrence of the query inside the
@@ -682,22 +773,93 @@ func highlightNameMatch(name, query string) string {
 	return strings.Join(lines, "\n")
 }
 
-// syncToolsViewport adjusts YOffset so that metaSelected is visible.
+// selectedLine is the selected tool's screen line — metaSelected translated
+// through toolLine, which under grouping differs from it by the headers above.
+// A model whose list was never painted (hand-built, pre-first-render) has no
+// map and falls back to the identity the flat list has anyway.
+func (m Model) selectedLine() int {
+	if m.metaSelected >= 0 && m.metaSelected < len(m.toolLine) {
+		return m.toolLine[m.metaSelected]
+	}
+	return m.metaSelected
+}
+
+// toolAtLine maps a screen line of the list back to a tool index, or -1 for a
+// header row or a line past the end. Identity fallback as in selectedLine.
+func (m Model) toolAtLine(line int) int {
+	if len(m.lineTool) == 0 {
+		return line
+	}
+	if line < 0 || line >= len(m.lineTool) {
+		return -1
+	}
+	return m.lineTool[line]
+}
+
+// toolNearLine resolves a *screen line* to a selectable tool: the tool on that
+// line, else the first one found stepping in dir (+1 down, -1 up), clamped to
+// the ends. It is what lets the page and half-page keys move by a screen page:
+// their step is a count of viewport rows, but metaSelected counts tools, and
+// under grouping the headers in between make those two units differ — stepping
+// the row count as a tool count skips rows that were never displayed.
+func (m Model) toolNearLine(line, dir int) int {
+	n := len(m.filteredMeta())
+	if n == 0 {
+		return 0
+	}
+	if len(m.lineTool) == 0 {
+		// No map (hand-built model): lines are tool indices.
+		return min(max(line, 0), n-1)
+	}
+	if line < 0 {
+		return 0
+	}
+	if line >= len(m.lineTool) {
+		return n - 1
+	}
+	for i := line; i >= 0 && i < len(m.lineTool); i += dir {
+		if t := m.lineTool[i]; t >= 0 {
+			return t
+		}
+	}
+	// Only headers that way (the leading header when moving up): take the end.
+	if dir < 0 {
+		return 0
+	}
+	return n - 1
+}
+
+// syncToolsViewport adjusts YOffset so that the selected tool is visible. Both
+// branches work in screen lines (selectedLine, not metaSelected): mixing the
+// two units breaks scrolling as soon as a header sits above the selection.
 func (m *Model) syncToolsViewport() {
 	vpH := m.toolsViewport.Height
 	if vpH <= 0 {
 		return
 	}
-	if m.metaSelected < m.toolsViewport.YOffset {
-		m.toolsViewport.SetYOffset(m.metaSelected)
-	} else if m.metaSelected >= m.toolsViewport.YOffset+vpH {
-		m.toolsViewport.SetYOffset(m.metaSelected - vpH + 1)
+	line := m.selectedLine()
+	// Scrolling up reveals the group header directly above the selection too:
+	// clamping to the tool's own line alone would park the first group's header
+	// one row above the window, with no keyboard way to bring it back.
+	top := line
+	if i := line - 1; i >= 0 && i < len(m.lineTool) && m.lineTool[i] == -1 {
+		top = i
+	}
+	if top < m.toolsViewport.YOffset {
+		m.toolsViewport.SetYOffset(top)
+	} else if line >= m.toolsViewport.YOffset+vpH {
+		m.toolsViewport.SetYOffset(line - vpH + 1)
 	}
 }
 
-// setToolsContent refreshes viewport content and syncs scroll position.
+// setToolsContent refreshes viewport content, the line maps and the scroll
+// position. It is the ONLY place the list content may be repainted: the maps
+// describe the content it just wrote, so a SetContent(renderLeftContent())
+// anywhere else would leave them describing the previous list.
 func (m *Model) setToolsContent() {
-	m.toolsViewport.SetContent(m.renderLeftContent())
+	content, toolLine, lineTool := m.buildToolRows()
+	m.toolLine, m.lineTool = toolLine, lineTool
+	m.toolsViewport.SetContent(content)
 	m.syncToolsViewport()
 }
 
@@ -819,14 +981,29 @@ func scrollColumn(vp viewport.Model, focused bool) string {
 	return strings.Join(rows, "\n")
 }
 
+// renderCard is the card text alone — the shape ~30 SetContent call sites want.
+// The clickable-link index is built by buildCard and only handleMouse needs it.
 func (m Model) renderCard() string {
+	s, _ := m.buildCard()
+	return s
+}
+
+// buildCard renders the brief panel and, alongside it, the index of its
+// clickable lines: 0-based content-line number → URL. Line heights vary
+// (dividers are 3 lines, about/note/changelog bodies wrap), so the indices are
+// recorded while writing — strings.Count(sb, "\n") immediately before the line
+// is the line's own index — rather than reconstructed by parsing the result.
+// bubbles/viewport is line-based (no soft wrap), so a content-line index is a
+// viewport line index, which is what the mouse handler maps a click row to.
+func (m Model) buildCard() (string, map[int]string) {
+	links := make(map[int]string)
 	if len(m.meta) == 0 {
-		return ui.DescStyle.Render("no tools tracked.\npress t to add one.")
+		return ui.DescStyle.Render("no tools tracked.\npress t to add one."), links
 	}
 
 	t, ok := m.selectedTool()
 	if !ok {
-		return ui.DescStyle.Render("select a tool from the left panel.")
+		return ui.DescStyle.Render("select a tool from the left panel."), links
 	}
 
 	inner := max(m.briefW-2, 1)
@@ -876,6 +1053,8 @@ func (m Model) renderCard() string {
 	if hasInfo {
 		sb.WriteString(m.sectionDivider("info"))
 		if t.GitHub != "" {
+			// Clickable: resolves exactly like the [o] key does.
+			links[strings.Count(sb.String(), "\n")] = "https://" + t.GitHub
 			sb.WriteString(ui.GithubStyle.Render("repo: "+t.GitHub) + "\n")
 			if !hasCard && m.repoStatus[t.Name] == "rate-limited" {
 				sb.WriteString(ui.WarnStyle.Render("rate limited — press [L]") + "\n")
@@ -886,9 +1065,15 @@ func (m Model) renderCard() string {
 		}
 		// "not found" only once the local probe reported back — before that
 		// an empty Installed just means the detection is still in flight.
+		// A resolved version carries the same U+F412 (nf-oct-tag) glyph the
+		// latest: line uses — here it marks a version, not specifically a
+		// release tag; the two version lines read as a pair. The states with no
+		// version to tag (not found / detecting) stay bare. Written as a \u
+		// escape on purpose — the raw glyph is invisible in most editors and
+		// diffs and gets silently lost.
 		switch {
 		case installed != "":
-			sb.WriteString(ui.InfoStyle.Render("installed: "+installed) + "\n")
+			sb.WriteString(ui.InfoStyle.Render("installed: \uf412 "+installed) + "\n")
 		case vinfo.InstalledKnown:
 			sb.WriteString(ui.InfoStyle.Render("installed: ") +
 				ui.DangerStyle.Render("✕") +
@@ -946,7 +1131,7 @@ func (m Model) renderCard() string {
 		if m.mode == modeEditTags {
 			sb.WriteString(ui.MetaDetailLabelStyle.Render("tags:") + " " + m.tagsInput.View() + "\n")
 		} else {
-			tagsText := strings.Join(mt.Tags, ", ")
+			tagsText := tagOf(mt)
 			if tagsText == "" {
 				tagsText = "— (press t to edit)"
 			}
@@ -956,20 +1141,32 @@ func (m Model) renderCard() string {
 	}
 
 	// [changelog] section (only when there is content to show).
-	var changelogContent string
+	var changelogContent, changelogURL string
 	if m.changelogLoadingFor == t.Name {
 		changelogContent = ui.DescStyle.Render("loading changelog...") + "\n"
 	} else if data, ok := m.changelogData[t.Name]; ok {
 		changelogContent = m.renderChangelogBlock(data)
+		// The block leads with the release URL only on a successful fetch with
+		// one — that is the line to register, and it is derived from the same
+		// data the block rendered from, so the two cannot drift.
+		if data.err == nil {
+			changelogURL = data.htmlUrl
+		}
 	} else if t.GitHub != "" {
 		changelogContent = ui.DescStyle.Render("loading changelog...") + "\n"
 	}
 	if changelogContent != "" {
 		sb.WriteString(m.sectionDivider("changelog"))
+		if changelogURL != "" {
+			// Registered after the divider, before the block: the URL is the
+			// block's first line. Note this is the release's own page, not the
+			// [c] key's <repo>/releases index.
+			links[strings.Count(sb.String(), "\n")] = changelogURL
+		}
 		sb.WriteString(changelogContent)
 	}
 
-	return sb.String()
+	return sb.String(), links
 }
 
 // renderRepoStatus highlights the maintenance state of the upstream repo: a
@@ -1017,6 +1214,21 @@ func (m Model) renderChangelogBlock(msg changelogMsg) string {
 	return sb.String()
 }
 
+// panelRow converts a click's screen Y into a 0-based row inside a panel's
+// viewport, or -1 when the click is not on the viewport at all. Row 0 is the
+// outer top margin, row 1 the panel's top border, row 2 the viewport's first
+// row; anything from the viewport's bottom edge down (the panel's lower border,
+// the status and hints bars) is outside too. Both panels share it so a stray Y
+// can never be mapped onto content — with an offset viewport, a click on the
+// chrome would otherwise resolve to a real list row or card link.
+func panelRow(y, vpHeight int) int {
+	row := y - 2
+	if row < 0 || row >= vpHeight {
+		return -1
+	}
+	return row
+}
+
 func (m Model) hasUpdate(toolName string) bool {
 	vi, ok := m.versions[toolName]
 	return ok && version.IsNewer(vi.Installed, vi.Latest)
@@ -1037,6 +1249,12 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	toolsPanelEnd := m.toolsW + 2
 	briefPanelEnd := toolsPanelEnd + m.briefW + 2
 
+	// X alone does not mean "inside a panel": the outer Margin(1,0) row, the
+	// panel borders and the status/hints bars share the panels' columns. Rows
+	// outside the viewport must not be mapped onto content — a stray Y there
+	// once resolved to a card link and opened the browser from a click on empty
+	// chrome.
+
 	// Detect which panel the click is in
 	var cmd tea.Cmd
 	if msg.X < toolsPanelEnd {
@@ -1044,8 +1262,12 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress && clickable {
 			// Any click in the panel focuses it, matching brief/help.
 			m.setFocus(focusTools)
-			// Row 0 = top margin, row 1 = panel border, row 2 = first list row.
-			toolIdx := msg.Y - 2 + m.toolsViewport.YOffset
+			// The row is a screen line: under grouping it maps back through
+			// lineTool, and a click on a header row selects nothing.
+			toolIdx := -1
+			if row := panelRow(msg.Y, m.toolsViewport.Height); row >= 0 {
+				toolIdx = m.toolAtLine(row + m.toolsViewport.YOffset)
+			}
 			filtered := m.filteredMeta()
 			if toolIdx >= 0 && toolIdx < len(filtered) && m.metaSelected != toolIdx {
 				// Mirror the keyboard j/k path (shared selectMeta helper,
@@ -1063,6 +1285,17 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		case tea.MouseButtonLeft:
 			if msg.Action == tea.MouseActionPress && clickable {
 				m.setFocus(focusBrief)
+				// Clickable links: the repo line and the changelog release URL
+				// open in the browser, like the [o] and [c] keys. The index is
+				// recomputed here rather than cached in the model — it is one
+				// card render per click and can never go stale against the
+				// content actually on screen.
+				if row := panelRow(msg.Y, m.briefViewport.Height); row >= 0 {
+					line := row + m.briefViewport.YOffset
+					if _, links := m.buildCard(); links[line] != "" {
+						return m, openURLCmd(links[line])
+					}
+				}
 			}
 		}
 	} else {

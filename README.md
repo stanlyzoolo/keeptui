@@ -70,7 +70,7 @@ time for the hotkeys overlay — every keybinding, grouped by panel.
 | `/` | search by name and tags: the matched substring is highlighted, tag-only matches show the tag dimmed, the status bar shows an `N/M` counter; `↑` / `↓` move through matches, `enter` opens the card, `esc` cancels and restores the previous selection |
 | `L` | GitHub API status — limits and token (see below) |
 | `?` | hotkeys overlay — every keybinding, grouped by panel |
-| `esc`, `q`, `ctrl+c` | quit |
+| `esc`, `q`, `ctrl+c` | quit (`q` / `ctrl+c` quit from any panel; `esc` quits only here — in `[2]` / `[3]` it moves focus back instead) |
 
 When you enter a GitHub URL (`https://github.com/owner/repo`, with `.git`, without a
 scheme, or in SSH form `git@github.com:owner/repo.git`), `keeptui` puts the short tool
@@ -170,7 +170,7 @@ tool with a `github` field costs 3 requests on startup, plus one more when you o
 its README in panel `[3]`; so a cold start with a large list and no token can hit the
 limit — cards stay empty until the window resets.
 
-Quota usage is visible in the right corner of the status bar (`▮▮▮░░░ 12/60`). The
+Quota usage is visible in the right corner of the status bar (`▮▮░░░░░░░░░░ 12/60`). The
 `L` key works from any panel (as long as no other input mode is active) and opens the
 API status overlay: token source, quota usage with an icon (`⚠` — low, `✕` —
 exhausted) and the reset time. Right in the overlay:
@@ -214,6 +214,9 @@ subprocess sandbox — is described in [ARCHITECTURE.md](ARCHITECTURE.md).
 - [Bubbles](https://github.com/charmbracelet/bubbles) — text input, viewport, spinner
 - [Lip Gloss](https://github.com/charmbracelet/lipgloss) — styling
 - [Glamour](https://github.com/charmbracelet/glamour) — markdown rendering for the README panel
+- [x/ansi](https://github.com/charmbracelet/x) — stripping escape sequences from captured tool output
+- [termenv](https://github.com/muesli/termenv) — terminal color-profile detection
+- [go-runewidth](https://github.com/mattn/go-runewidth) — glyph width measurement
 - [golang.org/x/mod/semver](https://pkg.go.dev/golang.org/x/mod/semver) — version comparison
 - [gopkg.in/yaml.v3](https://pkg.go.dev/gopkg.in/yaml.v3) — reading/writing `meta.yaml`
 

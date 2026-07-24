@@ -119,23 +119,46 @@ func TestNoteEditEscDiscards(t *testing.T) {
 	}
 }
 
-// TestTagsEditCommit verifies enter in modeEditTags parses the comma-separated
-// input, dropping empty entries.
+// TestTagsEditCommit verifies enter in modeEditTags stores exactly one tag:
+// everything past the first comma is dropped, so the editor lands on the same
+// value loader.LoadMeta's Tags[:1] migration produces for the equivalent
+// legacy list — the two paths must not disagree about the tag's shape.
 func TestTagsEditCommit(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	m := newTestModel(focusBrief)
 	m.mode = modeEditTags
-	m.tagsInput.SetValue("cli, , scm ,")
+	m.tagsInput.SetValue("cli, scm ,")
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	nm := updated.(Model)
 	if nm.mode != modeNormal {
 		t.Errorf("mode = %d, want modeNormal", nm.mode)
 	}
-	want := []string{"cli", "scm"}
-	got := nm.meta[0].Tags
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Errorf("tags = %v, want %v", got, want)
+	if got := nm.meta[0].Tags; len(got) != 1 || got[0] != "cli" {
+		t.Errorf("tags = %v, want [cli]", got)
+	}
+}
+
+// TestParseTag pins the single-tag editor semantics: the first comma-delimited
+// token wins, spaces inside a tag survive, and blank input clears the tag.
+func TestParseTag(t *testing.T) {
+	tests := []struct {
+		in   string
+		want []string
+	}{
+		{"cli", []string{"cli"}},
+		{"  cli  ", []string{"cli"}},
+		{"cli, foo", []string{"cli"}},        // first token wins, as Tags[:1] does
+		{"dev tools", []string{"dev tools"}}, // a space is part of the tag
+		{", foo", nil},                       // empty first token clears it
+		{"", nil},
+		{"   ", nil},
+	}
+	for _, tt := range tests {
+		got := parseTag(tt.in)
+		if len(got) != len(tt.want) || (len(got) == 1 && got[0] != tt.want[0]) {
+			t.Errorf("parseTag(%q) = %v, want %v", tt.in, got, tt.want)
+		}
 	}
 }
 
@@ -786,9 +809,11 @@ func TestSearchSingleMatchWrapAround(t *testing.T) {
 // with the (case-insensitively) matching tag, and filteredMeta projects the
 // same filtered list.
 func TestSearchMatchesByTag(t *testing.T) {
+	// One tag per tool (the len<=1 invariant LoadMeta migrates to), so the
+	// tag-only match has to come from that single tag.
 	m := New([]loader.ToolMeta{
-		{Name: "fzf", Tags: []string{"fuzzy", "finder"}},
-		{Name: "lazygit", Tags: []string{"git", "TUI"}},
+		{Name: "fzf", Tags: []string{"fuzzy"}},
+		{Name: "lazygit", Tags: []string{"TUI"}},
 		{Name: "ripgrep"},
 	})
 	updated, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})

@@ -1,8 +1,12 @@
 package main
 
 import (
+	"os"
 	"strings"
 	"testing"
+
+	"github.com/stanlyzoolo/keeptui/internal/loader"
+	"github.com/stanlyzoolo/keeptui/internal/logx"
 )
 
 func TestHandleCLI(t *testing.T) {
@@ -76,5 +80,37 @@ func TestResolveVersion(t *testing.T) {
 		if got := resolveVersion(tt.ldflag, tt.mod); got != tt.want {
 			t.Errorf("resolveVersion(%q, %q) = %q, want %q", tt.ldflag, tt.mod, got, tt.want)
 		}
+	}
+}
+
+// TestMain isolates the files this package can reach for the whole test binary:
+// main calls loader.LoadMeta, and a test here must never touch the developer's
+// real tracker. Mirrors the TestMain in internal/loader, internal/model and
+// internal/version. (The version package's cache/token are reached only through
+// the model, which isolates them in its own TestMain; importing it here would
+// collide with main.go's `version` ldflag variable.)
+func TestMain(m *testing.M) {
+	dir, err := os.MkdirTemp("", "keeptui-main-logs")
+	if err != nil {
+		panic(err)
+	}
+	restoreLog := logx.SetDirForTesting(dir)
+	cfgDir, err := os.MkdirTemp("", "keeptui-main-config")
+	if err != nil {
+		panic(err)
+	}
+	restoreMeta := loader.SetConfigDirForTesting(cfgDir)
+	code := m.Run()
+	restoreMeta()
+	restoreLog()
+	_ = os.RemoveAll(dir)
+	_ = os.RemoveAll(cfgDir)
+	os.Exit(code)
+}
+
+// TestConfigDirIsolated fails if the isolation above is ever removed.
+func TestConfigDirIsolated(t *testing.T) {
+	if loader.ConfigDirOverride() == "" {
+		t.Error("loader config override is empty — tests can write the real meta.yaml")
 	}
 }

@@ -8,6 +8,19 @@ subcommands; the only flags are `--version` and `--help`.
 
 ![keeptui — three-panel overview: tracker list, tool card, docs viewer (README / --help / man), live search and the hotkeys overlay](demo/hero.gif)
 
+## Contents
+
+- [Features](#features)
+- [Installation](#installation)
+- [Usage](#usage)
+- [Updating tools](#updating-tools)
+- [GitHub API and token](#github-api-and-token)
+- [Data storage](#data-storage)
+- [Architecture](#architecture)
+- [Stack](#stack)
+- [Contributing](#contributing)
+- [License](#license)
+
 ## Features
 
 - **Three panels**: tools (the tracker list), brief (the tool card), docs (README / `--help` / `man`)
@@ -17,10 +30,10 @@ subcommands; the only flags are `--version` and `--help`.
 - **In-TUI updates** — `u` on the card detects the package manager (brew / go / cargo / pipx / npm) or uses `update_cmd` from `meta.yaml`, shows the command for confirmation and streams its output into panel `[3]` in real time
 - **Run tools** — `enter` on a tool opens a one-line command prompt (it remembers the last command per tool for the session) and launches it in a new terminal tab (tmux / iTerm2 / kitty / WezTerm / Terminal.app); anywhere else the tool runs in the current window and `keeptui` resumes when it exits
 - **Help navigation** — in `--help` / `man` mode `j` / `k` walk through flags and subcommands with the current entry highlighted; `/` searches the text
-- **List search** — `/` filters by name and tags with match highlighting and an `N/M` counter
-- **Tracker** — add by GitHub URL, statuses, tags and notes, all inside the TUI
+- **List search** — `/` filters by name and tag with match highlighting and an `N/M` counter
+- **Tracker** — add by GitHub URL, statuses, one tag per tool and notes, all inside the TUI; `space` regroups the list under `#tag` headers
 - **GitHub API gauge** — an API quota usage indicator in the status bar, token management via `L`
-- **Mouse** — scrolling and clicking on panels
+- **Mouse** — scrolling, clicking on panels, and clicking the repository / release links on the card
 
 ## Installation
 
@@ -63,11 +76,12 @@ time for the hotkeys overlay — every keybinding, grouped by panel.
 | `PgUp / PgDn`, `ctrl+f / ctrl+b` | page the selection up / down |
 | `ctrl+d / ctrl+u` | move the selection half a page down / up |
 | `g / G` | jump to the first / last tool |
+| `space` | group the list by tag on / off — tools are gathered under `#tag` headers (untagged ones last); the selected tool stays selected across the toggle. With nothing tagged yet there is nothing to group, and the status bar says so |
 | `t` | track — add a tool by GitHub URL or short name |
 | `u` | untrack — remove (with confirmation) |
 | `r` | rename — fix the binary name when it differs from the repo name (e.g. `claude-code` → `claude`) |
 | `enter` | run the tool: a one-line prompt opens, prefilled with the tool name (or the last command run for it this session — handy for appending arguments); the command opens in a new tab named after the tool where the terminal is scriptable (tmux, iTerm2, kitty; Terminal.app opens a window, WezTerm an unnamed tab), anywhere else it runs in the current window — `keeptui` suspends and resumes when the tool exits. If opening the tab fails, the command automatically runs in the current window instead |
-| `/` | search by name and tags: the matched substring is highlighted, tag-only matches show the tag dimmed, the status bar shows an `N/M` counter; `↑` / `↓` move through matches, `enter` opens the card, `esc` cancels and restores the previous selection |
+| `/` | search by name and tag: the matched substring is highlighted, tag-only matches show the tag dimmed, the status bar shows an `N/M` counter; `↑` / `↓` move through matches, `enter` opens the card, `esc` cancels and restores the previous selection |
 | `L` | GitHub API status — limits and token (see below) |
 | `?` | hotkeys overlay — every keybinding, grouped by panel |
 | `esc`, `q`, `ctrl+c` | quit (`q` / `ctrl+c` quit from any panel; `esc` quits only here — in `[2]` / `[3]` it moves focus back instead) |
@@ -81,6 +95,14 @@ The selected row carries the `⏺` marker, which stays visible (dimmed) while an
 panel is focused. Tools with an available update are marked `↑` and gathered at the
 top of the list; the order in `meta.yaml` is never changed.
 
+`space` switches the list to the tag view: tools are gathered under `#tag` headers
+(untagged ones under `#untagged`, last), in the order the tags first appear in
+`meta.yaml`; tags differing only in letter case are one group, exactly as the search
+treats them. In this view tools are grouped by tag rather than by pending update — the
+`↑` marker still shows per row. Header rows are not selectable: `j` / `k` step over
+them and clicking one does nothing. `space` again returns to the flat view; the
+selected tool stays selected either way. Both views are display-only.
+
 ### Panel `[2] Brief`
 
 | Key | Action |
@@ -91,14 +113,18 @@ top of the list; the order in `meta.yaml` is never changed.
 | `r` | force-refresh the tool's data (card, changelog, README, installed version), bypassing the cache |
 | `s` | cycle the status (`active → trying → inactive → active`) |
 | `e` | edit the note |
-| `t` | edit the tags |
+| `t` | edit the tag — one tag per tool; text after the first comma is dropped, an empty value clears it |
 | `j / k`, `↑ / ↓` | scroll the card (3 lines) |
 | `ctrl+d / ctrl+u`, `ctrl+f / ctrl+b`, `PgUp / PgDn`, `space`, `g / G` | half-page / full-page scroll, top / bottom |
 | `?` | hotkeys overlay |
 
 Statuses: `active` (●) · `trying` (○) · `inactive` (✕) — shown on the card.
 Legacy `forgotten` / `archived` values from `meta.yaml` are automatically read as
-`inactive`.
+`inactive`; a legacy list of several tags is read as its first tag.
+
+The card's links are clickable: a click on the `repo:` line opens the repository in the
+browser, a click on the release URL under `[changelog]` opens that release page — the
+same thing `o` and `c` do from the keyboard.
 
 ### Panel `[3] Readme / Help / Man`
 
@@ -188,7 +214,10 @@ shows the `rate limited — press [L]` hint.
 ## Data storage
 
 The tool list lives in `~/.config/keeptui/meta.yaml` — one entry per tool (`name`,
-`status`, `added`, optionally `tags`, `note`, `github`, `update_cmd`). The file is
+`status`, `added`, optionally `tags`, `note`, `github`, `update_cmd`). `tags` stays a
+list in the file format, but a tool has **one** tag: a longer list is read as its first
+entry and rewritten as a single-item list on the next save — the file as it was before
+that migration is kept as `meta.yaml.bak`, so the dropped tags stay recoverable. The file is
 fully managed from the TUI; editing it by hand is not required but safe — writes are
 atomic.
 
@@ -198,6 +227,7 @@ atomic.
 | Version and README cache (24h TTL) | `~/.config/keeptui/cache.json` |
 | GitHub token (`0600`) | `~/.config/keeptui/token` |
 | Session error log | `~/.config/keeptui/logs/keeptui-<timestamp>.log` |
+| Copy of the tracker before the one-tag migration | `~/.config/keeptui/meta.yaml.bak` |
 
 The log is created lazily — only on the first error. A session with no errors leaves
 no file at all, so the presence of a file is itself the signal. The 20 most recent

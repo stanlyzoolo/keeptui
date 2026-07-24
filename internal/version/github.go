@@ -280,6 +280,27 @@ var testCacheDir string
 // testAPIBase overrides the GitHub API base URL in tests.
 var testAPIBase string
 
+// SetConfigDirForTesting points both files this package writes — cache.json and
+// the token (testTokenDir, token.go) — at dir, and returns a restore func.
+//
+// Exported like loader.SetConfigDirForTesting and for the same reason: a model
+// test that drives the [L] overlay reaches SetToken, which rewrites the user's
+// real GitHub token file, and any fetch path rewrites the real cache. Test
+// binaries install this once in TestMain rather than relying on every test to
+// remember. restore reverts to the previous overrides, so a nested per-test
+// override cannot un-isolate the rest of the run.
+func SetConfigDirForTesting(dir string) (restore func()) {
+	prevCache, prevToken := testCacheDir, testTokenDir
+	testCacheDir, testTokenDir = dir, dir
+	return func() { testCacheDir, testTokenDir = prevCache, prevToken }
+}
+
+// ConfigDirOverrides reports the active cache/token overrides ("" in a normal
+// run), so a test can assert its own isolation.
+func ConfigDirOverrides() (cacheDir, tokenDir string) {
+	return testCacheDir, testTokenDir
+}
+
 type CacheEntry struct {
 	Latest      string         `json:"latest"`
 	CheckedAt   time.Time      `json:"checked_at"`

@@ -57,7 +57,7 @@ func TestSaveMetaLoadMetaRoundTrip(t *testing.T) {
 			Name:   "ripgrep",
 			Status: StatusActive,
 			Added:  "2026-01-15",
-			Tags:   []string{"search", "cli"},
+			Tags:   []string{"search"},
 			Note:   "fast grep",
 			GitHub: "github.com/BurntSushi/ripgrep",
 		},
@@ -244,6 +244,103 @@ func TestLoadMetaMigratesRetiredStatuses(t *testing.T) {
 	}
 }
 
+// TestLoadMetaMigratesMultiTag: one tag per tool. A legacy list keeps its first
+// entry — the same "first wins" rule the tags editor applies to comma-separated
+// input — while a single tag and an absent one pass through untouched.
+func TestLoadMetaMigratesMultiTag(t *testing.T) {
+	dir := useTempConfigDir(t)
+
+	yaml := `- name: many
+  tags: [search, cli, fast]
+- name: one
+  tags: [cli]
+- name: none
+`
+	path := filepath.Join(dir, "keeptui", "meta.yaml")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(yaml), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := LoadMeta()
+	if err != nil {
+		t.Fatalf("LoadMeta: %v", err)
+	}
+	want := map[string][]string{
+		"many": {"search"},
+		"one":  {"cli"},
+		"none": nil,
+	}
+	for _, m := range got {
+		w := want[m.Name]
+		if len(m.Tags) != len(w) || (len(w) == 1 && m.Tags[0] != w[0]) {
+			t.Errorf("%s: tags = %v, want %v", m.Name, m.Tags, w)
+		}
+	}
+}
+
+// TestLoadMetaMultiTagMigrationRoundTrip: the migration is in-memory only — the
+// file keeps the old list until the next SaveMeta rewrites it, as with statuses.
+func TestLoadMetaMultiTagMigrationRoundTrip(t *testing.T) {
+	dir := useTempConfigDir(t)
+
+	path := filepath.Join(dir, "keeptui", "meta.yaml")
+	if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("- name: a\n  tags: [cli, extra]\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	meta, err := LoadMeta()
+	if err != nil {
+		t.Fatalf("LoadMeta: %v", err)
+	}
+	if len(meta[0].Tags) != 1 || meta[0].Tags[0] != "cli" {
+		t.Fatalf("in-memory tags = %v, want [cli]", meta[0].Tags)
+	}
+	// The claim under test: LoadMeta itself must not touch the file. Without
+	// this read the test passes just as green against a LoadMeta that persisted
+	// the migration eagerly.
+	untouched, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(untouched), "extra") {
+		t.Errorf("meta.yaml after LoadMeta = %q, want the dropped tag still on disk", untouched)
+	}
+	// And the pre-migration file is stashed, so the dropped tag stays
+	// recoverable once SaveMeta makes the truncation permanent.
+	bak, err := os.ReadFile(path + ".bak")
+	if err != nil {
+		t.Fatalf("read backup: %v", err)
+	}
+	if !strings.Contains(string(bak), "extra") {
+		t.Errorf("backup = %q, want the pre-migration content", bak)
+	}
+
+	if err := SaveMeta(meta); err != nil {
+		t.Fatalf("SaveMeta: %v", err)
+	}
+	onDisk, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(onDisk), "extra") {
+		t.Errorf("on-disk yaml after save = %q, want the dropped tag gone", onDisk)
+	}
+
+	reloaded, err := LoadMeta()
+	if err != nil {
+		t.Fatalf("reload: %v", err)
+	}
+	if len(reloaded[0].Tags) != 1 || reloaded[0].Tags[0] != "cli" {
+		t.Errorf("reloaded tags = %v, want [cli]", reloaded[0].Tags)
+	}
+}
+
 func TestLoadMetaMigrationRoundTrip(t *testing.T) {
 	dir := useTempConfigDir(t)
 
@@ -272,6 +369,10 @@ func TestLoadMetaMigrationRoundTrip(t *testing.T) {
 	}
 	if !strings.Contains(string(onDisk), "inactive") || strings.Contains(string(onDisk), "forgotten") {
 		t.Errorf("on-disk yaml after save = %q, want inactive persisted and forgotten gone", onDisk)
+	}
+	// No tag was dropped here, so the migration must not leave a backup behind.
+	if _, err := os.Stat(path + ".bak"); !os.IsNotExist(err) {
+		t.Errorf("status-only migration wrote a backup file (err=%v)", err)
 	}
 
 	reloaded, err := LoadMeta()

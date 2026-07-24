@@ -217,8 +217,24 @@ type Model struct {
 	updateLog    []string
 	updateLogFor string
 
-	meta         []loader.ToolMeta
+	meta []loader.ToolMeta
+	// metaSelected is an index into filteredMeta() — a tool index, never a
+	// screen row. Grouping only reorders that projection and inserts
+	// non-selectable header lines, so navigation and every index-writing site
+	// stay unit-consistent; the two maps below are the only tool-index ↔
+	// screen-line translation, and they are the identity when grouping is off.
 	metaSelected int
+
+	// groupByTag is the [1] list view toggle (space in focusTools): off (the
+	// default) is the flat update-grouped list, on partitions the tools under
+	// #tag headers. Display-only — meta.yaml is never reordered.
+	groupByTag bool
+	// toolLine maps a tool index to its screen line, lineTool a screen line
+	// back to its tool index (-1 on a header row). Both are rebuilt by
+	// setToolsContent, the single point that repaints the list — a repaint
+	// that bypasses it would leave them describing the previous content.
+	toolLine []int
+	lineTool []int
 
 	helpMode       int
 	helpLoadingFor string
@@ -282,7 +298,7 @@ func New(meta []loader.ToolMeta) Model {
 	ni.CharLimit = 256
 
 	tgi := textinput.New()
-	tgi.Placeholder = "tag1, tag2..."
+	tgi.Placeholder = "tag..."
 	tgi.CharLimit = 256
 
 	hsi := textinput.New()
@@ -740,8 +756,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.setHelpContent()
 			}
 		}
-		m.toolsViewport.SetContent(m.renderLeftContent())
-		m.syncToolsViewport()
+		// Through setToolsContent, not a bare SetContent: a resize repaints the
+		// list, so the line maps must be rebuilt with it or they would describe
+		// the pre-resize content (wrong scroll, out-of-range click mapping).
+		m.setToolsContent()
 		m.briefViewport.SetContent(m.renderCard())
 		return m, nil
 
@@ -986,8 +1004,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "pgup", "ctrl+b":
 			if m.focus == focusTools {
+				// A page is a page of *screen lines*: under grouping the
+				// headers between rows make a line step and a tool step
+				// different sizes (see toolNearLine).
 				step := max(m.toolsViewport.Height, 1)
-				return m, m.selectMeta(max(m.metaSelected-step, 0))
+				return m, m.selectMeta(m.toolNearLine(m.selectedLine()-step, -1))
 			}
 			if m.focus == focusBrief {
 				m.briefViewport.PageUp()
@@ -998,13 +1019,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "pgdown", "ctrl+f", " ":
 			if m.focus == focusTools {
-				// space has no tools binding — kept out so it can't collide with a
-				// future list action; ctrl+f already pages the list.
+				// space is the list-view toggle here, not a page-down —
+				// ctrl+f/PgDn already page the list.
 				if msg.String() == " " {
+					m.toggleGroupByTag()
 					return m, nil
 				}
 				step := max(m.toolsViewport.Height, 1)
-				return m, m.selectMeta(min(m.metaSelected+step, max(len(m.filteredMeta())-1, 0)))
+				return m, m.selectMeta(m.toolNearLine(m.selectedLine()+step, 1))
 			}
 			if m.focus == focusBrief {
 				m.briefViewport.PageDown()
@@ -1016,7 +1038,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+d":
 			if m.focus == focusTools {
 				step := max(m.toolsViewport.Height/2, 1)
-				return m, m.selectMeta(min(m.metaSelected+step, max(len(m.filteredMeta())-1, 0)))
+				return m, m.selectMeta(m.toolNearLine(m.selectedLine()+step, 1))
 			}
 			if m.focus == focusBrief {
 				m.briefViewport.HalfPageDown()
@@ -1028,7 +1050,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+u":
 			if m.focus == focusTools {
 				step := max(m.toolsViewport.Height/2, 1)
-				return m, m.selectMeta(max(m.metaSelected-step, 0))
+				return m, m.selectMeta(m.toolNearLine(m.selectedLine()-step, -1))
 			}
 			if m.focus == focusBrief {
 				m.briefViewport.HalfPageUp()
@@ -1133,7 +1155,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.focus == focusBrief {
 				if mt, ok := m.selectedMeta(); ok {
 					m.mode = modeEditTags
-					m.tagsInput.SetValue(strings.Join(mt.Tags, ", "))
+					m.tagsInput.SetValue(tagOf(mt))
 					m.tagsInput.Focus()
 					m.briefViewport.SetContent(m.renderCard())
 					return m, textinput.Blink
@@ -1326,6 +1348,12 @@ func (m Model) searchMatches() []searchMatch {
 		out = append(out, searchMatch{meta: mt, byTagOnly: !nameHit, tag: tag})
 	}
 
+	// Tag view: the two orderings are exclusive — grouping wins, so the tag
+	// sections stay contiguous (the ` ↑` marker still renders per row).
+	if m.grouped() {
+		return groupMatchesByTag(out)
+	}
+
 	// Stable two-pass partition: updatable rows first, the rest after, each
 	// group keeping its relative (meta.yaml) order. The predicate is exactly
 	// hasUpdate — the same one that renders the ` ↑` suffix, so the group and
@@ -1342,6 +1370,111 @@ func (m Model) searchMatches() []searchMatch {
 		}
 	}
 	return grouped
+}
+
+// toggleGroupByTag flips the [1] list between the flat update-grouped view and
+// the tag-grouped one. The toggle reorders filteredMeta(), and metaSelected is
+// an index into that projection — so it would silently point at a different
+// tool. Capture the selected tool by name first, remap after: the same
+// cursor-follows-the-tool rule the installedMsg/remoteMsg handlers use.
+// Deliberately not routed through selectMeta — a pure view toggle changes no
+// selection and must fire no auto-fetch.
+func (m *Model) toggleGroupByTag() {
+	// Turning it on with nothing tagged would produce a lone "#untagged" header
+	// over the unchanged list — a keypress that reads as broken. Say why
+	// instead. Turning it *off* is never refused, so a tracker whose last tag
+	// was just removed cannot get stuck in the tag view.
+	if !m.groupByTag && !m.hasTaggedTool() {
+		m.statusMsg = "no tags to group by — press [t] on a tool"
+		return
+	}
+	name := ""
+	if mt, ok := m.selectedMeta(); ok {
+		name = mt.Name
+	}
+	m.groupByTag = !m.groupByTag
+	if name != "" {
+		m.metaSelected = m.indexOfMeta(name)
+	}
+	m.setToolsContent()
+	if m.groupByTag {
+		m.statusMsg = "grouped by tag"
+	} else {
+		m.statusMsg = "flat list"
+	}
+}
+
+// hasTaggedTool reports whether any tracked tool carries a tag — the condition
+// under which the tag view has anything to show.
+func (m Model) hasTaggedTool() bool {
+	for _, mt := range m.meta {
+		if tagOf(mt) != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// grouped is the single "the list is in tag view" predicate, shared by the
+// ordering (searchMatches) and the header rows (buildToolRows) so the two can
+// never disagree about whether headers belong in the content. An active search
+// suppresses it: the `/` filter behaves identically to before, headers and all.
+// It also requires at least one tagged tool: with none, the tag view is a
+// single "#untagged" header over the unchanged list, so it degrades to the flat
+// view rather than spending a row on a meaningless section (this covers a tag
+// removed while the view is on, which the toggle guard cannot).
+func (m Model) grouped() bool {
+	return m.groupByTag && m.searchQuery() == "" && m.hasTaggedTool()
+}
+
+// groupMatchesByTag reorders matches so tools sharing a tag sit together,
+// untagged ones last. Groups appear in first-appearance (meta.yaml) order and
+// keep that order inside a group too — the same stability rule as the update
+// partition it replaces, so the list only ever regroups rows the user's own
+// file order already fixed. One tag per tool (tagOf), so no row can land in two
+// groups.
+func groupMatchesByTag(matches []searchMatch) []searchMatch {
+	var order []string
+	seen := make(map[string]bool, len(matches))
+	for _, sm := range matches {
+		if key := tagKey(sm.meta); key != "" && !seen[key] {
+			seen[key] = true
+			order = append(order, key)
+		}
+	}
+	out := make([]searchMatch, 0, len(matches))
+	for _, key := range order {
+		for _, sm := range matches {
+			if tagKey(sm.meta) == key {
+				out = append(out, sm)
+			}
+		}
+	}
+	for _, sm := range matches {
+		if tagKey(sm.meta) == "" {
+			out = append(out, sm)
+		}
+	}
+	return out
+}
+
+// tagOf returns a tool's single tag, or "" when it has none. Tags stays a
+// []string so meta.yaml keeps its schema, but it is held at len<=1 (parseTag on
+// the way in, loader.LoadMeta migrating legacy lists), so every consumer reads
+// the one tag through here rather than joining the slice.
+func tagOf(mt loader.ToolMeta) string {
+	if len(mt.Tags) == 0 {
+		return ""
+	}
+	return mt.Tags[0]
+}
+
+// tagKey is the grouping identity of a tool's tag: case-folded, because the
+// search predicate (matchingTag) already compares case-insensitively, and two
+// spellings the search treats as one tag must not split the list into two
+// sections. The header still shows the group's first spelling.
+func tagKey(mt loader.ToolMeta) string {
+	return strings.ToLower(tagOf(mt))
 }
 
 // matchingTag returns the first tag containing the query, or "".
